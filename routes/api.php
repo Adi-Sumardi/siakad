@@ -3,8 +3,10 @@
 use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\Auth\InvitationController;
 use App\Http\Controllers\Api\Auth\OtpController;
+use App\Http\Controllers\Api\Wali\BillController as WaliBillController;
 use App\Http\Controllers\Api\Wali\DashboardController as WaliDashboardController;
 use App\Http\Controllers\Api\Webhooks\PmbHandoffController;
+use App\Http\Controllers\Api\Webhooks\XenditController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -23,6 +25,10 @@ use Illuminate\Support\Facades\Route;
 // it proves itself with an HMAC signature over the raw body instead.
 Route::post('/webhooks/pmb/students', [PmbHandoffController::class, 'store'])
     ->middleware('pmb.signature');
+
+// Settles money, so it verifies its own token and records every delivery before
+// acting - see the controller.
+Route::post('/webhooks/xendit', [XenditController::class, 'handle']);
 
 Route::prefix('auth')->group(function () {
     // Guardians: passwordless. The identifier decides the channel - an email
@@ -47,4 +53,11 @@ Route::prefix('invitations')->middleware('throttle:20,1')->group(function () {
 
 Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(function () {
     Route::get('/students', [WaliDashboardController::class, 'index']);
+
+    Route::get('/bills', [WaliBillController::class, 'index']);
+    Route::get('/bills/{ulid}', [WaliBillController::class, 'show']);
+    // One invoice for however many bills were ticked - the whole point of
+    // payment_allocations.
+    Route::post('/checkout', [WaliBillController::class, 'checkout'])->middleware('throttle:20,1');
+    Route::get('/payments', [WaliBillController::class, 'payments']);
 });

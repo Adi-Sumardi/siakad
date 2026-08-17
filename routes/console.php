@@ -12,6 +12,21 @@ use Illuminate\Support\Facades\Schedule;
 |
 */
 
+// SPP for the month. Early on the 1st, before anyone is looking at the app, and
+// idempotent - the dedup_key means a second firing issues nothing.
+Schedule::command('bills:generate --type=spp')
+    ->monthlyOn(1, '00:30')
+    ->name('generate-monthly-spp')
+    ->withoutOverlapping()
+    ->description('Terbitkan SPP bulan berjalan untuk siswa aktif');
+
+// After the generator, so a bill issued today is never marked late on the same
+// run that created it.
+Schedule::command('bills:mark-overdue')
+    ->dailyAt('01:00')
+    ->name('mark-overdue-bills')
+    ->description('Tandai tagihan yang lewat jatuh tempo');
+
 // Keeps the unit master in step with PMB. Daily is often enough: units change
 // once a year at most, but a stale code means a handoff for a new unit fails
 // with "Unit tidak dikenal" until someone notices.

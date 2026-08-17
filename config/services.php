@@ -56,4 +56,13 @@ return [
         'base_url' => env('PMB_BASE_URL'),
     ],
 
+    // Payment gateway. Left unset, checkout still works end to end but produces
+    // no invoice URL - a laptop must not be able to mint payable invoices.
+    'xendit' => [
+        'secret_key' => env('XENDIT_SECRET_KEY'),
+        'webhook_token' => env('XENDIT_WEBHOOK_TOKEN'),
+        'base_url' => env('XENDIT_BASE_URL', 'https://api.xendit.co'),
+        'invoice_duration' => env('XENDIT_INVOICE_DURATION', 86400),
+    ],
+
 ];

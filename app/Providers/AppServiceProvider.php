@@ -6,6 +6,8 @@ use App\Services\Notification\MailGateway;
 use App\Services\Notification\SendagoMailGateway;
 use App\Services\Notification\SendagoWhatsAppGateway;
 use App\Services\Notification\WhatsAppGateway;
+use App\Services\Payment\PaymentGateway;
+use App\Services\Payment\XenditGateway;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\ServiceProvider;
@@ -18,6 +20,7 @@ class AppServiceProvider extends ServiceProvider
         // handoff code knowing which provider is behind it.
         $this->app->bind(MailGateway::class, SendagoMailGateway::class);
         $this->app->bind(WhatsAppGateway::class, SendagoWhatsAppGateway::class);
+        $this->app->bind(PaymentGateway::class, XenditGateway::class);
     }
 
     public function boot(): void
