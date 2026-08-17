@@ -378,7 +378,7 @@ class BillingTest extends TestCase
 
         $bill = Bill::first();
         $admin = User::create([
-            'name' => 'Admin', 'email' => 'a@yapinet.id', 'password' => 'x',
+            'name' => 'Admin', 'email' => 'a@yapinet.id',
             'role' => 'admin', 'is_active' => true, 'activated_at' => now(),
         ]);
 

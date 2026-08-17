@@ -73,7 +73,6 @@ class AdminBillingTest extends TestCase
         return User::create([
             'name' => ucfirst($role),
             'email' => $role.uniqid().'@yapinet.id',
-            'password' => 'rahasia-kuat-2026',
             'role' => $role,
             'school_unit_id' => $unit?->id,
             'is_active' => true,

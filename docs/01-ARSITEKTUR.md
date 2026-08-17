@@ -49,11 +49,13 @@ Konsekuensinya, semua tagihan pra-masuk (formulir, uang pangkal) tetap 100% urus
 PMB — batas tanggung jawabnya jadi bersih: **PMB menagih sampai lunas uang pangkal,
 aplikasi ini menagih semua yang sesudahnya.**
 
-### D2 — Wali murid masuk dengan kode sekali pakai, tanpa kata sandi
+### D2 — Semua orang masuk dengan kode sekali pakai. Tidak ada kata sandi.
 
-Wali murid tidak pernah punya kata sandi. Mereka mengetik email atau nomor HP,
-lalu memasukkan kode 6 digit yang dikirim ke **kanal yang mereka ketik sendiri**:
-email → kode lewat email, nomor HP → kode lewat WhatsApp.
+Tidak ada satu pun kata sandi di aplikasi ini — wali murid maupun staf. Semua
+mengetik email atau nomor HP, lalu memasukkan kode 6 digit yang dikirim ke
+**kanal yang mereka ketik sendiri**: email → kode lewat email, nomor HP → kode
+lewat WhatsApp. Kolom `users.password` tidak ada; ia dihapus, bukan dibiarkan
+nullable, supaya jalur login yang sudah dimatikan tidak diam-diam hidup lagi.
 
 Alasannya cocok dengan penggunanya. Wali murid membuka aplikasi ini beberapa kali
 sebulan, bukan tiap hari — kata sandi yang jarang dipakai adalah kata sandi yang
@@ -63,10 +65,17 @@ kelas masalah yang menyertainya: password lemah, dipakai ulang dari aplikasi lai
 dibagikan satu keluarga dan tidak pernah diganti, serta alur lupa-password yang
 harus dibangun dan dijaga.
 
-**Staf tetap memakai kata sandi.** Admin dan guru login tiap hari; menunggu kode
-setiap pagi adalah beban, bukan kemudahan. Yang membedakan keduanya cuma satu hal:
-kolom `users.password` terisi atau tidak — tidak ada flag kedua yang harus dijaga
-supaya tetap sinkron.
+**Staf ikut memakai kode**, menyamakan dengan PMB yang lebih dulu menghapus kata
+sandi. Konsekuensinya nyata dan diterima: admin menunggu satu kode tiap kali
+sesinya habis. Imbalannya, tidak ada satu pun kredensial permanen yang bisa
+bocor, dipakai ulang dari aplikasi lain, atau diwariskan antar staf saat ada
+pergantian orang — dan tidak ada alur lupa-kata-sandi yang harus dibangun,
+diamankan, dan dijaga.
+
+**Pemulihan saat kedua gateway mati:** `php artisan otp:issue <email|no HP>`
+mencetak kode di terminal tanpa mengirim apa pun. Ini menuntut akses shell ke
+server — sengaja jauh lebih tinggi daripada tautan reset kata sandi — dan tiap
+pemakaiannya tercatat di riwayat terminal operatornya sendiri.
 
 Aturan pengamanan kode:
 
@@ -79,10 +88,12 @@ Aturan pengamanan kode:
 | Penyimpanan | hanya hash (HMAC) | Bocornya database tidak memberi satu pun kode yang hidup |
 | Jawaban endpoint | sama untuk nomor terdaftar & tidak | Kalau berbeda, endpoint ini jadi cara mendata keluarga mana yang bersekolah di sini |
 
-Konsekuensi lain: **halaman aktivasi tidak lagi meminta kata sandi.** Memegang
-tautan undangan sudah membuktikan wali menguasai alamat yang tercatat di sekolah —
-persis hal yang diperiksa kode OTP. Jadi tautan itu langsung mengaktifkan akun dan
-memulai sesi, dan login berikutnya lewat kode.
+Konsekuensi lain: **halaman aktivasi tidak meminta apa pun.** Memegang tautan
+undangan sudah membuktikan wali menguasai alamat yang tercatat di sekolah — persis
+hal yang diperiksa kode OTP. Tautan itu langsung mengaktifkan akun dan memulai
+sesi. Undangan yang telanjur kedaluwarsa pun bukan masalah: wali tetap bisa masuk
+lewat kode, karena aktivasi bukan gerbang, hanya catatan kapan hal itu pertama
+terjadi.
 
 SSO (OIDC) antar PMB dan aplikasi ini tetap di luar scope: satu komponen
 infrastruktur tambahan yang kalau mati, dua aplikasi ikut mati — tidak sepadan

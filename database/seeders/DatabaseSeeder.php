@@ -50,11 +50,13 @@ class DatabaseSeeder extends Seeder
             ['starts_on' => '2027-01-01', 'ends_on' => '2027-06-30', 'is_active' => false]
         );
 
+        // Staff sign in with a one-time code like everyone else. With the
+        // gateways unset locally, `php artisan otp:issue admin@yapinet.id`
+        // prints one to the terminal.
         User::updateOrCreate(
             ['email' => 'admin@yapinet.id'],
             [
                 'name' => 'Administrator',
-                'password' => 'password',
                 'role' => 'admin',
                 'is_active' => true,
                 'activated_at' => now(),
@@ -100,7 +102,6 @@ class DatabaseSeeder extends Seeder
             ['email' => 'admin.sd@yapinet.id'],
             [
                 'name' => 'Admin SD Sakinah',
-                'password' => 'password',
                 'role' => 'admin_unit',
                 'school_unit_id' => $sd?->id,
                 'is_active' => true,

@@ -258,37 +258,54 @@ class OtpLoginTest extends TestCase
         $this->assertCount(1, $this->sentWhatsApp);
     }
 
-    public function test_a_guardian_is_told_to_use_a_code_instead_of_a_password(): void
-    {
-        $this->guardian();
-
-        $this->postJson('/api/auth/login', [
-            'identifier' => 'budi@example.com',
-            'password' => 'apa-saja',
-        ])
-            ->assertStatus(422)
-            ->assertJsonPath('errors.identifier.0', 'Akun ini masuk dengan kode sekali pakai. Gunakan tombol "Kirim kode".');
-    }
-
-    public function test_staff_still_sign_in_with_a_password(): void
+    public function test_staff_sign_in_with_a_code_exactly_as_guardians_do(): void
     {
         $unit = SchoolUnit::create(['code' => 'SD-SAKINAH', 'label' => 'SD Sakinah', 'jenjang_group' => 'sd']);
 
         $staff = User::create([
             'name' => 'Admin SD',
             'email' => 'admin.sd@yapinet.id',
-            'password' => 'rahasia-kuat-2026',
             'role' => 'admin_unit',
             'school_unit_id' => $unit->id,
             'is_active' => true,
             'activated_at' => now(),
         ]);
 
-        $this->postJson('/api/auth/login', [
+        $this->postJson('/api/auth/otp/request', ['identifier' => 'admin.sd@yapinet.id'])
+            ->assertOk()
+            ->assertJsonPath('channel', 'email');
+
+        $this->postJson('/api/auth/otp/verify', [
             'identifier' => 'admin.sd@yapinet.id',
-            'password' => 'rahasia-kuat-2026',
+            'code' => $this->codeFromMail(),
         ])->assertOk()->assertJsonPath('user.role', 'admin_unit');
 
         $this->assertAuthenticatedAs($staff);
+    }
+
+    public function test_there_is_no_password_endpoint_left_to_try(): void
+    {
+        $this->guardian();
+
+        // Passwords are gone for everyone, so the route is gone too - not left
+        // answering 422 for a credential nobody holds.
+        $this->postJson('/api/auth/login', [
+            'identifier' => 'budi@example.com',
+            'password' => 'apa-saja',
+        ])->assertStatus(404);
+    }
+
+    public function test_an_operator_can_issue_a_code_from_the_shell_when_gateways_are_down(): void
+    {
+        $this->guardian();
+
+        // The only recovery path, and it needs shell access to the server -
+        // deliberately a higher bar than a password reset link.
+        $this->artisan('otp:issue', ['identifier' => 'budi@example.com'])
+            ->assertSuccessful();
+
+        $this->assertDatabaseCount('login_otps', 1);
+        // Nothing was sent; the code was printed instead.
+        $this->assertEmpty($this->sentMail);
     }
 }

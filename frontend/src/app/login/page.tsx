@@ -14,8 +14,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api";
 import { useAuth, type OtpChallenge } from "@/lib/auth/auth-context";
 
+/**
+ * One way in, for everyone.
+ *
+ * There is no password anywhere in this app - not for parents, not for staff -
+ * so there is no second form to fall back to and no "forgot password" to
+ * support. Two steps: who you are, then the code.
+ */
 function LoginForm() {
-  const { requestOtp, verifyOtp, loginWithPassword } = useAuth();
+  const { requestOtp, verifyOtp } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
 
@@ -23,12 +30,6 @@ function LoginForm() {
   const [challenge, setChallenge] = useState<OtpChallenge | null>(null);
   const [code, setCode] = useState("");
   const [cooldown, setCooldown] = useState(0);
-
-  // Staff only. Guardians never see this - their accounts have no password,
-  // and the API says so if they somehow try.
-  const [staffMode, setStaffMode] = useState(false);
-  const [password, setPassword] = useState("");
-
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -38,10 +39,8 @@ function LoginForm() {
     return () => clearTimeout(timer);
   }, [cooldown]);
 
-  function readError(err: unknown, fallbackField: string) {
-    if (err instanceof ApiError) {
-      return err.fieldError(fallbackField) ?? err.message;
-    }
+  function readError(err: unknown, field: string) {
+    if (err instanceof ApiError) return err.fieldError(field) ?? err.message;
     return "Tidak dapat menghubungi server.";
   }
 
@@ -81,29 +80,12 @@ function LoginForm() {
     }
   }
 
-  async function submitPassword(event: React.FormEvent) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      const user = await loginWithPassword(identifier.trim(), password);
-      toast.success(`Selamat datang, ${user.name}`);
-      router.replace(params.get("redirect") ?? "/");
-    } catch (err) {
-      setError(readError(err, "identifier"));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   const errorBox = error && (
     <p role="alert" className="rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">
       {error}
     </p>
   );
 
-  // Step 2: the code has been sent.
   if (challenge) {
     return (
       <Card className="p-6">
@@ -120,7 +102,7 @@ function LoginForm() {
         </button>
 
         <h1 className="text-xl font-bold tracking-tight">Masukkan kode</h1>
-        <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+        <p className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
           {challenge.channel === "email" ? (
             <Mail className="size-4 shrink-0" />
           ) : (
@@ -167,17 +149,14 @@ function LoginForm() {
     );
   }
 
-  // Step 1: who are you?
   return (
     <Card className="p-6">
       <h1 className="text-xl font-bold tracking-tight">Masuk</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        {staffMode
-          ? "Masuk sebagai petugas sekolah."
-          : "Masukkan email atau nomor HP yang terdaftar di sekolah. Kami kirimkan kode sekali pakai."}
+        Masukkan email atau nomor HP yang terdaftar di sekolah. Kami kirimkan kode sekali pakai.
       </p>
 
-      <form onSubmit={staffMode ? submitPassword : sendCode} className="mt-5 flex flex-col gap-4" noValidate>
+      <form onSubmit={sendCode} className="mt-5 flex flex-col gap-4" noValidate>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="identifier">Email atau nomor HP</Label>
           <Input
@@ -193,39 +172,12 @@ function LoginForm() {
           />
         </div>
 
-        {staffMode && (
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password">Kata sandi</Label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              aria-invalid={Boolean(error)}
-            />
-          </div>
-        )}
-
         {errorBox}
 
         <Button type="submit" size="full" disabled={submitting || !identifier.trim()}>
-          {submitting ? "Memproses…" : staffMode ? "Masuk" : "Kirim kode"}
+          {submitting ? "Memproses…" : "Kirim kode"}
         </Button>
       </form>
-
-      <button
-        type="button"
-        onClick={() => {
-          setStaffMode((on) => !on);
-          setError(null);
-        }}
-        className="mt-4 w-full text-center text-sm text-muted-foreground hover:text-foreground"
-      >
-        {staffMode ? "Saya wali murid — masuk dengan kode" : "Saya petugas sekolah"}
-      </button>
     </Card>
   );
 }
@@ -244,7 +196,8 @@ export default function LoginPage() {
         </Suspense>
 
         <p className="mt-5 text-center text-sm text-muted-foreground">
-          Akun wali murid dibuat otomatis setelah uang pangkal lunas. Tidak perlu kata sandi.
+          Tidak ada kata sandi di aplikasi ini. Akun wali murid dibuat otomatis setelah uang
+          pangkal lunas.
         </p>
       </div>
     </main>

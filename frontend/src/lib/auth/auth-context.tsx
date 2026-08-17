@@ -26,7 +26,6 @@ type AuthContextValue = {
   loading: boolean;
   requestOtp: (identifier: string) => Promise<OtpChallenge>;
   verifyOtp: (identifier: string, code: string) => Promise<User>;
-  loginWithPassword: (identifier: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
   /** Adopts a session the server already started - used by the activation link. */
   adopt: (user: User) => void;
@@ -69,12 +68,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return user;
   }, []);
 
-  const loginWithPassword = useCallback(async (identifier: string, password: string) => {
-    const { user } = await api.post<{ user: User }>("/api/auth/login", { identifier, password });
-    setUser(user);
-    return user;
-  }, []);
-
   const logout = useCallback(async () => {
     try {
       await api.post("/api/auth/logout");
@@ -86,7 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, requestOtp, verifyOtp, loginWithPassword, logout, adopt: setUser }}
+      value={{ user, loading, requestOtp, verifyOtp, logout, adopt: setUser }}
     >
       {children}
     </AuthContext.Provider>

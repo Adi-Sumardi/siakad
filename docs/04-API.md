@@ -16,14 +16,15 @@ Konvensi:
 | Method | Path | Keterangan |
 |---|---|---|
 | GET | `/sanctum/csrf-cookie` | |
-| POST | `/api/auth/otp/request` | **wali murid**: `{identifier}` (email atau no HP) → kirim kode ke kanal yang sesuai |
+| POST | `/api/auth/otp/request` | **semua peran**: `{identifier}` (email atau no HP) → kirim kode ke kanal yang sesuai |
 | POST | `/api/auth/otp/verify` | `{identifier, code}` → sesi dimulai, akun otomatis teraktivasi |
-| POST | `/api/auth/login` | **staf saja**: email + password. Akun wali dijawab 422 dengan arahan memakai kode |
 | POST | `/api/auth/logout` | |
 | GET | `/api/auth/me` | profil pengguna yang sedang masuk |
 | GET | `/api/invitations/{token}` | validasi token undangan, balikkan nama & daftar anak (tanpa auth) |
 | POST | `/api/invitations/{token}/activate` | tanpa body — akun aktif → langsung login |
-| POST | `/api/auth/forgot-password`, `/api/auth/reset-password` | staf saja; wali tidak punya kata sandi untuk direset |
+
+Tidak ada endpoint kata sandi sama sekali — tidak ada `login`, `forgot-password`,
+maupun `reset-password`. Pemulihan darurat lewat `php artisan otp:issue`.
 
 Respons `otp/request` sengaja identik untuk nomor terdaftar maupun tidak — hanya
 kanal dan identitas tersamar (`bu**@example.com`) yang dikembalikan, plus

@@ -4,7 +4,7 @@ use App\Http\Controllers\Api\Admin\BillController as AdminBillController;
 use App\Http\Controllers\Api\Admin\BillingRunController;
 use App\Http\Controllers\Api\Admin\FeeSettingController;
 use App\Http\Controllers\Api\Admin\ReportController;
-use App\Http\Controllers\Api\Auth\AuthController;
+use App\Http\Controllers\Api\Auth\SessionController;
 use App\Http\Controllers\Api\Auth\InvitationController;
 use App\Http\Controllers\Api\Auth\OtpController;
 use App\Http\Controllers\Api\Wali\BillController as WaliBillController;
@@ -35,17 +35,15 @@ Route::post('/webhooks/pmb/students', [PmbHandoffController::class, 'store'])
 Route::post('/webhooks/xendit', [XenditController::class, 'handle']);
 
 Route::prefix('auth')->group(function () {
-    // Guardians: passwordless. The identifier decides the channel - an email
-    // gets an emailed code, a phone number gets one over WhatsApp.
+    // The only way in, for everyone. The identifier decides the channel: an
+    // email gets an emailed code, a phone number gets one over WhatsApp. There
+    // is no password endpoint because there are no passwords.
     Route::post('/otp/request', [OtpController::class, 'request'])->middleware('throttle:10,1');
     Route::post('/otp/verify', [OtpController::class, 'verify'])->middleware('throttle:20,1');
 
-    // Staff only; a guardian account has no password to check.
-    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
-
     Route::middleware('auth:sanctum')->group(function () {
-        Route::post('/logout', [AuthController::class, 'logout']);
-        Route::get('/me', [AuthController::class, 'me']);
+        Route::post('/logout', [SessionController::class, 'logout']);
+        Route::get('/me', [SessionController::class, 'me']);
     });
 });
 

@@ -19,7 +19,6 @@ class User extends Authenticatable
         'name',
         'email',
         'phone',
-        'password',
         'role',
         'school_unit_id',
         'is_active',
@@ -29,7 +28,6 @@ class User extends Authenticatable
     ];
 
     protected $hidden = [
-        'password',
         'remember_token',
         'phone_hash',
     ];
@@ -44,9 +42,21 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'activated_at' => 'datetime',
             'last_login_at' => 'datetime',
-            'password' => 'hashed',
             'is_active' => 'boolean',
         ];
+    }
+
+    /**
+     * There is no password to return.
+     *
+     * Sessions are started with Auth::login() after a one-time code is checked,
+     * so nothing here ever reaches credential validation. This override exists
+     * so any framework path that reaches for a password gets an empty string it
+     * cannot match, rather than a null it might mishandle.
+     */
+    public function getAuthPassword(): string
+    {
+        return '';
     }
 
     public function schoolUnit(): BelongsTo
@@ -101,20 +111,11 @@ class User extends Authenticatable
      * as activated once its owner has proved they hold the address it was sent
      * to - by opening the invitation, or by entering a sign-in code.
      *
-     * Deliberately not "has a password": guardians never get one.
+     * Activation is not a gate on signing in: receiving a code proves the same
+     * thing. It records when that first happened.
      */
     public function hasActivated(): bool
     {
         return $this->activated_at !== null;
-    }
-
-    /**
-     * Guardians sign in with a one-time code, staff with a password. The column
-     * being null is what distinguishes them, so nothing has to keep a second
-     * flag in step with it.
-     */
-    public function usesPasswordLogin(): bool
-    {
-        return $this->password !== null;
     }
 }

@@ -260,14 +260,21 @@ class PmbHandoffTest extends TestCase
         $this->postJson("/api/invitations/{$token}/activate")->assertStatus(404);
     }
 
-    public function test_an_unactivated_account_cannot_log_in(): void
+    public function test_a_guardian_who_never_opened_the_invitation_can_still_get_in(): void
     {
         $this->postHandoff($this->payload())->assertStatus(202);
 
-        $this->postJson('/api/auth/login', [
-            'identifier' => 'budi@example.com',
-            'password' => 'apa-saja',
-        ])->assertStatus(422);
+        $user = User::firstWhere('email', 'budi@example.com');
+        $this->assertFalse($user->hasActivated());
+
+        // The invitation is a welcome, not a gate. A parent who deleted the
+        // email is not locked out: requesting a code proves the same thing the
+        // link would have, and activates the account on the way through.
+        $this->postJson('/api/auth/otp/request', ['identifier' => 'budi@example.com'])
+            ->assertOk()
+            ->assertJsonPath('channel', 'email');
+
+        $this->assertDatabaseCount('login_otps', 1);
     }
 
     public function test_a_guardian_logs_in_and_sees_only_their_own_children(): void
