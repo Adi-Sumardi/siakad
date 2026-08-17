@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+/*
+  Siakad YAPI design tokens — putih dengan biru.
+
+  The palette is PMB's, deliberately: the two apps are one family, and a
+  guardian who just came from PMB should not feel handed to a stranger.
+
+  Single theme. There is no dark mode in v1, so every colour is written out
+  explicitly rather than inherited from the visitor's system preference.
+*/
+:root {
+  color-scheme: light;
+
+  --background: #ffffff;
+  --foreground: #101b33;
+
+  --card: #ffffff;
+  --card-foreground: #101b33;
+
+  --canvas: #f3f6fc;
+  --muted: #f3f6fc;
+  --muted-foreground: #4a5875;
+
+  --primary: #2856e0;
+  --primary-foreground: #ffffff;
+  --primary-deep: #13286b;
+
+  --accent: #eaf0fd;
+  --accent-foreground: #13286b;
+
+  --border: #e1e8f6;
+  --input: #dbe4f7;
+  --ring: #2856e0;
+
+  /* Status, kept out of the brand blues: a late bill must not read as a link. */
+  --good: #16745b;
+  --good-soft: #e3f3ec;
+  --warn: #9a5c0b;
+  --warn-soft: #faefdc;
+  --bad: #b93a3f;
+  --bad-soft: #fae7e7;
+
+  --radius: 0.7rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-canvas: var(--canvas);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-deep: var(--primary-deep);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans, system-ui, -apple-system, "Segoe UI", sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers that sit in columns - amounts, points - must not jitter. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

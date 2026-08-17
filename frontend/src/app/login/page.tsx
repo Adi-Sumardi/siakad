@@ -1,0 +1,252 @@
+"use client";
+
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowLeft, Mail, MessageCircle } from "lucide-react";
+import { toast } from "sonner";
+import { BrandMark } from "@/components/brand-mark";
+import { OtpInput } from "@/components/otp-input";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ApiError } from "@/lib/api";
+import { useAuth, type OtpChallenge } from "@/lib/auth/auth-context";
+
+function LoginForm() {
+  const { requestOtp, verifyOtp, loginWithPassword } = useAuth();
+  const router = useRouter();
+  const params = useSearchParams();
+
+  const [identifier, setIdentifier] = useState("");
+  const [challenge, setChallenge] = useState<OtpChallenge | null>(null);
+  const [code, setCode] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+
+  // Staff only. Guardians never see this - their accounts have no password,
+  // and the API says so if they somehow try.
+  const [staffMode, setStaffMode] = useState(false);
+  const [password, setPassword] = useState("");
+
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((seconds) => seconds - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  function readError(err: unknown, fallbackField: string) {
+    if (err instanceof ApiError) {
+      return err.fieldError(fallbackField) ?? err.message;
+    }
+    return "Tidak dapat menghubungi server.";
+  }
+
+  async function sendCode(event?: React.FormEvent) {
+    event?.preventDefault();
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const result = await requestOtp(identifier.trim());
+      setChallenge(result);
+      setCooldown(result.resend_after_seconds);
+      setCode("");
+      toast.success(
+        result.channel === "email" ? "Kode dikirim ke email Anda." : "Kode dikirim lewat WhatsApp.",
+      );
+    } catch (err) {
+      setError(readError(err, "identifier"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitCode(value: string) {
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const user = await verifyOtp(identifier.trim(), value);
+      toast.success(`Selamat datang, ${user.name}`);
+      router.replace(params.get("redirect") ?? "/");
+    } catch (err) {
+      setError(readError(err, "code"));
+      setCode("");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitPassword(event: React.FormEvent) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const user = await loginWithPassword(identifier.trim(), password);
+      toast.success(`Selamat datang, ${user.name}`);
+      router.replace(params.get("redirect") ?? "/");
+    } catch (err) {
+      setError(readError(err, "identifier"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const errorBox = error && (
+    <p role="alert" className="rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">
+      {error}
+    </p>
+  );
+
+  // Step 2: the code has been sent.
+  if (challenge) {
+    return (
+      <Card className="p-6">
+        <button
+          type="button"
+          onClick={() => {
+            setChallenge(null);
+            setError(null);
+          }}
+          className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" />
+          Ganti email / nomor
+        </button>
+
+        <h1 className="text-xl font-bold tracking-tight">Masukkan kode</h1>
+        <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+          {challenge.channel === "email" ? (
+            <Mail className="size-4 shrink-0" />
+          ) : (
+            <MessageCircle className="size-4 shrink-0" />
+          )}
+          Kode {challenge.expires_in_minutes} menit dikirim ke{" "}
+          <span className="font-medium text-foreground">{challenge.identifier}</span>
+        </p>
+
+        <div className="mt-5 flex flex-col gap-4">
+          <OtpInput
+            value={code}
+            onChange={setCode}
+            onComplete={submitCode}
+            disabled={submitting}
+            invalid={Boolean(error)}
+          />
+
+          {errorBox}
+
+          <Button
+            type="button"
+            size="full"
+            disabled={submitting || code.length < 6}
+            onClick={() => submitCode(code)}
+          >
+            {submitting ? "Memeriksa…" : "Masuk"}
+          </Button>
+
+          <button
+            type="button"
+            disabled={cooldown > 0 || submitting}
+            onClick={() => sendCode()}
+            className="text-sm text-primary disabled:text-muted-foreground"
+          >
+            {cooldown > 0 ? `Kirim ulang kode dalam ${cooldown} detik` : "Kirim ulang kode"}
+          </button>
+        </div>
+
+        <p className="mt-5 border-t border-border pt-4 text-xs text-muted-foreground">
+          Petugas sekolah tidak akan pernah meminta kode ini. Jangan berikan kepada siapa pun.
+        </p>
+      </Card>
+    );
+  }
+
+  // Step 1: who are you?
+  return (
+    <Card className="p-6">
+      <h1 className="text-xl font-bold tracking-tight">Masuk</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {staffMode
+          ? "Masuk sebagai petugas sekolah."
+          : "Masukkan email atau nomor HP yang terdaftar di sekolah. Kami kirimkan kode sekali pakai."}
+      </p>
+
+      <form onSubmit={staffMode ? submitPassword : sendCode} className="mt-5 flex flex-col gap-4" noValidate>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="identifier">Email atau nomor HP</Label>
+          <Input
+            id="identifier"
+            name="identifier"
+            autoComplete="username"
+            autoFocus
+            required
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
+            aria-invalid={Boolean(error)}
+            placeholder="budi@example.com atau 0812…"
+          />
+        </div>
+
+        {staffMode && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="password">Kata sandi</Label>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              aria-invalid={Boolean(error)}
+            />
+          </div>
+        )}
+
+        {errorBox}
+
+        <Button type="submit" size="full" disabled={submitting || !identifier.trim()}>
+          {submitting ? "Memproses…" : staffMode ? "Masuk" : "Kirim kode"}
+        </Button>
+      </form>
+
+      <button
+        type="button"
+        onClick={() => {
+          setStaffMode((on) => !on);
+          setError(null);
+        }}
+        className="mt-4 w-full text-center text-sm text-muted-foreground hover:text-foreground"
+      >
+        {staffMode ? "Saya wali murid — masuk dengan kode" : "Saya petugas sekolah"}
+      </button>
+    </Card>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <main className="grid min-h-dvh place-items-center bg-canvas px-4 py-10">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex justify-center">
+          <BrandMark />
+        </div>
+        {/* useSearchParams reads the ?redirect= a guard appended, and needs a
+            Suspense boundary or the route bails out of prerendering. */}
+        <Suspense fallback={<Skeleton className="h-80 w-full" />}>
+          <LoginForm />
+        </Suspense>
+
+        <p className="mt-5 text-center text-sm text-muted-foreground">
+          Akun wali murid dibuat otomatis setelah uang pangkal lunas. Tidak perlu kata sandi.
+        </p>
+      </div>
+    </main>
+  );
+}

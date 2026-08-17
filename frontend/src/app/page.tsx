@@ -1,0 +1,127 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { GraduationCap, LogOut } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth/auth-context";
+
+type Student = {
+  ulid: string;
+  nama_lengkap: string;
+  nama_panggilan: string | null;
+  nis: string | null;
+  status: string;
+  unit: { code: string; label: string } | null;
+  kelas: { name: string; tingkat: number; wali_kelas: string | null } | null;
+};
+
+export default function DashboardPage() {
+  const { user, loading, logout } = useAuth();
+  const router = useRouter();
+  const [students, setStudents] = useState<Student[] | null>(null);
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login");
+    }
+  }, [loading, user, router]);
+
+  useEffect(() => {
+    if (user?.role === "orangtua") {
+      api.get<{ students: Student[] }>("/api/wali/students").then(({ students }) => setStudents(students));
+    }
+  }, [user]);
+
+  if (loading || !user) {
+    return (
+      <main className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-32 w-full" />
+      </main>
+    );
+  }
+
+  return (
+    <div className="min-h-dvh bg-canvas">
+      <header className="border-b border-border bg-card">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-3.5">
+          <BrandMark />
+          <div className="flex items-center gap-3">
+            <span className="hidden text-sm text-muted-foreground sm:inline">{user.name}</span>
+            <Button variant="ghost" size="sm" onClick={logout}>
+              <LogOut className="size-4" />
+              Keluar
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-3xl px-6 py-8">
+        <h1 className="text-xl font-bold tracking-tight">Assalamu&apos;alaikum, {user.name}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {user.role === "orangtua"
+            ? "Berikut anak Anda yang terdaftar di sekolah."
+            : "Anda masuk sebagai staf. Modul admin menyusul di fase berikutnya."}
+        </p>
+
+        {user.role === "orangtua" && (
+          <section className="mt-6 flex flex-col gap-3">
+            {students === null && <Skeleton className="h-28 w-full" />}
+
+            {students?.length === 0 && (
+              <Card className="p-6 text-sm text-muted-foreground">
+                Belum ada anak yang terhubung dengan akun ini. Hubungi tata usaha unit bila ini
+                keliru.
+              </Card>
+            )}
+
+            {students?.map((student) => (
+              <Card key={student.ulid} className="flex flex-col gap-4 p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground">
+                      <GraduationCap className="size-5" />
+                    </span>
+                    <div>
+                      <p className="font-semibold">{student.nama_lengkap}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {student.unit?.label ?? "Unit belum diatur"}
+                        {student.kelas ? ` · Kelas ${student.kelas.name}` : " · Kelas belum ditentukan"}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant={student.status === "active" ? "good" : "warn"}>
+                    {student.status === "active" ? "Aktif" : student.status}
+                  </Badge>
+                </div>
+
+                <dl className="grid grid-cols-2 gap-3 border-t border-border pt-4 text-sm sm:grid-cols-3">
+                  <div>
+                    <dt className="text-xs text-muted-foreground">NIS</dt>
+                    <dd className="tabular font-medium">{student.nis ?? "Belum terbit"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Wali kelas</dt>
+                    <dd className="font-medium">{student.kelas?.wali_kelas ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Tagihan</dt>
+                    {/* Fase 2 fills this in; saying so beats showing "Rp 0",
+                        which a parent would read as "nothing to pay". */}
+                    <dd className="text-muted-foreground">Menyusul</dd>
+                  </div>
+                </dl>
+              </Card>
+            ))}
+          </section>
+        )}
+      </main>
+    </div>
+  );
+}
