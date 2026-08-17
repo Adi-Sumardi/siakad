@@ -3,6 +3,8 @@
 namespace Database\Seeders;
 
 use App\Models\AcademicYear;
+use App\Models\FeeRate;
+use App\Models\FeeType;
 use App\Models\SchoolUnit;
 use App\Models\Term;
 use App\Models\User;
@@ -59,6 +61,38 @@ class DatabaseSeeder extends Seeder
                 'email_verified_at' => now(),
             ]
         );
+
+        // Fee catalogue. Codes are the contract the generator and every
+        // dedup_key are built on, so they are seeded rather than typed in.
+        $feeTypes = [
+            ['code' => 'spp', 'name' => 'SPP', 'recurrence' => 'monthly'],
+            ['code' => 'seragam', 'name' => 'Seragam & atribut', 'recurrence' => 'once', 'allow_installment' => true, 'requires_selection' => true],
+            ['code' => 'buku', 'name' => 'Buku', 'recurrence' => 'per_term'],
+            ['code' => 'kegiatan', 'name' => 'Kegiatan', 'recurrence' => 'per_term'],
+        ];
+
+        foreach ($feeTypes as $i => $type) {
+            FeeType::updateOrCreate(['code' => $type['code']], $type + ['sort_order' => $i]);
+        }
+
+        // Dev rates only. Real amounts are set per unit in Pengaturan; these
+        // exist so a fresh checkout can run the generator and see something.
+        $spp = FeeType::where('code', 'spp')->first();
+        $monthly = ['PG-SAKINAH' => 450000, 'TK-SAKINAH' => 500000, 'SD-SAKINAH' => 650000, 'SMP-SAKINAH' => 750000];
+
+        foreach ($monthly as $code => $amount) {
+            $unit = SchoolUnit::where('code', $code)->first();
+
+            FeeRate::updateOrCreate(
+                [
+                    'fee_type_id' => $spp->id,
+                    'school_unit_id' => $unit->id,
+                    'academic_year_id' => $year->id,
+                    'tingkat' => null,
+                ],
+                ['amount' => $amount, 'due_day' => 10, 'late_fee_amount' => 25000, 'late_fee_grace_days' => 7]
+            );
+        }
 
         $sd = SchoolUnit::where('code', 'SD-SAKINAH')->first();
 

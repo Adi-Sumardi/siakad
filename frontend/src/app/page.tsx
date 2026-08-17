@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { GraduationCap, LogOut } from "lucide-react";
+import { GraduationCap, LogOut, Receipt } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,8 +53,15 @@ export default function DashboardPage() {
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-3.5">
           <BrandMark />
-          <div className="flex items-center gap-3">
-            <span className="hidden text-sm text-muted-foreground sm:inline">{user.name}</span>
+          <div className="flex items-center gap-2">
+            {user.role === "orangtua" && (
+              <Link href="/tagihan">
+                <Button variant="outline" size="sm">
+                  <Receipt className="size-4" />
+                  Tagihan
+                </Button>
+              </Link>
+            )}
             <Button variant="ghost" size="sm" onClick={logout}>
               <LogOut className="size-4" />
               Keluar
@@ -112,9 +120,11 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <dt className="text-xs text-muted-foreground">Tagihan</dt>
-                    {/* Fase 2 fills this in; saying so beats showing "Rp 0",
-                        which a parent would read as "nothing to pay". */}
-                    <dd className="text-muted-foreground">Menyusul</dd>
+                    <dd>
+                      <Link href="/tagihan" className="font-medium text-primary">
+                        Lihat tagihan
+                      </Link>
+                    </dd>
                   </div>
                 </dl>
               </Card>

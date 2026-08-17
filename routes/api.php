@@ -1,5 +1,9 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\BillController as AdminBillController;
+use App\Http\Controllers\Api\Admin\BillingRunController;
+use App\Http\Controllers\Api\Admin\FeeSettingController;
+use App\Http\Controllers\Api\Admin\ReportController;
 use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\Auth\InvitationController;
 use App\Http\Controllers\Api\Auth\OtpController;
@@ -60,4 +64,43 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
     // payment_allocations.
     Route::post('/checkout', [WaliBillController::class, 'checkout'])->middleware('throttle:20,1');
     Route::get('/payments', [WaliBillController::class, 'payments']);
+});
+
+/*
+ * Staff area. `role:` decides who may reach an endpoint; which rows they see is
+ * a separate question answered by visibleTo() on each model - a role check
+ * alone would let one unit's admin open another unit's student.
+ */
+Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->group(function () {
+    Route::get('/bills', [AdminBillController::class, 'index']);
+    Route::post('/bills/{ulid}/waive', [AdminBillController::class, 'waive']);
+    Route::post('/bills/{ulid}/cancel', [AdminBillController::class, 'cancel']);
+    Route::post('/bills/{ulid}/payments', [AdminBillController::class, 'recordPayment']);
+
+    Route::get('/payments/pending', [AdminBillController::class, 'pendingVerification']);
+    Route::post('/payments/{ulid}/verify', [AdminBillController::class, 'verifyPayment']);
+    Route::post('/payments/{ulid}/reject', [AdminBillController::class, 'rejectPayment']);
+
+    // A per-unit admin runs billing for their own unit - the controller forces
+    // the unit rather than trusting the parameter.
+    Route::get('/billing-runs', [BillingRunController::class, 'index']);
+    Route::post('/billing-runs/preview', [BillingRunController::class, 'preview']);
+    Route::post('/billing-runs', [BillingRunController::class, 'store']);
+
+    Route::get('/reports/receivables', [ReportController::class, 'receivables']);
+    Route::get('/reports/collections', [ReportController::class, 'collections']);
+});
+
+/*
+ * Prices are central-admin only, the same split PMB draws around its settings:
+ * a per-unit admin bills their unit but does not decide what it charges.
+ */
+Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
+    Route::get('/fee-types', [FeeSettingController::class, 'types']);
+    Route::post('/fee-types', [FeeSettingController::class, 'storeType']);
+    Route::patch('/fee-types/{feeType}', [FeeSettingController::class, 'updateType']);
+
+    Route::get('/fee-rates', [FeeSettingController::class, 'rates']);
+    Route::post('/fee-rates', [FeeSettingController::class, 'storeRate']);
+    Route::patch('/fee-rates/{feeRate}', [FeeSettingController::class, 'updateRate']);
 });
