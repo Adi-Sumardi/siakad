@@ -14,7 +14,7 @@ class Achievement extends Model
     protected $fillable = [
         'student_id', 'nama_prestasi', 'kategori', 'tingkat', 'juara',
         'nama_event', 'penyelenggara', 'tanggal_event', 'tempat_event',
-        'sertifikat_path', 'foto_kegiatan_path', 'source', 'status', 'point_awarded',
+        'sertifikat_path', 'sertifikat_name', 'foto_kegiatan_path', 'foto_kegiatan_name', 'source', 'status', 'point_awarded',
         'recorded_by', 'verified_at', 'verified_by', 'rejection_reason',
     ];
 

@@ -57,10 +57,17 @@ class PaymentAllocator
      *
      * Idempotent on purpose: a Xendit callback can arrive twice, and the second
      * one must change nothing rather than double-count.
+     *
+     * Refuses anything not still pending/processing, not only what is already
+     * completed. A payment CheckoutService superseded because a fresher
+     * checkout covered the same bill is done, even if its old Xendit invoice
+     * is technically still sitting out there and gets paid late - completing
+     * it here would double-count the bill exactly the way two live invoices
+     * for one bill did before checkout started superseding them.
      */
     public function settle(Payment $payment, ?string $externalId = null, array $gatewayResponse = []): void
     {
-        if ($payment->isSettled()) {
+        if (! in_array($payment->status, ['pending', 'processing'], true)) {
             return;
         }
 

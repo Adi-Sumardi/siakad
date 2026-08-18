@@ -178,6 +178,20 @@ class BillGenerator
         $kelas = $enrollment?->classroom?->name;
         $base = ['kelas' => $kelas];
 
+        if ($type->requires_selection) {
+            // A type flagged this way - seragam is the one in the dev seed -
+            // means a family is meant to choose which items and sizes apply
+            // to them. There is no screen anywhere yet where they, or an
+            // admin on their behalf, make that choice, so this generator
+            // cannot know what to charge. Billing everyone the full bundle
+            // would be a guess dressed up as a bill; skipping and saying
+            // why is the honest alternative until that screen exists.
+            return $base + [
+                'reason' => 'Perlu pemilihan item',
+                'detail' => $type->name.' membutuhkan pemilihan item/ukuran per siswa - layar untuk itu belum dibangun, jadi tagihan ini belum bisa diterbitkan sama sekali.',
+            ];
+        }
+
         $rate = FeeRate::resolve($type, $student, $year, $enrollment?->classroom?->tingkat);
 
         if (! $rate) {

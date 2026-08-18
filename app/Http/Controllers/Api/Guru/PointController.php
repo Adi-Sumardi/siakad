@@ -79,6 +79,7 @@ class PointController extends Controller
                 $student, $term, $rule, $request->user(),
                 Carbon::parse($validated['occurred_on']), $validated['description'],
                 $this->storeEvidence($request),
+                $request->file('evidence')?->getClientOriginalName(),
             );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);

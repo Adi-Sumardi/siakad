@@ -19,7 +19,14 @@ export type PointThresholdInfo = {
   action?: string | null;
 };
 
+export type StudentSummary = {
+  ulid: string;
+  nama_lengkap: string;
+  nama_panggilan: string | null;
+};
+
 export type PointSummary = {
+  student: StudentSummary;
   balance: number;
   term: string | null;
   threshold: PointThresholdInfo | null;

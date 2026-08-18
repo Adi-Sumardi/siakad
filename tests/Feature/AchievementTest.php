@@ -243,7 +243,10 @@ class AchievementTest extends TestCase
 
         $this->actingAs($owner)
             ->get("/api/files/achievements/{$achievement->ulid}/sertifikat")
-            ->assertOk();
+            ->assertOk()
+            // The name the uploader gave it, not the random path it's stored
+            // under - a family opening this should not get "aB3f...xyz.pdf".
+            ->assertHeader('content-disposition', 'inline; filename=sertifikat.pdf');
 
         $strangerStudent = $this->student();
         $stranger = $this->guardianFor($strangerStudent);

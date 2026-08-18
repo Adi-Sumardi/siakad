@@ -244,7 +244,9 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
       </header>
 
       <main className="mx-auto max-w-2xl px-6 py-8">
-        <h1 className="text-xl font-bold tracking-tight">Poin &amp; Prestasi</h1>
+        <h1 className="text-xl font-bold tracking-tight">
+          {points ? `Poin & Prestasi — ${points.student.nama_panggilan ?? points.student.nama_lengkap}` : "Poin & Prestasi"}
+        </h1>
         {points?.term && <p className="mt-1 text-sm text-muted-foreground">Semester {points.term}</p>}
 
         <Card className="mt-6 overflow-hidden p-0">

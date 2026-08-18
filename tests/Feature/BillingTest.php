@@ -196,6 +196,29 @@ class BillingTest extends TestCase
         $this->assertSame('Tarif belum ada', $preview['skipped'][0]['reason']);
     }
 
+    public function test_a_fee_type_needing_item_selection_is_skipped_not_guessed_at(): void
+    {
+        $seragam = FeeType::create([
+            'code' => 'seragam', 'name' => 'Seragam & atribut', 'recurrence' => 'once',
+            'requires_selection' => true,
+        ]);
+        FeeRate::create([
+            'fee_type_id' => $seragam->id, 'school_unit_id' => $this->unit->id,
+            'academic_year_id' => $this->year->id, 'amount' => 300000,
+        ]);
+        $this->student();
+
+        $preview = $this->generator()->preview($seragam, $this->year, $this->unit);
+
+        // A rate exists, but nothing anywhere lets a family choose which
+        // items or sizes apply to them - billing the full bundle to everyone
+        // would be a guess, not a bill.
+        $this->assertSame(0, $preview['eligible']);
+        $this->assertCount(1, $preview['skipped']);
+        $this->assertSame('Perlu pemilihan item', $preview['skipped'][0]['reason']);
+        $this->assertDatabaseCount('bills', 0);
+    }
+
     public function test_preview_writes_nothing(): void
     {
         $this->rate();
@@ -407,6 +430,37 @@ class BillingTest extends TestCase
         // Xendit retries; the balance must not move on the second delivery.
         $this->assertEquals(650000.0, (float) $bill->fresh()->paid_amount);
         $this->assertDatabaseCount('payment_allocations', 1);
+    }
+
+    public function test_a_second_checkout_on_the_same_bill_supersedes_the_first(): void
+    {
+        $this->rate();
+        $student = $this->student();
+        $user = $this->guardianFor($student);
+        $this->generator()->run($this->spp, $this->year, $this->unit, 8);
+
+        $bill = Bill::first();
+        $checkout = app(CheckoutService::class);
+        $allocator = app(PaymentAllocator::class);
+
+        // A double-click, or two open tabs: the same still-open bill checked
+        // out twice before either payment is settled.
+        $first = $checkout->start($user, [$bill->ulid], 'virtual_account');
+        $second = $checkout->start($user, [$bill->ulid], 'virtual_account');
+
+        $this->assertSame('failed', $first->fresh()->status);
+        $this->assertSame('processing', $second->fresh()->status);
+
+        // If the family (or a late gateway callback) somehow settles both -
+        // two Xendit invoices, two transfers - the bill must not end up
+        // marked paid for more than it was ever owed.
+        $allocator->settle($first->fresh());
+        $allocator->settle($second->fresh());
+
+        $this->assertSame('failed', $first->fresh()->status);
+        $this->assertSame('completed', $second->fresh()->status);
+        $this->assertEquals(650000.0, (float) $bill->fresh()->paid_amount);
+        $this->assertSame('paid', $bill->fresh()->status);
     }
 
     public function test_a_guardian_cannot_pay_another_familys_bill(): void

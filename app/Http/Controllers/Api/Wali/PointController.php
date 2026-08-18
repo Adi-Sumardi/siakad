@@ -21,10 +21,11 @@ class PointController extends Controller
     public function index(Request $request, string $ulid): JsonResponse
     {
         $student = Student::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+        $studentInfo = ['ulid' => $student->ulid, 'nama_lengkap' => $student->nama_lengkap, 'nama_panggilan' => $student->nama_panggilan];
         $term = Term::current();
 
         if (! $term) {
-            return response()->json(['balance' => 0, 'term' => null, 'threshold' => null, 'records' => []]);
+            return response()->json(['student' => $studentInfo, 'balance' => 0, 'term' => null, 'threshold' => null, 'records' => []]);
         }
 
         $balance = app(PointLedger::class)->balance($student, $term);
@@ -37,6 +38,7 @@ class PointController extends Controller
             ->get();
 
         return response()->json([
+            'student' => $studentInfo,
             'balance' => $balance,
             'term' => $term->label(),
             'threshold' => $threshold ? [

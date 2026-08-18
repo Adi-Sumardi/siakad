@@ -5,6 +5,7 @@ namespace App\Services\Billing;
 use App\Models\Bill;
 use App\Models\Guardian;
 use App\Models\Payment;
+use App\Models\PaymentAllocation;
 use App\Models\User;
 use App\Services\Payment\PaymentGateway;
 use Illuminate\Support\Collection;
@@ -45,6 +46,16 @@ class CheckoutService
         }
 
         $payment = DB::transaction(function () use ($guardian, $amount, $method, $bills) {
+            // A bill may have at most one live invoice. Without this, a
+            // double-click or two open tabs each mint their own pending
+            // payment for the same bill, and if a parent somehow settles both
+            // - two Xendit invoices, two transfers - the bill ends up marked
+            // paid for more than it was ever owed, with nothing to flag it.
+            // Superseding is safe: a pending payment has reserved nothing (see
+            // PaymentAllocator's class docblock), so voiding the old one loses
+            // no money that actually moved.
+            $this->supersedePendingPaymentsFor($bills);
+
             $payment = Payment::create([
                 'payment_number' => Payment::generateNumber(),
                 'payer_guardian_id' => $guardian->id,
@@ -94,6 +105,28 @@ class CheckoutService
         }
 
         return $bills;
+    }
+
+    /**
+     * Fails every still-pending or still-processing payment that touches any
+     * of these bills, so at most one live invoice ever exists per bill.
+     *
+     * @param  Collection<int, Bill>  $bills
+     */
+    private function supersedePendingPaymentsFor(Collection $bills): void
+    {
+        $paymentIds = PaymentAllocation::whereIn('bill_id', $bills->pluck('id'))
+            ->pluck('payment_id')
+            ->unique();
+
+        Payment::whereIn('id', $paymentIds)
+            ->whereIn('status', ['pending', 'processing'])
+            ->get()
+            ->each(fn (Payment $stale) => $this->allocator->fail(
+                $stale,
+                'failed',
+                'Digantikan oleh checkout baru untuk tagihan yang sama.',
+            ));
     }
 
     /**

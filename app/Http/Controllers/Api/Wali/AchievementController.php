@@ -21,7 +21,10 @@ class AchievementController extends Controller
             ->orderByDesc('tanggal_event')
             ->get();
 
-        return response()->json(['achievements' => AchievementResource::collection($achievements)]);
+        return response()->json([
+            'student' => ['ulid' => $student->ulid, 'nama_lengkap' => $student->nama_lengkap, 'nama_panggilan' => $student->nama_panggilan],
+            'achievements' => AchievementResource::collection($achievements),
+        ]);
     }
 
     /**
@@ -57,7 +60,9 @@ class AchievementController extends Controller
             'tanggal_event' => $validated['tanggal_event'] ?? null,
             'tempat_event' => $validated['tempat_event'] ?? null,
             'sertifikat_path' => $request->hasFile('sertifikat') ? $request->file('sertifikat')->store('achievements/certificates', 'local') : null,
+            'sertifikat_name' => $request->file('sertifikat')?->getClientOriginalName(),
             'foto_kegiatan_path' => $request->hasFile('foto_kegiatan') ? $request->file('foto_kegiatan')->store('achievements/photos', 'local') : null,
+            'foto_kegiatan_name' => $request->file('foto_kegiatan')?->getClientOriginalName(),
             'source' => 'sekolah',
             'status' => 'pending',
             'recorded_by' => $request->user()->id,

@@ -23,23 +23,23 @@ class FileController extends Controller
 {
     public function achievementSertifikat(Request $request, string $ulid): StreamedResponse
     {
-        return $this->stream(
-            Achievement::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail()->sertifikat_path
-        );
+        $achievement = Achievement::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+
+        return $this->stream($achievement->sertifikat_path, $achievement->sertifikat_name);
     }
 
     public function achievementFoto(Request $request, string $ulid): StreamedResponse
     {
-        return $this->stream(
-            Achievement::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail()->foto_kegiatan_path
-        );
+        $achievement = Achievement::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+
+        return $this->stream($achievement->foto_kegiatan_path, $achievement->foto_kegiatan_name);
     }
 
     public function pointEvidence(Request $request, string $ulid): StreamedResponse
     {
-        return $this->stream(
-            PointRecord::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail()->evidence_path
-        );
+        $record = PointRecord::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+
+        return $this->stream($record->evidence_path, $record->evidence_name);
     }
 
     /**
@@ -51,13 +51,18 @@ class FileController extends Controller
     {
         $announcement = Announcement::where('ulid', $ulid)->live()->firstOrFail();
 
-        return $this->stream($announcement->file_path);
+        return $this->stream($announcement->file_path, $announcement->file_name);
     }
 
-    private function stream(?string $path): StreamedResponse
+    /**
+     * $name is what the uploader called it. Older rows recorded before this
+     * was captured have none, so the storage path's own (random) basename is
+     * still the fallback, not an error.
+     */
+    private function stream(?string $path, ?string $name = null): StreamedResponse
     {
         abort_if(! $path || ! Storage::disk('local')->exists($path), 404);
 
-        return Storage::disk('local')->response($path);
+        return Storage::disk('local')->response($path, $name);
     }
 }

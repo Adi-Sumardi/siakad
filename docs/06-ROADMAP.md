@@ -82,6 +82,12 @@ Fase 4, sebagai item pertama.
 
 - Presensi harian (`attendances`) + rekap ke `enrollments.absent_count` dkk. —
   dipindah dari Fase 3, lihat catatan di atas
+- Pemilihan item/ukuran per siswa untuk fee type `requires_selection` (mis.
+  seragam). Kolomnya (`requires_selection`, `has_size_option`) sudah ada sejak
+  Fase 2 tapi tidak pernah dibaca di mana pun; `BillGenerator` sekarang
+  melewati fee type ini dengan alasan eksplisit alih-alih menagih bundel penuh
+  ke setiap siswa tanpa pilihan apa pun (ditemukan lewat debugging menyeluruh,
+  2026-08-18)
 - Mata pelajaran, penugasan mengajar, nilai, rapor
 - Ekstrakurikuler
 - Kenaikan kelas massal antar tahun ajaran

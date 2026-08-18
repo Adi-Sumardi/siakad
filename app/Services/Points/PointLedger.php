@@ -39,6 +39,7 @@ class PointLedger
         Carbon $occurredOn,
         string $description,
         ?string $evidencePath = null,
+        ?string $evidenceName = null,
     ): PointRecord {
         if ($rule->requires_evidence && ! $evidencePath) {
             throw new RuntimeException("Aturan '{$rule->name}' mewajibkan bukti.");
@@ -53,6 +54,7 @@ class PointLedger
             'occurred_on' => $occurredOn,
             'description' => $description,
             'evidence_path' => $evidencePath,
+            'evidence_name' => $evidenceName,
             'recorded_by' => $recordedBy->id,
             'status' => 'recorded',
         ]);

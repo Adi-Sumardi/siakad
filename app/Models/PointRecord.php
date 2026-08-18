@@ -12,7 +12,7 @@ class PointRecord extends Model
 
     protected $fillable = [
         'student_id', 'term_id', 'point_rule_id', 'related_achievement_id',
-        'type', 'points', 'occurred_on', 'description', 'evidence_path',
+        'type', 'points', 'occurred_on', 'description', 'evidence_path', 'evidence_name',
         'recorded_by', 'status', 'revoked_by', 'revoked_at', 'revoke_reason',
         'acknowledged_at',
     ];
