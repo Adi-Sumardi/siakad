@@ -62,6 +62,13 @@ ambang yang sama, hanya sekali. 115 tes lulus, dan alur guru→poin,
 prestasi→poin, serta idempotensi notifikasi ambang diverifikasi langsung di
 luar test suite.
 
+Frontend admin & guru (10 halaman admin, 3 halaman guru) menyusul setelahnya,
+menutup celah `tunggakan` di portal wali (dulu placeholder `null`) sekaligus:
+akses baca `fee-types`/`fee-rates` dibuka untuk admin_unit (dulu pusat saja),
+endpoint referensi (`school-units`, `academic-years`, `classrooms`) dan ledger
+poin per siswa untuk guru (`/api/guru/students/{ulid}/points`) ditambahkan
+untuk mendukung layar-layar ini.
+
 **Presensi harian (`attendances`) sengaja tidak dibangun di fase ini.**
 `docs/03-ERD.md` sendiri sejak awal mendaftarkan `attendances` di bawah "tabel
 fase berikutnya (tidak dibuat sekarang)" — dua dokumen perencanaan ini sempat
@@ -81,9 +88,6 @@ Fase 4, sebagai item pertama.
 - Ekspor Dapodik
 - SSO PMB ↔ Sekolah (bila aplikasi ketiga muncul)
 - Aplikasi mobile / PWA notifikasi
-- Frontend guru & admin — API-nya sudah lengkap sejak Fase 2 (keuangan) dan
-  Fase 3 (kesiswaan), layarnya belum; portal wali yang diprioritaskan lebih
-  dulu karena itu yang dipakai keluarga tiap bulan
 
 ## Yang harus dibereskan sebelum produksi
 

@@ -17,6 +17,35 @@ use RuntimeException;
 
 class PointController extends Controller
 {
+    /**
+     * One student's ledger this term - what a teacher needs before deciding
+     * whether something they, or a colleague, recorded should be revoked.
+     * Same shape as the guardian's own view; Student::visibleTo() already
+     * treats a teacher as scoped to their whole unit.
+     */
+    public function studentLedger(Request $request, string $ulid): JsonResponse
+    {
+        $student = Student::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+        $term = Term::current();
+
+        if (! $term) {
+            return response()->json(['balance' => 0, 'term' => null, 'records' => []]);
+        }
+
+        $records = $student->pointRecords()
+            ->where('term_id', $term->id)
+            ->with(['pointRule', 'recordedBy'])
+            ->orderByDesc('occurred_on')
+            ->get();
+
+        return response()->json([
+            'student' => ['ulid' => $student->ulid, 'nama_lengkap' => $student->nama_lengkap],
+            'balance' => app(PointLedger::class)->balance($student, $term),
+            'term' => $term->label(),
+            'records' => PointRecordResource::collection($records),
+        ]);
+    }
+
     /** The catalogue this teacher's unit may use: its own rules plus the school-wide ones. */
     public function rules(Request $request): JsonResponse
     {

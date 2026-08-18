@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\Admin\FeeSettingController;
 use App\Http\Controllers\Api\Admin\PointController as AdminPointController;
 use App\Http\Controllers\Api\Admin\PointRuleController;
 use App\Http\Controllers\Api\Admin\PointThresholdController;
+use App\Http\Controllers\Api\Admin\ReferenceController;
 use App\Http\Controllers\Api\Admin\ReportController;
 use App\Http\Controllers\Api\Auth\SessionController;
 use App\Http\Controllers\Api\Auth\InvitationController;
@@ -95,6 +96,7 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     Route::get('/classrooms/{ulid}/students', [GuruClassroomController::class, 'students']);
 
     Route::get('/point-rules', [GuruPointController::class, 'rules']);
+    Route::get('/students/{ulid}/points', [GuruPointController::class, 'studentLedger']);
     Route::post('/points', [GuruPointController::class, 'store']);
     // One rule, many students - a whole line late to assembly recorded once.
     Route::post('/points/bulk', [GuruPointController::class, 'storeBulk']);
@@ -168,18 +170,30 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::post('/announcements', [AdminAnnouncementController::class, 'store']);
     Route::patch('/announcements/{ulid}', [AdminAnnouncementController::class, 'update']);
     Route::delete('/announcements/{ulid}', [AdminAnnouncementController::class, 'destroy']);
+
+    // Reading the catalogue is open to both admin kinds - a per-unit admin has
+    // to know what fee types and rates exist before running billing for their
+    // own unit. FeeSettingController::rates() scopes the response to their
+    // unit regardless of what was asked for.
+    Route::get('/fee-types', [FeeSettingController::class, 'types']);
+    Route::get('/fee-rates', [FeeSettingController::class, 'rates']);
+
+    // Pickers every admin form needs - none of it sensitive, so one response
+    // shape for both admin kinds.
+    Route::get('/school-units', [ReferenceController::class, 'schoolUnits']);
+    Route::get('/academic-years', [ReferenceController::class, 'academicYears']);
+    Route::get('/classrooms', [ReferenceController::class, 'classrooms']);
 });
 
 /*
- * Prices are central-admin only, the same split PMB draws around its settings:
- * a per-unit admin bills their unit but does not decide what it charges.
+ * Setting prices is central-admin only, the same split PMB draws around its
+ * settings: a per-unit admin bills their unit but does not decide what it
+ * charges.
  */
 Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
-    Route::get('/fee-types', [FeeSettingController::class, 'types']);
     Route::post('/fee-types', [FeeSettingController::class, 'storeType']);
     Route::patch('/fee-types/{feeType}', [FeeSettingController::class, 'updateType']);
 
-    Route::get('/fee-rates', [FeeSettingController::class, 'rates']);
     Route::post('/fee-rates', [FeeSettingController::class, 'storeRate']);
     Route::patch('/fee-rates/{feeRate}', [FeeSettingController::class, 'updateRate']);
 });

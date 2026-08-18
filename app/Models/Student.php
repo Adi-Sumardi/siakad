@@ -96,6 +96,11 @@ class Student extends Model
         return $this->hasMany(PointRecord::class);
     }
 
+    public function bills(): HasMany
+    {
+        return $this->hasMany(Bill::class);
+    }
+
     /** The room this student sits in for the active academic year, if placed. */
     public function currentEnrollment(): ?Enrollment
     {

@@ -77,6 +77,7 @@ kelas dalam satu unit.
 | POST | `/api/guru/points` | catat satu: `{student_ulid, point_rule_ulid, occurred_on, description, evidence?}` |
 | POST | `/api/guru/points/bulk` | satu aturan untuk banyak siswa sekaligus (mis. terlambat upacara); aturan berbukti wajib ditolak di sini |
 | PATCH | `/api/guru/points/{ulid}/revoke` | `{reason}` wajib — mengecualikan dari saldo, baris & alasannya tetap ada (D6) |
+| GET | `/api/guru/students/{ulid}/points` | ledger satu siswa semester berjalan — dipakai sebelum memutuskan revoke |
 | POST | `/api/guru/achievements` | catat prestasi — **langsung terverifikasi**, boleh sertakan `points_awarded` |
 
 Guru tidak bisa mengisi `points` bebas — hanya menerapkan aturan dari katalog.
@@ -93,8 +94,10 @@ bukan 403).
 ### Keuangan
 | Method | Path | Keterangan |
 |---|---|---|
-| GET, POST, PATCH | `/api/admin/fee-types` | **pusat saja** |
-| GET, POST, PATCH | `/api/admin/fee-rates` | **pusat saja** — harga menyangkut ratusan keluarga |
+| GET | `/api/admin/fee-types` | admin_unit maupun pusat — perlu tahu jenis biaya sebelum menjalankan billing run |
+| POST, PATCH | `/api/admin/fee-types` | **pusat saja** |
+| GET | `/api/admin/fee-rates` | admin_unit **dipaksa** ke unitnya sendiri (parameter `?unit=` diabaikan bila terkirim), pusat bebas filter unit mana pun |
+| POST, PATCH | `/api/admin/fee-rates` | **pusat saja** — harga menyangkut ratusan keluarga |
 | POST | `/api/admin/billing-runs/preview` | dry-run: berapa tagihan, total nominal, siapa dilewati & kenapa |
 | POST | `/api/admin/billing-runs` | jalankan; admin_unit dipaksa ke unitnya sendiri, parameter unit lain diabaikan |
 | GET | `/api/admin/billing-runs` | riwayat run |
@@ -120,11 +123,14 @@ bukan 403).
 | Method | Path | Keterangan |
 |---|---|---|
 | GET, POST, PATCH, DELETE | `/api/admin/announcements` | admin_unit **melihat** pengumuman sekolah-wide + unitnya, tapi hanya **mengubah** unitnya — dua scope terpisah (`scopeVisibleTo` vs `scopeManageableBy`) |
+| GET | `/api/admin/school-units` | untuk pemilih unit di form (tarif baru, aturan/ambang poin sekolah-wide, dll.) |
+| GET | `/api/admin/academic-years` | untuk pemilih tahun ajaran saat membuat tarif |
+| GET | `/api/admin/classrooms` | `visibleTo()` — admin_unit hanya kelasnya sendiri, pusat semua unit |
 
-Belum dibangun (API maupun frontend): manajemen siswa/kelas/wali langsung dari
-admin (siswa datang dari handoff PMB, kelas & guru masih lewat tinker/seed),
-promosi kelas massal, dan layar admin/guru di frontend — semuanya API-lengkap,
-tinggal antarmukanya.
+Belum dibangun: manajemen siswa/kelas/wali langsung dari admin (siswa datang
+dari handoff PMB, kelas & guru masih lewat tinker/seed) dan promosi kelas
+massal. Frontend admin (10 halaman) dan guru (3 halaman) sudah dibangun
+menyusul API-nya.
 
 ## File privat
 

@@ -126,11 +126,13 @@ class AdminBillingTest extends TestCase
         $this->assertSame('unpaid', $bill->fresh()->status);
     }
 
-    public function test_a_unit_admin_may_not_set_prices(): void
+    public function test_a_unit_admin_may_read_but_not_set_prices(): void
     {
+        // Reading is open - a per-unit admin has to know the going rate before
+        // they can run billing for their own unit.
         $this->actingAs($this->staff('admin_unit', $this->sd))
             ->getJson('/api/admin/fee-rates')
-            ->assertStatus(403);
+            ->assertOk();
 
         $this->actingAs($this->staff('admin_unit', $this->sd))
             ->postJson('/api/admin/fee-rates', [
@@ -140,6 +142,19 @@ class AdminBillingTest extends TestCase
                 'amount' => 1,
             ])
             ->assertStatus(403);
+    }
+
+    public function test_a_unit_admin_reading_rates_only_sees_their_own_unit(): void
+    {
+        // setUp() already seeded one SPP rate for each of $this->sd and
+        // $this->smp - exactly the two-unit situation this guards against.
+        $rates = $this->actingAs($this->staff('admin_unit', $this->sd))
+            ->getJson('/api/admin/fee-rates')
+            ->assertOk()
+            ->json('rates');
+
+        $this->assertCount(1, $rates);
+        $this->assertSame('SD-SAKINAH', $rates[0]['unit']['code']);
     }
 
     public function test_a_guardian_cannot_reach_the_admin_area_at_all(): void

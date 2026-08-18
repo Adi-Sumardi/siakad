@@ -66,7 +66,8 @@ export default function BillsPage() {
   function toggle(ulid: string) {
     setSelected((current) => {
       const next = new Set(current);
-      next.has(ulid) ? next.delete(ulid) : next.add(ulid);
+      if (next.has(ulid)) next.delete(ulid);
+      else next.add(ulid);
       return next;
     });
   }

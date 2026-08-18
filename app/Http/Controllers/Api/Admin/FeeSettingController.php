@@ -15,15 +15,20 @@ use Illuminate\Support\Facades\DB;
 /**
  * The fee catalogue and its rates.
  *
- * Central admin only - a per-unit admin runs billing for their unit but does
- * not set prices, the same split PMB draws around its settings screens. Rates
- * decide what hundreds of families are charged, so the blast radius of a typo
- * is much larger than the screen it was typed on.
+ * Reading is open to both admin kinds - a per-unit admin has to know what fee
+ * types and rates exist before they can run billing for their own unit.
+ * *Writing* is central-admin only: rates decide what hundreds of families are
+ * charged, so the blast radius of a typo is much larger than the screen it was
+ * typed on. index() methods below scope reads to the caller's own unit; the
+ * store/update methods stay behind the central-admin-only route group in
+ * routes/api.php.
  */
 class FeeSettingController extends Controller
 {
     public function types(): JsonResponse
     {
+        // Category names only - no pricing here, so there is nothing a
+        // per-unit admin should not see.
         return response()->json([
             'fee_types' => FeeType::orderBy('sort_order')->orderBy('name')->get()
                 ->map(fn (FeeType $type) => [
@@ -81,7 +86,11 @@ class FeeSettingController extends Controller
     {
         $rates = FeeRate::query()
             ->with(['feeType', 'schoolUnit', 'academicYear', 'components'])
-            ->when($request->string('unit')->value(), fn ($q, $code) => $q->whereHas('schoolUnit', fn ($u) => $u->where('code', $code)))
+            // A per-unit admin only ever sees their own unit's rates, whatever
+            // ?unit= asked for - the same "forced, not trusted" rule
+            // BillingRunController applies to which unit a run actually bills.
+            ->when($request->user()->isUnitScoped(), fn ($q) => $q->where('school_unit_id', $request->user()->school_unit_id))
+            ->when(! $request->user()->isUnitScoped() && $request->string('unit')->value(), fn ($q, $code) => $q->whereHas('schoolUnit', fn ($u) => $u->where('code', $code)))
             ->when($request->string('type')->value(), fn ($q, $code) => $q->whereHas('feeType', fn ($t) => $t->where('code', $code)))
             ->when($request->string('year')->value(), fn ($q, $year) => $q->whereHas('academicYear', fn ($y) => $y->where('year', $year)))
             ->get();

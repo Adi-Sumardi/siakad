@@ -257,6 +257,27 @@ class PointLedgerTest extends TestCase
             ->assertJsonCount(1, 'records');
     }
 
+    public function test_a_guru_can_read_a_students_ledger_to_decide_whether_to_revoke(): void
+    {
+        $student = $this->studentIn($this->sd);
+        $guru = $this->staff('guru', $this->sd);
+        $this->ledger()->record($student, $this->term, $this->rule(['points' => 10]), $guru, now(), 'Terlambat');
+
+        $this->actingAs($guru)->getJson("/api/guru/students/{$student->ulid}/points")
+            ->assertOk()
+            ->assertJsonPath('balance', -10)
+            ->assertJsonCount(1, 'records');
+    }
+
+    public function test_a_guru_cannot_read_a_students_ledger_outside_their_unit(): void
+    {
+        $student = $this->studentIn($this->smp);
+        $guru = $this->staff('guru', $this->sd);
+
+        $this->actingAs($guru)->getJson("/api/guru/students/{$student->ulid}/points")
+            ->assertStatus(404);
+    }
+
     public function test_a_guardian_cannot_read_another_familys_points(): void
     {
         $mine = $this->studentIn($this->sd, 'Anak saya');

@@ -31,8 +31,20 @@ export default function DashboardPage() {
   const [students, setStudents] = useState<Student[] | null>(null);
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (loading) return;
+
+    if (!user) {
       router.replace("/login");
+      return;
+    }
+
+    // This screen is the wali home. Staff land here right after signing in
+    // too - the same session works for every role - so they are sent on to
+    // their own area rather than shown a page built for a different job.
+    if (user.role === "admin" || user.role === "admin_unit") {
+      router.replace("/admin");
+    } else if (user.role === "guru") {
+      router.replace("/guru");
     }
   }, [loading, user, router]);
 
@@ -42,7 +54,7 @@ export default function DashboardPage() {
     }
   }, [user]);
 
-  if (loading || !user) {
+  if (loading || !user || user.role !== "orangtua") {
     return (
       <main className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
         <Skeleton className="h-8 w-48" />
@@ -57,22 +69,18 @@ export default function DashboardPage() {
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-3.5">
           <BrandMark />
           <div className="flex items-center gap-2">
-            {user.role === "orangtua" && (
-              <>
-                <Link href="/informasi">
-                  <Button variant="outline" size="sm">
-                    <Megaphone className="size-4" />
-                    Informasi
-                  </Button>
-                </Link>
-                <Link href="/tagihan">
-                  <Button variant="outline" size="sm">
-                    <Receipt className="size-4" />
-                    Tagihan
-                  </Button>
-                </Link>
-              </>
-            )}
+            <Link href="/informasi">
+              <Button variant="outline" size="sm">
+                <Megaphone className="size-4" />
+                Informasi
+              </Button>
+            </Link>
+            <Link href="/tagihan">
+              <Button variant="outline" size="sm">
+                <Receipt className="size-4" />
+                Tagihan
+              </Button>
+            </Link>
             <Button variant="ghost" size="sm" onClick={logout}>
               <LogOut className="size-4" />
               Keluar
@@ -83,14 +91,9 @@ export default function DashboardPage() {
 
       <main className="mx-auto max-w-3xl px-6 py-8">
         <h1 className="text-xl font-bold tracking-tight">Assalamu&apos;alaikum, {user.name}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {user.role === "orangtua"
-            ? "Berikut anak Anda yang terdaftar di sekolah."
-            : "Anda masuk sebagai staf. Modul admin menyusul di fase berikutnya."}
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">Berikut anak Anda yang terdaftar di sekolah.</p>
 
-        {user.role === "orangtua" && (
-          <section className="mt-6 flex flex-col gap-3">
+        <section className="mt-6 flex flex-col gap-3">
             {students === null && <Skeleton className="h-28 w-full" />}
 
             {students?.length === 0 && (
@@ -149,8 +152,7 @@ export default function DashboardPage() {
                 )}
               </Card>
             ))}
-          </section>
-        )}
+        </section>
       </main>
     </div>
   );

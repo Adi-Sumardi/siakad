@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\Bill;
 use App\Models\PointThreshold;
 use App\Models\Term;
 use App\Services\Points\PointLedger;
@@ -31,12 +32,16 @@ class StudentResource extends JsonResource
                 'wali_kelas' => $enrollment->classroom->homeroomTeacher?->name,
             ] : null,
             'poin' => $this->pointSummary(),
-            // Fase 2 never wired a bills() relation onto Student to compute
-            // this cheaply for a list - the wali dashboard links out to
-            // /tagihan instead. Left as a placeholder rather than an N+1 query
-            // per child on every dashboard load.
-            'tunggakan' => null,
+            'tunggakan' => $this->outstandingTotal(),
         ];
+    }
+
+    /** One SUM per child - fine for a guardian's handful; see PointController::index() for how the admin roster avoids the same query per row instead. */
+    private function outstandingTotal(): float
+    {
+        return (float) Bill::where('student_id', $this->id)
+            ->whereIn('status', Bill::OPEN_STATUSES)
+            ->sum('remaining_amount');
     }
 
     /**
