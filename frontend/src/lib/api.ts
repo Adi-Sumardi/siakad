@@ -6,7 +6,7 @@
  * development Laravel runs on another port, so the base URL is explicit and
  * every request needs credentials: "include".
  */
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export class ApiError extends Error {
   constructor(

@@ -27,6 +27,15 @@ Schedule::command('bills:mark-overdue')
     ->name('mark-overdue-bills')
     ->description('Tandai tagihan yang lewat jatuh tempo');
 
+// Morning, so a nudge lands when someone can act on it rather than at 1am. The
+// unique index on (bill_id, kind) is what keeps a second firing silent, not the
+// schedule itself.
+Schedule::command('bills:send-reminders')
+    ->dailyAt('07:00')
+    ->name('send-bill-reminders')
+    ->withoutOverlapping()
+    ->description('Pengingat jatuh tempo H-7, H-1, dan H+3');
+
 // Keeps the unit master in step with PMB. Daily is often enough: units change
 // once a year at most, but a stale code means a handoff for a new unit fails
 // with "Unit tidak dikenal" until someone notices.

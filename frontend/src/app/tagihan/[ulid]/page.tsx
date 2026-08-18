@@ -2,11 +2,12 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FileDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError } from "@/lib/api";
+import { API_BASE, api, ApiError } from "@/lib/api";
 import { rupiah, tanggal } from "@/lib/format";
 import type { Bill, Payment } from "@/lib/types/billing";
 
@@ -70,14 +71,31 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
               {bill.student?.nama_lengkap} · {bill.bill_number}
             </p>
           </div>
-          {bill.status === "paid" ? (
-            <Badge variant="good">Lunas</Badge>
-          ) : bill.status === "overdue" ? (
-            <Badge variant="bad">Lewat jatuh tempo</Badge>
-          ) : (
-            <Badge>Belum lunas</Badge>
-          )}
+          <div className="flex items-center gap-2">
+            {bill.status === "paid" ? (
+              <Badge variant="good">Lunas</Badge>
+            ) : bill.status === "overdue" ? (
+              <Badge variant="bad">Lewat jatuh tempo</Badge>
+            ) : (
+              <Badge>Belum lunas</Badge>
+            )}
+          </div>
         </div>
+
+        {/* Plain <a>, not fetch: the browser handles the PDF response itself -
+            preview inline or save, whichever it is set up to do - and the
+            session cookie already rides along on a same-origin navigation. */}
+        <a
+          href={`${API_BASE}/api/wali/bills/${bill.ulid}/pdf`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 inline-block"
+        >
+          <Button variant="outline" size="sm">
+            <FileDown className="size-4" />
+            {bill.status === "paid" ? "Unduh kuitansi" : "Unduh tagihan"}
+          </Button>
+        </a>
 
         <Card className="mt-6 overflow-hidden p-0">
           <div className="border-b border-border px-5 py-3">

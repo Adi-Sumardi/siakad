@@ -88,7 +88,7 @@ class SendagoMailGateway implements MailGateway
              * that is the event the family just lived through, and naming it
              * is what makes the email read as a continuation of PMB rather
              * than an unexplained message from a system they never signed up
-             * for. No password appears here - only a link to choose one.
+             * for. No password appears anywhere - there are none in this app.
              */
             'school_account_invite' => [
                 "Akun Siakad untuk {$data['nama_panggilan']} sudah siap",
@@ -98,11 +98,13 @@ class SendagoMailGateway implements MailGateway
                     ."tahun ajaran {$data['academic_year']}.\n\n"
                     ."Mulai sekarang tagihan sekolah, catatan poin, dan prestasi {$data['nama_panggilan']} "
                     ."dapat dilihat melalui aplikasi sekolah.\n\n"
-                    ."Silakan aktifkan akun Anda dan tentukan kata sandi melalui tautan berikut:\n\n"
+                    ."Silakan masuk melalui tautan berikut:\n\n"
                     ."{$data['activation_url']}\n\n"
-                    ."Email akun Anda: {$data['login_identifier']}\n"
-                    ."Tautan berlaku sampai {$data['expires_at']}.\n\n"
-                    ."Jika tautan sudah kedaluwarsa, hubungi tata usaha unit untuk dikirim ulang.\n\n"
+                    ."Akun Anda: {$data['login_identifier']}\n"
+                    ."Tidak ada kata sandi yang perlu dibuat - setiap kali masuk, kami kirimkan "
+                    ."kode sekali pakai ke alamat ini.\n\n"
+                    ."Tautan di atas berlaku sampai {$data['expires_at']}. Lewat dari itu pun Anda "
+                    ."tetap bisa masuk lewat kode.\n\n"
                     .'Terima kasih.',
             ],
             /**
@@ -118,14 +120,26 @@ class SendagoMailGateway implements MailGateway
                     ."Jangan berikan kode ini kepada siapa pun, termasuk yang mengaku petugas sekolah. "
                     .'Jika Anda tidak sedang mencoba masuk, abaikan email ini.',
             ],
-            'password_reset' => [
-                'Atur Ulang Kata Sandi Siakad YAPI',
-                "Yth. {$data['name']},\n\n"
-                    ."Kami menerima permintaan untuk mengatur ulang kata sandi akun Anda. "
-                    ."Klik tautan berikut untuk membuat kata sandi baru:\n\n"
-                    ."{$data['reset_url']}\n\n"
-                    ."Tautan ini berlaku selama 60 menit.\n\n"
-                    .'Jika Anda tidak meminta pengaturan ulang, abaikan email ini - kata sandi Anda tidak berubah.',
+            /**
+             * Due-date nudge. Leads with the amount and the date because that
+             * is the whole content; a parent scanning a notification bar should
+             * not have to open it to learn what is owed and by when.
+             */
+            'bill_reminder' => [
+                match ($data['kind']) {
+                    'h7' => "Pengingat: {$data['description']} - {$data['student_name']}",
+                    'h1' => "Besok jatuh tempo: {$data['description']} - {$data['student_name']}",
+                    default => "Lewat jatuh tempo: {$data['description']} - {$data['student_name']}",
+                },
+                "Yth. {$data['guardian_name']},\n\n"
+                    .match ($data['kind']) {
+                        'h7' => "{$data['description']} untuk {$data['student_name']} akan jatuh tempo pada {$data['due_date']}.",
+                        'h1' => "{$data['description']} untuk {$data['student_name']} jatuh tempo besok, {$data['due_date']}.",
+                        default => "{$data['description']} untuk {$data['student_name']} sudah lewat jatuh tempo ({$data['due_date']}).",
+                    }."\n\n"
+                    ."Sisa tagihan : Rp {$data['amount']}\n\n"
+                    ."Pembayaran dapat dilakukan melalui aplikasi sekolah.\n\n"
+                    .'Abaikan email ini bila pembayaran sudah dilakukan.',
             ],
             default => [
                 'Notifikasi Siakad YAPI',

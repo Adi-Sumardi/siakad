@@ -16,7 +16,6 @@ class Payment extends Model
         'payment_number', 'payer_guardian_id', 'amount', 'method', 'channel', 'status',
         'external_transaction_id', 'invoice_id', 'invoice_url',
         'gateway_response', 'metadata', 'expires_at', 'paid_at', 'failed_at',
-        'receipt_file_path', 'receipt_file_name', 'receipt_file_size', 'receipt_file_mime',
         'verified_by', 'verified_at', 'verification_notes', 'rejection_reason', 'recorded_by',
     ];
 

@@ -58,6 +58,7 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
 
     Route::get('/bills', [WaliBillController::class, 'index']);
     Route::get('/bills/{ulid}', [WaliBillController::class, 'show']);
+    Route::get('/bills/{ulid}/pdf', [WaliBillController::class, 'pdf']);
     // One invoice for however many bills were ticked - the whole point of
     // payment_allocations.
     Route::post('/checkout', [WaliBillController::class, 'checkout'])->middleware('throttle:20,1');
@@ -71,13 +72,14 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
  */
 Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->group(function () {
     Route::get('/bills', [AdminBillController::class, 'index']);
+    Route::get('/bills/{ulid}/pdf', [AdminBillController::class, 'pdf']);
     Route::post('/bills/{ulid}/waive', [AdminBillController::class, 'waive']);
     Route::post('/bills/{ulid}/cancel', [AdminBillController::class, 'cancel']);
     Route::post('/bills/{ulid}/payments', [AdminBillController::class, 'recordPayment']);
 
-    Route::get('/payments/pending', [AdminBillController::class, 'pendingVerification']);
-    Route::post('/payments/{ulid}/verify', [AdminBillController::class, 'verifyPayment']);
-    Route::post('/payments/{ulid}/reject', [AdminBillController::class, 'rejectPayment']);
+    // No manual verification endpoints: Xendit's callback settles online
+    // payments on its own, and cash at the front desk is settled the moment the
+    // admin records it. Nothing arrives here needing a human to approve it.
 
     // A per-unit admin runs billing for their own unit - the controller forces
     // the unit rather than trusting the parameter.

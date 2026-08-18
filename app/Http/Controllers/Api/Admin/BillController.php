@@ -7,12 +7,12 @@ use App\Http\Resources\BillResource;
 use App\Http\Resources\PaymentResource;
 use App\Models\ActivityLog;
 use App\Models\Bill;
-use App\Models\Payment;
+use App\Services\Billing\BillPdfService;
 use App\Services\Billing\CheckoutService;
-use App\Services\Billing\PaymentAllocator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\Response;
 
 class BillController extends Controller
 {
@@ -34,6 +34,16 @@ class BillController extends Controller
         return response()->json([
             'bills' => BillResource::collection($bills)->response()->getData(true),
         ]);
+    }
+
+    public function pdf(Request $request, string $ulid, BillPdfService $pdf): Response
+    {
+        $bill = Bill::query()
+            ->visibleTo($request->user())
+            ->where('ulid', $ulid)
+            ->firstOrFail();
+
+        return $pdf->render($bill)->stream($pdf->filename($bill));
     }
 
     /**
@@ -129,66 +139,5 @@ class BillController extends Controller
             'payment' => new PaymentResource($payment),
             'bill' => new BillResource($bill->fresh()),
         ], 201);
-    }
-
-    /** Transfers waiting on someone to look at the receipt. */
-    public function pendingVerification(Request $request): JsonResponse
-    {
-        $payments = Payment::query()
-            ->visibleTo($request->user())
-            ->whereIn('status', ['pending', 'processing'])
-            ->whereNotNull('receipt_file_path')
-            ->whereNull('verified_at')
-            ->with(['payer', 'bills.student', 'bills.feeType'])
-            ->latest()
-            ->get();
-
-        return response()->json(['payments' => PaymentResource::collection($payments)]);
-    }
-
-    public function verifyPayment(Request $request, string $ulid, PaymentAllocator $allocator): JsonResponse
-    {
-        $validated = $request->validate(['notes' => 'nullable|string|max:500']);
-
-        $payment = Payment::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
-
-        if ($payment->isSettled()) {
-            return response()->json(['message' => 'Pembayaran ini sudah diverifikasi.'], 422);
-        }
-
-        $payment->forceFill([
-            'verified_by' => $request->user()->id,
-            'verified_at' => now(),
-            'verification_notes' => $validated['notes'] ?? null,
-        ])->save();
-
-        $allocator->settle($payment);
-
-        ActivityLog::record($request->user(), 'payment.verified', $payment, [
-            'amount' => (float) $payment->amount,
-        ]);
-
-        return response()->json(['payment' => new PaymentResource($payment->fresh())]);
-    }
-
-    public function rejectPayment(Request $request, string $ulid, PaymentAllocator $allocator): JsonResponse
-    {
-        $validated = $request->validate(['reason' => 'required|string|max:500']);
-
-        $payment = Payment::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
-
-        if ($payment->isSettled()) {
-            return response()->json([
-                'message' => 'Pembayaran yang sudah lunas tidak bisa ditolak. Gunakan refund.',
-            ], 422);
-        }
-
-        $allocator->fail($payment, 'failed', $validated['reason']);
-
-        ActivityLog::record($request->user(), 'payment.rejected', $payment, [
-            'reason' => $validated['reason'],
-        ]);
-
-        return response()->json(['payment' => new PaymentResource($payment->fresh())]);
     }
 }

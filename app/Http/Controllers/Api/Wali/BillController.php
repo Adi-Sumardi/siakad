@@ -7,10 +7,12 @@ use App\Http\Resources\BillResource;
 use App\Http\Resources\PaymentResource;
 use App\Models\Bill;
 use App\Models\Payment;
+use App\Services\Billing\BillPdfService;
 use App\Services\Billing\CheckoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\Response;
 
 class BillController extends Controller
 {
@@ -57,6 +59,21 @@ class BillController extends Controller
                 $bill->allocations()->with('payment')->get()->pluck('payment')->filter()->values()
             ),
         ]);
+    }
+
+    /**
+     * PDF for this bill - an invoice while owed, a receipt once settled. Same
+     * ownership check as everywhere else: visibleTo() before firstOrFail(), so
+     * this can never be used to fetch another family's document.
+     */
+    public function pdf(Request $request, string $ulid, BillPdfService $pdf): Response
+    {
+        $bill = Bill::query()
+            ->visibleTo($request->user())
+            ->where('ulid', $ulid)
+            ->firstOrFail();
+
+        return $pdf->render($bill)->stream($pdf->filename($bill));
     }
 
     /**
