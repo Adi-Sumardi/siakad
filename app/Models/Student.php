@@ -86,6 +86,16 @@ class Student extends Model
         return $this->hasMany(StudentDocument::class);
     }
 
+    public function achievements(): HasMany
+    {
+        return $this->hasMany(Achievement::class);
+    }
+
+    public function pointRecords(): HasMany
+    {
+        return $this->hasMany(PointRecord::class);
+    }
+
     /** The room this student sits in for the active academic year, if placed. */
     public function currentEnrollment(): ?Enrollment
     {

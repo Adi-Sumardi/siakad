@@ -141,6 +141,19 @@ class SendagoMailGateway implements MailGateway
                     ."Pembayaran dapat dilakukan melalui aplikasi sekolah.\n\n"
                     .'Abaikan email ini bila pembayaran sudah dilakukan.',
             ],
+            /**
+             * The threshold-crossing notice. Sent once per band per term - see
+             * PointThresholdNotifier - so this is never routine noise, it is
+             * always the first time a family is told their child's balance
+             * moved into this territory.
+             */
+            'point_threshold' => [
+                "Poin {$data['student_name']}: {$data['label']}",
+                "Yth. {$data['guardian_name']},\n\n"
+                    ."Poin {$data['student_name']} saat ini {$data['balance']} ({$data['label']}).\n\n"
+                    .($data['action'] !== '' ? "{$data['action']}\n\n" : '')
+                    ."Rincian lengkap dapat dilihat di aplikasi sekolah.",
+            ],
             default => [
                 'Notifikasi Siakad YAPI',
                 implode("\n", array_map(fn ($k, $v) => "{$k}: {$v}", array_keys($data), $data)),

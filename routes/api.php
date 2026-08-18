@@ -1,14 +1,26 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\AchievementController as AdminAchievementController;
+use App\Http\Controllers\Api\Admin\AnnouncementController as AdminAnnouncementController;
 use App\Http\Controllers\Api\Admin\BillController as AdminBillController;
 use App\Http\Controllers\Api\Admin\BillingRunController;
 use App\Http\Controllers\Api\Admin\FeeSettingController;
+use App\Http\Controllers\Api\Admin\PointController as AdminPointController;
+use App\Http\Controllers\Api\Admin\PointRuleController;
+use App\Http\Controllers\Api\Admin\PointThresholdController;
 use App\Http\Controllers\Api\Admin\ReportController;
 use App\Http\Controllers\Api\Auth\SessionController;
 use App\Http\Controllers\Api\Auth\InvitationController;
 use App\Http\Controllers\Api\Auth\OtpController;
+use App\Http\Controllers\Api\FileController;
+use App\Http\Controllers\Api\Guru\AchievementController as GuruAchievementController;
+use App\Http\Controllers\Api\Guru\ClassroomController as GuruClassroomController;
+use App\Http\Controllers\Api\Guru\PointController as GuruPointController;
+use App\Http\Controllers\Api\Wali\AchievementController as WaliAchievementController;
+use App\Http\Controllers\Api\Wali\AnnouncementController as WaliAnnouncementController;
 use App\Http\Controllers\Api\Wali\BillController as WaliBillController;
 use App\Http\Controllers\Api\Wali\DashboardController as WaliDashboardController;
+use App\Http\Controllers\Api\Wali\PointController as WaliPointController;
 use App\Http\Controllers\Api\Webhooks\PmbHandoffController;
 use App\Http\Controllers\Api\Webhooks\XenditController;
 use Illuminate\Support\Facades\Route;
@@ -63,6 +75,49 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
     // payment_allocations.
     Route::post('/checkout', [WaliBillController::class, 'checkout'])->middleware('throttle:20,1');
     Route::get('/payments', [WaliBillController::class, 'payments']);
+
+    Route::get('/students/{ulid}/points', [WaliPointController::class, 'index']);
+    Route::get('/students/{ulid}/achievements', [WaliAchievementController::class, 'index']);
+    // A guardian's own account of a win - it waits for staff to confirm it,
+    // and never carries points on its own.
+    Route::post('/students/{ulid}/achievements', [WaliAchievementController::class, 'store']);
+
+    Route::get('/announcements', [WaliAnnouncementController::class, 'index']);
+});
+
+/*
+ * Homeroom and subject teachers. Student::scopeVisibleTo() already treats
+ * `guru` as unit-scoped exactly like admin_unit - a teacher sees every student
+ * in their unit, not only their own homeroom, because they teach across it.
+ */
+Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function () {
+    Route::get('/classrooms', [GuruClassroomController::class, 'index']);
+    Route::get('/classrooms/{ulid}/students', [GuruClassroomController::class, 'students']);
+
+    Route::get('/point-rules', [GuruPointController::class, 'rules']);
+    Route::post('/points', [GuruPointController::class, 'store']);
+    // One rule, many students - a whole line late to assembly recorded once.
+    Route::post('/points/bulk', [GuruPointController::class, 'storeBulk']);
+    // Excludes a record from the balance; the row and its reasoning stay on
+    // file - never a DELETE. See docs/01-ARSITEKTUR.md D6.
+    Route::patch('/points/{ulid}/revoke', [GuruPointController::class, 'revoke']);
+
+    // Trusted immediately, unlike a guardian's own submission of the same thing.
+    Route::post('/achievements', [GuruAchievementController::class, 'store']);
+});
+
+/*
+ * Private files - certificates, activity photos, point evidence, announcement
+ * attachments. One gate for all four: whoever is asking must be able to see
+ * the row that owns the file, via the same visibleTo() scope that already
+ * governs its JSON. No role restriction beyond being signed in - the
+ * ownership check does the actual work.
+ */
+Route::middleware('auth:sanctum')->prefix('files')->group(function () {
+    Route::get('/achievements/{ulid}/sertifikat', [FileController::class, 'achievementSertifikat']);
+    Route::get('/achievements/{ulid}/foto', [FileController::class, 'achievementFoto']);
+    Route::get('/points/{ulid}/evidence', [FileController::class, 'pointEvidence']);
+    Route::get('/announcements/{ulid}/file', [FileController::class, 'announcementFile']);
 });
 
 /*
@@ -89,6 +144,30 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 
     Route::get('/reports/receivables', [ReportController::class, 'receivables']);
     Route::get('/reports/collections', [ReportController::class, 'collections']);
+
+    // A per-unit admin manages their own unit's rules/thresholds and never a
+    // school-wide one - PointRuleController and PointThresholdController
+    // enforce this internally, the same way BillingRunController forces a
+    // unit rather than trusting the request.
+    Route::get('/point-rules', [PointRuleController::class, 'index']);
+    Route::post('/point-rules', [PointRuleController::class, 'store']);
+    Route::patch('/point-rules/{pointRule}', [PointRuleController::class, 'update']);
+    Route::delete('/point-rules/{pointRule}', [PointRuleController::class, 'destroy']);
+
+    Route::get('/point-thresholds', [PointThresholdController::class, 'index']);
+    Route::post('/point-thresholds', [PointThresholdController::class, 'store']);
+    Route::patch('/point-thresholds/{pointThreshold}', [PointThresholdController::class, 'update']);
+
+    Route::get('/points', [AdminPointController::class, 'index']);
+
+    Route::get('/achievements', [AdminAchievementController::class, 'index']);
+    Route::post('/achievements/{ulid}/verify', [AdminAchievementController::class, 'verify']);
+    Route::post('/achievements/{ulid}/reject', [AdminAchievementController::class, 'reject']);
+
+    Route::get('/announcements', [AdminAnnouncementController::class, 'index']);
+    Route::post('/announcements', [AdminAnnouncementController::class, 'store']);
+    Route::patch('/announcements/{ulid}', [AdminAnnouncementController::class, 'update']);
+    Route::delete('/announcements/{ulid}', [AdminAnnouncementController::class, 'destroy']);
 });
 
 /*

@@ -19,38 +19,71 @@ Tanpa ini tidak ada satu pun data siswa di aplikasi.
 **Selesai berarti:** satu siswa uji yang lunas di PMB muncul di sini, walinya
 menerima email, bisa aktivasi, dan bisa login.
 
-## Fase 2 — Keuangan (nilai utamanya)
+## Fase 2 — Keuangan (nilai utamanya) — selesai
 
 - Migration kelompok D lengkap
 - Master tarif: `fee_types`, `fee_rates`, `fee_components`, beasiswa
-- Generator tagihan + `billing_runs` + preview dry-run
+- Generator tagihan (`BillGenerator`) + `billing_runs` + preview dry-run
 - Portal tagihan wali: daftar lintas anak, detail, keranjang, checkout multi-tagihan
 - Integrasi Xendit + webhook + `payment_allocations` + `PaymentAllocator`
-- Pembayaran manual: unggah bukti, verifikasi admin, catat tunai
-- Invoice/kuitansi PDF (`InvoicePdfService` PMB bisa disalin)
-- Scheduler: generate SPP, tandai overdue, kirim pengingat
-- Laporan tunggakan & penerimaan per unit
+- Pembayaran tunai dicatat admin (`CheckoutService::recordManual`) — **bukan**
+  unggah bukti transfer: semua pembayaran online lewat Xendit, jadi tidak ada
+  slip untuk difoto. Endpoint verifikasi manual tidak dibangun karena tidak ada
+  yang pernah menulis ke sana.
+- Invoice/kuitansi PDF (`BillPdfService`, satu template untuk keduanya)
+- Scheduler: `bills:generate`, `bills:mark-overdue`, `bills:send-reminders` (H-7/H-1/H+3)
+- Laporan tunggakan & penerimaan per unit (`ReportController`)
 
 **Selesai berarti:** SPP bulan berjalan terbit otomatis, orang tua bisa membayar
 beberapa bulan sekaligus, dan admin unit bisa melihat siapa yang menunggak.
+Terbukti dengan 68 tes lulus dan alur end-to-end diverifikasi langsung
+(bukan cuma di test suite).
 
-## Fase 3 — Kesiswaan
+## Fase 3 — Kesiswaan — selesai (kecuali presensi)
 
-- Katalog `point_rules` + ambang + ledger `point_records`
-- Layar guru: catat poin satuan & massal, batalkan dengan alasan
-- Portal wali: meteran poin, riwayat, notifikasi saat melewati ambang
-- Prestasi: input guru, pengajuan wali, verifikasi admin, unggah sertifikat
-- Pengumuman (sekolah/unit/kelas)
-- Presensi harian (`attendances`) + rekap di enrollment
+- Katalog `point_rules` + `point_thresholds` + ledger `point_records`
+  (`PointLedger` — satu-satunya penulis, revoke bukan delete, lihat D6)
+- Layar guru: catat poin satuan & massal (`/api/guru/points`, `points/bulk`),
+  batalkan dengan alasan wajib (`points/{ulid}/revoke`)
+- Portal wali: meteran poin (`<PointMeter />`), riwayat lengkap per semester,
+  notifikasi otomatis saat saldo melewati ambang — sekali per ambang per
+  semester (`point_threshold_notifications`, pola sama dengan `bill_reminders`)
+- Prestasi: input guru (langsung terverifikasi, boleh sekalian beri poin),
+  pengajuan wali (menunggu verifikasi, tidak pernah bawa poin sendiri),
+  verifikasi/tolak admin, sertifikat & foto tersimpan privat di balik
+  pemeriksaan kepemilikan (`FileController`)
+- Pengumuman sekolah/unit/kelas (`Announcement`, pola `scopeLive()` dari PMB,
+  ditambah satu level cakupan kelas)
+- Scheduler: `points:evaluate-thresholds`
+
+**Selesai berarti:** guru mencatat poin dalam hitungan detik, wali murid tahu di
+hari yang sama lewat notifikasi otomatis — bukan setiap hari saldo tetap di
+ambang yang sama, hanya sekali. 115 tes lulus, dan alur guru→poin,
+prestasi→poin, serta idempotensi notifikasi ambang diverifikasi langsung di
+luar test suite.
+
+**Presensi harian (`attendances`) sengaja tidak dibangun di fase ini.**
+`docs/03-ERD.md` sendiri sejak awal mendaftarkan `attendances` di bawah "tabel
+fase berikutnya (tidak dibuat sekarang)" — dua dokumen perencanaan ini sempat
+tidak sinkron soal fase mana presensi berada. Skemanya belum pernah dirancang
+(berbeda dengan poin/prestasi/pengumuman yang sudah punya rancangan ERD utuh
+sebelum fase ini dimulai), dan presensi harian adalah fitur besar tersendiri —
+input harian per siswa, rekap mingguan/bulanan, laporan per kelas. Dipindah ke
+Fase 4, sebagai item pertama.
 
 ## Fase 4 — Akademik & penyempurnaan
 
+- Presensi harian (`attendances`) + rekap ke `enrollments.absent_count` dkk. —
+  dipindah dari Fase 3, lihat catatan di atas
 - Mata pelajaran, penugasan mengajar, nilai, rapor
 - Ekstrakurikuler
 - Kenaikan kelas massal antar tahun ajaran
 - Ekspor Dapodik
 - SSO PMB ↔ Sekolah (bila aplikasi ketiga muncul)
 - Aplikasi mobile / PWA notifikasi
+- Frontend guru & admin — API-nya sudah lengkap sejak Fase 2 (keuangan) dan
+  Fase 3 (kesiswaan), layarnya belum; portal wali yang diprioritaskan lebih
+  dulu karena itu yang dipakai keluarga tiap bulan
 
 ## Yang harus dibereskan sebelum produksi
 

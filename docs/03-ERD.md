@@ -143,7 +143,7 @@ per siswa boleh `is_billing_contact` — ke situlah tagihan & pengingat dikirim.
 | student_id, classroom_id, academic_year_id | FK | |
 | status | enum(active, promoted, repeated, left, graduated) default active | |
 | joined_on, left_on | date, date nullable | |
-| absent_count, sick_count, permit_count | smallint default 0 | ringkasan presensi (Fase 3) |
+| absent_count, sick_count, permit_count | smallint default 0 | ringkasan presensi — diisi Fase 4, lihat docs/06-ROADMAP.md |
 | timestamps | | |
 
 Unique `(student_id, academic_year_id)` — satu siswa satu rombel per tahun.
@@ -173,9 +173,14 @@ Pola generik ini disalin dari `documents` di PMB — sengaja bukan kolom
 | nama_event, penyelenggara, tanggal_event, tempat_event | | |
 | sertifikat_path, foto_kegiatan_path | string nullable | |
 | source | enum(pmb, sekolah) default sekolah | prestasi bawaan dari formulir PMB tidak boleh diedit guru |
-| point_awarded | smallint nullable | poin penghargaan otomatis, bila aturannya ada |
-| recorded_by FK, verified_at, verified_by FK | | prestasi yang diinput wali murid perlu verifikasi |
+| point_awarded | smallint nullable | diisi saat admin memverifikasi dan memilih memberi poin — bukan otomatis dari tabel aturan; besarannya keputusan admin saat itu, bukan tarif tetap |
+| status | enum(pending, verified, rejected) default pending | ditambah saat implementasi — sketsa awal hanya `verified_at` nullable, tapi jalur tolak (`rejected`) butuh keadaannya sendiri, bukan dipaksa masuk `verified_at IS NULL` |
+| recorded_by FK, verified_at, verified_by FK, rejection_reason | | prestasi dari guru langsung `verified` (guru = saksi langsung); dari wali murid `pending` sampai staf memutuskan |
 | timestamps | | |
+
+Tidak berdiri sendiri — `point_records.related_achievement_id` (lihat di bawah)
+menaut baris ledger yang lahir dari prestasi ini, supaya wali murid yang melihat
+ledgernya tahu poin itu dari mana, bukan sekadar "+20 poin" tanpa konteks.
 
 ### `point_rules` (katalog)
 | Kolom | Tipe | Catatan |
@@ -206,6 +211,7 @@ Unique `(school_unit_id, code)`.
 | status | enum(recorded, revoked) default recorded | |
 | revoked_by, revoked_at, revoke_reason | | pembatalan, bukan DELETE (D6) |
 | acknowledged_at | timestamp nullable | terisi saat wali murid membuka notifikasinya |
+| related_achievement_id | FK nullable, → achievements, nullOnDelete | ditambah saat implementasi — diisi saat poin lahir dari verifikasi prestasi, bukan dari katalog aturan |
 | timestamps | | |
 
 Index: `(student_id, term_id, status)`, `occurred_on`.
@@ -220,6 +226,20 @@ notify_guardian boolean, timestamps`.
 Contoh baris: `−25..−49 → "Peringatan 1" → surat pemberitahuan wali`;
 `−75..−999 → "Pemanggilan orang tua"`. Dipakai untuk mewarnai badge di UI dan
 memicu notifikasi otomatis saat saldo melewati ambang.
+
+### `point_threshold_notifications`
+
+Ditambah saat implementasi — pola idempotensi yang sama dengan `bill_reminders`
+di modul keuangan, belum tersketsa saat dokumen ini pertama ditulis.
+
+`id, ulid, student_id FK cascade, term_id FK cascade, point_threshold_id FK
+cascade, balance_at_notification integer, notified_at, timestamps`.
+
+**Unique `(student_id, term_id, point_threshold_id)`** — inilah yang membuat
+evaluator harian tidak mengirim ulang notifikasi tiap hari selama saldo diam
+di satu ambang. Turun ke ambang yang lebih buruk memicu notifikasi baru
+(baris `point_threshold_id` berbeda); membaik lalu jatuh lagi ke ambang yang
+sama tidak — sudah pernah diberi tahu, tidak perlu diulang.
 
 ---
 

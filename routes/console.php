@@ -36,6 +36,16 @@ Schedule::command('bills:send-reminders')
     ->withoutOverlapping()
     ->description('Pengingat jatuh tempo H-7, H-1, dan H+3');
 
+// Morning, after the day has started - a family should not open their phone
+// before dawn to a notice about their child's points. Idempotent: see the
+// unique row in point_threshold_notifications, not this schedule, for why a
+// second run sends nothing.
+Schedule::command('points:evaluate-thresholds')
+    ->dailyAt('06:30')
+    ->name('evaluate-point-thresholds')
+    ->withoutOverlapping()
+    ->description('Notifikasi wali murid saat saldo poin melewati ambang');
+
 // Keeps the unit master in step with PMB. Daily is often enough: units change
 // once a year at most, but a stale code means a handoff for a new unit fails
 // with "Unit tidak dikenal" until someone notices.

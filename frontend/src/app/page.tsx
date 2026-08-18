@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { GraduationCap, LogOut, Receipt } from "lucide-react";
+import { GraduationCap, LogOut, Megaphone, Receipt } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth/auth-context";
+import { PointMeter } from "@/components/point-meter";
+import type { PointThresholdInfo } from "@/lib/types/kesiswaan";
 
 type Student = {
   ulid: string;
@@ -20,6 +22,7 @@ type Student = {
   status: string;
   unit: { code: string; label: string } | null;
   kelas: { name: string; tingkat: number; wali_kelas: string | null } | null;
+  poin: { balance: number; threshold: PointThresholdInfo | null } | null;
 };
 
 export default function DashboardPage() {
@@ -55,12 +58,20 @@ export default function DashboardPage() {
           <BrandMark />
           <div className="flex items-center gap-2">
             {user.role === "orangtua" && (
-              <Link href="/tagihan">
-                <Button variant="outline" size="sm">
-                  <Receipt className="size-4" />
-                  Tagihan
-                </Button>
-              </Link>
+              <>
+                <Link href="/informasi">
+                  <Button variant="outline" size="sm">
+                    <Megaphone className="size-4" />
+                    Informasi
+                  </Button>
+                </Link>
+                <Link href="/tagihan">
+                  <Button variant="outline" size="sm">
+                    <Receipt className="size-4" />
+                    Tagihan
+                  </Button>
+                </Link>
+              </>
             )}
             <Button variant="ghost" size="sm" onClick={logout}>
               <LogOut className="size-4" />
@@ -92,18 +103,18 @@ export default function DashboardPage() {
             {students?.map((student) => (
               <Card key={student.ulid} className="flex flex-col gap-4 p-5">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
+                  <Link href={`/anak/${student.ulid}`} className="flex items-center gap-3">
                     <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground">
                       <GraduationCap className="size-5" />
                     </span>
                     <div>
-                      <p className="font-semibold">{student.nama_lengkap}</p>
+                      <p className="font-semibold hover:text-primary">{student.nama_lengkap}</p>
                       <p className="text-sm text-muted-foreground">
                         {student.unit?.label ?? "Unit belum diatur"}
                         {student.kelas ? ` · Kelas ${student.kelas.name}` : " · Kelas belum ditentukan"}
                       </p>
                     </div>
-                  </div>
+                  </Link>
                   <Badge variant={student.status === "active" ? "good" : "warn"}>
                     {student.status === "active" ? "Aktif" : student.status}
                   </Badge>
@@ -127,6 +138,15 @@ export default function DashboardPage() {
                     </dd>
                   </div>
                 </dl>
+
+                {student.poin && (
+                  <div className="border-t border-border pt-4">
+                    <p className="mb-1.5 text-xs text-muted-foreground">Poin semester ini</p>
+                    <Link href={`/anak/${student.ulid}`}>
+                      <PointMeter balance={student.poin.balance} threshold={student.poin.threshold} size="sm" />
+                    </Link>
+                  </div>
+                )}
               </Card>
             ))}
           </section>
