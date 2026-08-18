@@ -226,7 +226,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
       <main className="mx-auto max-w-2xl p-6">
         <Card className="p-6">
           <p className="text-sm text-muted-foreground">{error}</p>
-          <Link href="/" className="mt-4 inline-block text-sm text-primary">Kembali ke beranda</Link>
+          <Link href="/dashboard" className="mt-4 inline-block text-sm text-primary">Kembali ke beranda</Link>
         </Card>
       </main>
     );
@@ -236,7 +236,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
     <div className="min-h-dvh bg-canvas">
       <header className="border-b border-border bg-card">
         <div className="mx-auto max-w-2xl px-6 py-3.5">
-          <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="size-4" />
             Beranda
           </Link>

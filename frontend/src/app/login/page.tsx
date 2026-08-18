@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Mail, MessageCircle } from "lucide-react";
+import { ArrowLeft, Award, Mail, Megaphone, MessageCircle, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/brand-mark";
 import { OtpInput } from "@/components/otp-input";
@@ -71,7 +71,7 @@ function LoginForm() {
     try {
       const user = await verifyOtp(identifier.trim(), value);
       toast.success(`Selamat datang, ${user.name}`);
-      router.replace(params.get("redirect") ?? "/");
+      router.replace(params.get("redirect") ?? "/dashboard");
     } catch (err) {
       setError(readError(err, "code"));
       setCode("");
@@ -182,24 +182,68 @@ function LoginForm() {
   );
 }
 
+const HIGHLIGHTS = [
+  { icon: Receipt, text: "Tagihan & pembayaran SPP" },
+  { icon: Award, text: "Poin & prestasi anak" },
+  { icon: Megaphone, text: "Informasi sekolah, unit, dan kelas" },
+];
+
 export default function LoginPage() {
   return (
-    <main className="grid min-h-dvh place-items-center bg-canvas px-4 py-10">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 flex justify-center">
-          <BrandMark />
-        </div>
-        {/* useSearchParams reads the ?redirect= a guard appended, and needs a
-            Suspense boundary or the route bails out of prerendering. */}
-        <Suspense fallback={<Skeleton className="h-80 w-full" />}>
-          <LoginForm />
-        </Suspense>
+    <div className="min-h-svh grid lg:grid-cols-[1.1fr_1fr] bg-background">
+      {/* Visual panel - same navy gradient PMB uses for its own login page */}
+      <div className="hidden lg:flex flex-col p-11 relative overflow-hidden bg-linear-to-br from-[#13286B] to-[#2856E0] text-white">
+        <div className="absolute -right-32 -bottom-32 size-96 rounded-full border border-white/10" />
+        <div className="absolute -right-16 -bottom-44 size-96 rounded-full border border-white/10" />
+        <div className="absolute -left-24 -top-24 size-72 rounded-full bg-white/5 blur-2xl" />
 
-        <p className="mt-5 text-center text-sm text-muted-foreground">
-          Tidak ada kata sandi di aplikasi ini. Akun wali murid dibuat otomatis setelah uang
-          pangkal lunas.
+        <BrandMark variant="dark" className="relative z-10 text-[16.5px]" />
+
+        <div className="relative z-10 flex-1 flex flex-col justify-center max-w-md">
+          <h1 className="text-[30px] leading-[1.15] mb-3" style={{ fontFamily: "var(--font-heading)" }}>
+            Satu portal untuk keluarga besar
+            <span className="block italic text-white/90" style={{ fontFamily: "var(--font-brand)" }}>
+              sekolah YAPI.
+            </span>
+          </h1>
+          <p className="text-white/70 text-sm leading-relaxed">
+            Masuk untuk memantau tagihan, poin, prestasi, dan informasi terbaru anak Anda.
+          </p>
+
+          <div className="flex flex-col gap-3 mt-8">
+            {HIGHLIGHTS.map((item) => (
+              <div key={item.text} className="flex items-center gap-3 text-sm text-white/85">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-white/10">
+                  <item.icon className="size-3.5" />
+                </span>
+                {item.text}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <p className="relative z-10 text-xs text-white/45">
+          Tidak ada kata sandi - masuk cukup dengan email atau nomor WhatsApp.
         </p>
       </div>
-    </main>
+
+      {/* Form panel */}
+      <div className="flex items-center justify-center p-6 sm:p-10">
+        <div className="w-full max-w-sm flex flex-col gap-6">
+          <BrandMark className="lg:hidden" />
+
+          {/* useSearchParams reads the ?redirect= a guard appended, and needs a
+              Suspense boundary or the route bails out of prerendering. */}
+          <Suspense fallback={<Skeleton className="h-80 w-full" />}>
+            <LoginForm />
+          </Suspense>
+
+          <p className="text-center text-xs text-muted-foreground">
+            Akun wali murid dibuat otomatis setelah uang pangkal lunas. Petugas sekolah masuk
+            dengan kode yang sama, dikirim ke email kedinasan.
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }

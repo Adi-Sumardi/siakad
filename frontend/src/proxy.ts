@@ -11,12 +11,14 @@ import type { NextRequest } from "next/server";
  * certainly not signed in. Real enforcement is every API call: a 401 makes the
  * client clear the user and route to /login.
  */
-const PUBLIC_PATHS = ["/login", "/aktivasi", "/lupa-password", "/reset-password"];
+const PUBLIC_PATHS = ["/login", "/aktivasi"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const definitelyLoggedOut = !request.cookies.has("XSRF-TOKEN");
-  const isPublicPath = PUBLIC_PATHS.some((path) => pathname.startsWith(path));
+  // "/" is the public landing page, not the wali home (that moved to
+  // /dashboard) - it must render for a visitor with no session at all.
+  const isPublicPath = pathname === "/" || PUBLIC_PATHS.some((path) => pathname.startsWith(path));
 
   if (definitelyLoggedOut && !isPublicPath) {
     const loginUrl = new URL("/login", request.url);

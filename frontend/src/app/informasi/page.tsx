@@ -27,7 +27,7 @@ export default function AnnouncementsPage() {
     <div className="min-h-dvh bg-canvas">
       <header className="border-b border-border bg-card">
         <div className="mx-auto max-w-2xl px-6 py-3.5">
-          <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="size-4" />
             Beranda
           </Link>

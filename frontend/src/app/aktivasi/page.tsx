@@ -59,7 +59,7 @@ function ActivationCard() {
       // one-time code. The server starts the session, so the app adopts it.
       adopt(user);
       toast.success("Akun aktif. Selamat datang!");
-      router.replace("/");
+      router.replace("/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Tidak dapat menghubungi server.");
     } finally {

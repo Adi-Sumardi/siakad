@@ -2,158 +2,126 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { GraduationCap, LogOut, Megaphone, Receipt } from "lucide-react";
+import { Award, Megaphone, Receipt, ArrowRight } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth/auth-context";
-import { PointMeter } from "@/components/point-meter";
-import type { PointThresholdInfo } from "@/lib/types/kesiswaan";
+import { cn } from "@/lib/utils";
 
-type Student = {
-  ulid: string;
-  nama_lengkap: string;
-  nama_panggilan: string | null;
-  nis: string | null;
-  status: string;
-  unit: { code: string; label: string } | null;
-  kelas: { name: string; tingkat: number; wali_kelas: string | null } | null;
-  poin: { balance: number; threshold: PointThresholdInfo | null } | null;
-};
+const UNITS = ["PG Sakinah", "TK Sakinah", "SD Sakinah", "SMP Sakinah"];
 
-export default function DashboardPage() {
-  const { user, loading, logout } = useAuth();
-  const router = useRouter();
-  const [students, setStudents] = useState<Student[] | null>(null);
+function RotatingUnit() {
+  const [index, setIndex] = useState(0);
 
   useEffect(() => {
-    if (loading) return;
-
-    if (!user) {
-      router.replace("/login");
-      return;
-    }
-
-    // This screen is the wali home. Staff land here right after signing in
-    // too - the same session works for every role - so they are sent on to
-    // their own area rather than shown a page built for a different job.
-    if (user.role === "admin" || user.role === "admin_unit") {
-      router.replace("/admin");
-    } else if (user.role === "guru") {
-      router.replace("/guru");
-    }
-  }, [loading, user, router]);
-
-  useEffect(() => {
-    if (user?.role === "orangtua") {
-      api.get<{ students: Student[] }>("/api/wali/students").then(({ students }) => setStudents(students));
-    }
-  }, [user]);
-
-  if (loading || !user || user.role !== "orangtua") {
-    return (
-      <main className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
-      </main>
-    );
-  }
+    const id = setInterval(() => setIndex((i) => (i + 1) % UNITS.length), 2400);
+    return () => clearInterval(id);
+  }, []);
 
   return (
-    <div className="min-h-dvh bg-canvas">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-3.5">
-          <BrandMark />
-          <div className="flex items-center gap-2">
-            <Link href="/informasi">
-              <Button variant="outline" size="sm">
-                <Megaphone className="size-4" />
-                Informasi
-              </Button>
-            </Link>
-            <Link href="/tagihan">
-              <Button variant="outline" size="sm">
-                <Receipt className="size-4" />
-                Tagihan
-              </Button>
-            </Link>
-            <Button variant="ghost" size="sm" onClick={logout}>
-              <LogOut className="size-4" />
-              Keluar
-            </Button>
-          </div>
-        </div>
+    // Serif italic against the sans headline, same contrast PMB uses for its
+    // own rotating line - the cue that this word is the one that changes.
+    <span
+      className="relative inline-grid justify-items-center text-primary italic"
+      style={{ fontFamily: "var(--font-brand)" }}
+    >
+      {UNITS.map((unit, i) => (
+        <span
+          key={unit}
+          aria-hidden={i !== index}
+          className={cn(
+            "[grid-area:1/1] transition-opacity duration-700",
+            i === index ? "opacity-100" : "opacity-0",
+          )}
+        >
+          {unit}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+const FEATURES = [
+  {
+    icon: Receipt,
+    title: "Tagihan & pembayaran",
+    desc: "SPP bulanan, riwayat pembayaran, dan kuitansi - untuk semua anak dalam satu keluarga sekaligus.",
+  },
+  {
+    icon: Award,
+    title: "Poin & prestasi",
+    desc: "Catatan poin kedisiplinan semester berjalan, plus prestasi yang sudah diverifikasi sekolah.",
+  },
+  {
+    icon: Megaphone,
+    title: "Informasi sekolah",
+    desc: "Pengumuman dari sekolah, unit, sampai kelas anak Anda - tanpa harus mencari-cari di grup chat.",
+  },
+];
+
+export default function LandingPage() {
+  return (
+    <div className="min-h-svh bg-white relative overflow-x-hidden">
+      {/* Decorative background - visibly blue, not a near-white tint */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden -z-10">
+        <div className="absolute inset-0 bg-linear-to-b from-[#DCE6FB] via-[#F0F5FE] to-white" />
+        <div className="absolute -top-24 -left-32 size-104 rounded-full bg-[#2856E0]/45 blur-3xl" />
+        <div className="absolute top-20 -right-24 size-96 rounded-full bg-[#13286B]/35 blur-3xl" />
+        <div className="absolute top-112 left-1/4 size-88 rounded-full bg-[#2856E0]/30 blur-3xl" />
+      </div>
+
+      <header className="flex items-center justify-between px-5 sm:px-8 py-5 max-w-5xl mx-auto">
+        <BrandMark />
+        <Link
+          href="/login"
+          className="inline-flex items-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+        >
+          Masuk
+        </Link>
       </header>
 
-      <main className="mx-auto max-w-3xl px-6 py-8">
-        <h1 className="text-xl font-bold tracking-tight">Assalamu&apos;alaikum, {user.name}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Berikut anak Anda yang terdaftar di sekolah.</p>
+      <main className="max-w-5xl mx-auto px-5 sm:px-8">
+        {/* Hero */}
+        <section className="py-14 sm:py-20 flex flex-col items-center text-center gap-5">
+          <h1
+            className="text-3xl sm:text-4xl font-semibold max-w-2xl leading-tight flex flex-col items-center gap-1"
+            style={{ fontFamily: "var(--font-heading)" }}
+          >
+            <span>Satu portal untuk keluarga besar</span>
+            <RotatingUnit />
+          </h1>
+          <p className="text-muted-foreground max-w-md text-sm sm:text-base">
+            Tagihan, poin, prestasi, dan informasi sekolah anak Anda - dalam satu akun. Masuk cukup
+            dengan email atau nomor WhatsApp, tanpa kata sandi.
+          </p>
+          <Link href="/login">
+            <Button size="lg" className="mt-1 w-fit">
+              Masuk ke akun Anda
+              <ArrowRight />
+            </Button>
+          </Link>
+        </section>
 
-        <section className="mt-6 flex flex-col gap-3">
-            {students === null && <Skeleton className="h-28 w-full" />}
-
-            {students?.length === 0 && (
-              <Card className="p-6 text-sm text-muted-foreground">
-                Belum ada anak yang terhubung dengan akun ini. Hubungi tata usaha unit bila ini
-                keliru.
-              </Card>
-            )}
-
-            {students?.map((student) => (
-              <Card key={student.ulid} className="flex flex-col gap-4 p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <Link href={`/anak/${student.ulid}`} className="flex items-center gap-3">
-                    <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground">
-                      <GraduationCap className="size-5" />
-                    </span>
-                    <div>
-                      <p className="font-semibold hover:text-primary">{student.nama_lengkap}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {student.unit?.label ?? "Unit belum diatur"}
-                        {student.kelas ? ` · Kelas ${student.kelas.name}` : " · Kelas belum ditentukan"}
-                      </p>
-                    </div>
-                  </Link>
-                  <Badge variant={student.status === "active" ? "good" : "warn"}>
-                    {student.status === "active" ? "Aktif" : student.status}
-                  </Badge>
-                </div>
-
-                <dl className="grid grid-cols-2 gap-3 border-t border-border pt-4 text-sm sm:grid-cols-3">
-                  <div>
-                    <dt className="text-xs text-muted-foreground">NIS</dt>
-                    <dd className="tabular font-medium">{student.nis ?? "Belum terbit"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-muted-foreground">Wali kelas</dt>
-                    <dd className="font-medium">{student.kelas?.wali_kelas ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-muted-foreground">Tagihan</dt>
-                    <dd>
-                      <Link href="/tagihan" className="font-medium text-primary">
-                        Lihat tagihan
-                      </Link>
-                    </dd>
-                  </div>
-                </dl>
-
-                {student.poin && (
-                  <div className="border-t border-border pt-4">
-                    <p className="mb-1.5 text-xs text-muted-foreground">Poin semester ini</p>
-                    <Link href={`/anak/${student.ulid}`}>
-                      <PointMeter balance={student.poin.balance} threshold={student.poin.threshold} size="sm" />
-                    </Link>
-                  </div>
-                )}
-              </Card>
-            ))}
+        {/* Features */}
+        <section className="pb-16 sm:pb-24 grid sm:grid-cols-3 gap-4">
+          {FEATURES.map((feature) => (
+            <div key={feature.title} className="rounded-2xl border bg-card/90 backdrop-blur-sm p-5 flex flex-col gap-3">
+              <span className="flex size-8 items-center justify-center rounded-lg bg-accent text-accent-foreground shrink-0">
+                <feature.icon className="size-4" />
+              </span>
+              <h3 className="text-sm font-semibold" style={{ fontFamily: "var(--font-heading)" }}>
+                {feature.title}
+              </h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">{feature.desc}</p>
+            </div>
+          ))}
         </section>
       </main>
+
+      <footer className="border-t bg-card/60 py-8 flex flex-col items-center gap-3 text-center text-xs text-muted-foreground">
+        <p>Powered By Yayasan Asrama Pelajar Islam - Al Azhar</p>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/images/logo-yapi.png" alt="Yayasan Asrama Pelajar Islam - Al Azhar" className="h-8 w-auto opacity-80" />
+      </footer>
     </div>
   );
 }
