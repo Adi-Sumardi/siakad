@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PointMeter } from "@/components/point-meter";
 import { API_BASE, api, ApiError } from "@/lib/api";
+import { useRequireRole } from "@/lib/auth/use-require-role";
 import { tanggal } from "@/lib/format";
 import {
   JUARA_OPTIONS,
@@ -203,23 +204,38 @@ function SubmitAchievementForm({ studentUlid, onSubmitted }: { studentUlid: stri
 
 export default function StudentDetailPage({ params }: { params: Promise<{ ulid: string }> }) {
   const { ulid } = use(params);
+  const { user, loading } = useRequireRole("orangtua");
 
   const [points, setPoints] = useState<PointSummary | null>(null);
   const [achievements, setAchievements] = useState<Achievement[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function loadAchievements() {
-    api.get<{ achievements: Achievement[] }>(`/api/wali/students/${ulid}/achievements`).then((d) => setAchievements(d.achievements));
+    api
+      .get<{ achievements: Achievement[] }>(`/api/wali/students/${ulid}/achievements`)
+      .then((d) => setAchievements(d.achievements))
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
   }
 
   useEffect(() => {
+    if (user?.role !== "orangtua") return;
+
     api
       .get<PointSummary>(`/api/wali/students/${ulid}/points`)
       .then(setPoints)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
     loadAchievements();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ulid]);
+  }, [ulid, user]);
+
+  if (loading || !user || user.role !== "orangtua") {
+    return (
+      <main className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-32 w-full" />
+      </main>
+    );
+  }
 
   if (error) {
     return (

@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronRight, Star, Users } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 type Classroom = {
   ulid: string; name: string; tingkat: number; is_homeroom: boolean;
@@ -16,7 +17,10 @@ export default function GuruClassroomsPage() {
   const [classrooms, setClassrooms] = useState<Classroom[] | null>(null);
 
   useEffect(() => {
-    api.get<{ classrooms: Classroom[] }>("/api/guru/classrooms").then((d) => setClassrooms(d.classrooms));
+    api
+      .get<{ classrooms: Classroom[] }>("/api/guru/classrooms")
+      .then((d) => setClassrooms(d.classrooms))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar kelas."));
   }, []);
 
   return (

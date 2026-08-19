@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Award, Receipt, Wallet } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth/auth-context";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { rupiah } from "@/lib/format";
 
 type ReceivablesSummary = {
@@ -32,10 +33,14 @@ export default function AdminHomePage() {
   const [pendingAchievements, setPendingAchievements] = useState<number | null>(null);
 
   useEffect(() => {
-    api.get<{ summary: ReceivablesSummary }>("/api/admin/reports/receivables").then((d) => setSummary(d.summary));
+    api
+      .get<{ summary: ReceivablesSummary }>("/api/admin/reports/receivables")
+      .then((d) => setSummary(d.summary))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat ringkasan tunggakan."));
     api
       .get<{ achievements: unknown[] }>("/api/admin/achievements?status=pending")
-      .then((d) => setPendingAchievements(d.achievements.length));
+      .then((d) => setPendingAchievements(d.achievements.length))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat prestasi menunggu."));
   }, []);
 
   return (

@@ -134,13 +134,22 @@ export default function AdminAnnouncementsPage() {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
 
   function load() {
-    api.get<{ announcements: Announcement[] }>("/api/admin/announcements").then((d) => setAnnouncements(d.announcements));
+    api
+      .get<{ announcements: Announcement[] }>("/api/admin/announcements")
+      .then((d) => setAnnouncements(d.announcements))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat pengumuman."));
   }
 
   useEffect(() => {
     load();
-    api.get<{ school_units: Unit[] }>("/api/admin/school-units").then((d) => setUnits(d.school_units));
-    api.get<{ classrooms: Classroom[] }>("/api/admin/classrooms").then((d) => setClassrooms(d.classrooms));
+    api
+      .get<{ school_units: Unit[] }>("/api/admin/school-units")
+      .then((d) => setUnits(d.school_units))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar unit."));
+    api
+      .get<{ classrooms: Classroom[] }>("/api/admin/classrooms")
+      .then((d) => setClassrooms(d.classrooms))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar kelas."));
   }, []);
 
   async function remove(a: Announcement) {

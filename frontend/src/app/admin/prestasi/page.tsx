@@ -90,8 +90,10 @@ export default function AdminAchievementsPage() {
 
   function load() {
     const qs = filter ? `?status=${filter}` : "";
-    api.get<{ achievements: (Achievement & { student?: { nama_lengkap: string } })[] }>(`/api/admin/achievements${qs}`)
-      .then((d) => setAchievements(d.achievements));
+    api
+      .get<{ achievements: (Achievement & { student?: { nama_lengkap: string } })[] }>(`/api/admin/achievements${qs}`)
+      .then((d) => setAchievements(d.achievements))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat prestasi."));
   }
 
   useEffect(() => { load(); }, [filter]); // eslint-disable-line react-hooks/exhaustive-deps

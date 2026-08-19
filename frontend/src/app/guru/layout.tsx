@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Award, School } from "lucide-react";
 import { StaffShell, type StaffNavItem } from "@/components/layout/staff-shell";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAuth } from "@/lib/auth/auth-context";
+import { homePathFor, useAuth } from "@/lib/auth/auth-context";
 
 const NAV: StaffNavItem[] = [
   { href: "/guru", label: "Kelas saya", icon: School },
@@ -23,7 +23,7 @@ export default function GuruLayout({ children }: { children: React.ReactNode }) 
       return;
     }
     if (user.role !== "guru") {
-      router.replace("/");
+      router.replace(homePathFor(user.role));
     }
   }, [loading, user, router]);
 

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
-import { useAuth } from "@/lib/auth/auth-context";
+import { useRequireRole } from "@/lib/auth/use-require-role";
 import { dueLabel, rupiah } from "@/lib/format";
 import { isOpen, type Bill, type BillSummary, type Payment } from "@/lib/types/billing";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,7 @@ function statusBadge(bill: Bill) {
 }
 
 export default function BillsPage() {
-  const { user, loading } = useAuth();
+  const { user, loading } = useRequireRole("orangtua");
   const router = useRouter();
 
   const [bills, setBills] = useState<Bill[] | null>(null);
@@ -35,14 +35,14 @@ export default function BillsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [paying, setPaying] = useState(false);
 
-  useEffect(() => {
-    if (!loading && !user) router.replace("/login");
-  }, [loading, user, router]);
-
   const load = useCallback(async () => {
-    const data = await api.get<{ bills: Bill[]; summary: BillSummary }>("/api/wali/bills");
-    setBills(data.bills);
-    setSummary(data.summary);
+    try {
+      const data = await api.get<{ bills: Bill[]; summary: BillSummary }>("/api/wali/bills");
+      setBills(data.bills);
+      setSummary(data.summary);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan. Muat ulang halaman.");
+    }
   }, []);
 
   useEffect(() => {

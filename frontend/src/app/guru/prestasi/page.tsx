@@ -22,18 +22,24 @@ export default function GuruAchievementPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.get<{ classrooms: Classroom[] }>("/api/guru/classrooms").then((d) => {
-      setClassrooms(d.classrooms);
-      if (d.classrooms[0]) setClassroomUlid(d.classrooms[0].ulid);
-    });
+    api
+      .get<{ classrooms: Classroom[] }>("/api/guru/classrooms")
+      .then((d) => {
+        setClassrooms(d.classrooms);
+        if (d.classrooms[0]) setClassroomUlid(d.classrooms[0].ulid);
+      })
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar kelas."));
   }, []);
 
   useEffect(() => {
     if (!classroomUlid) return;
-    api.get<{ students: StudentRow[] }>(`/api/guru/classrooms/${classroomUlid}/students`).then((d) => {
-      setStudents(d.students);
-      setStudentUlid(d.students[0]?.ulid ?? "");
-    });
+    api
+      .get<{ students: StudentRow[] }>(`/api/guru/classrooms/${classroomUlid}/students`)
+      .then((d) => {
+        setStudents(d.students);
+        setStudentUlid(d.students[0]?.ulid ?? "");
+      })
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar siswa."));
   }, [classroomUlid]);
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {

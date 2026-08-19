@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { StaffShell, type StaffNavItem } from "@/components/layout/staff-shell";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAuth } from "@/lib/auth/auth-context";
+import { homePathFor, useAuth } from "@/lib/auth/auth-context";
 
 const NAV: StaffNavItem[] = [
   { href: "/admin", label: "Ringkasan", icon: LayoutDashboard },
@@ -39,7 +39,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
     if (user.role !== "admin" && user.role !== "admin_unit") {
       // Not staff, or the wrong kind - this area is not theirs to open.
-      router.replace("/");
+      router.replace(homePathFor(user.role));
     }
   }, [loading, user, router]);
 

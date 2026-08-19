@@ -104,12 +104,20 @@ export default function PointThresholdsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
 
   function load() {
-    api.get<{ thresholds: Threshold[] }>("/api/admin/point-thresholds").then((d) => setThresholds(d.thresholds));
+    api
+      .get<{ thresholds: Threshold[] }>("/api/admin/point-thresholds")
+      .then((d) => setThresholds(d.thresholds))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat ambang poin."));
   }
 
   useEffect(() => {
     load();
-    if (isCentral) api.get<{ school_units: Unit[] }>("/api/admin/school-units").then((d) => setUnits(d.school_units));
+    if (isCentral) {
+      api
+        .get<{ school_units: Unit[] }>("/api/admin/school-units")
+        .then((d) => setUnits(d.school_units))
+        .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar unit."));
+    }
   }, [isCentral]);
 
   return (

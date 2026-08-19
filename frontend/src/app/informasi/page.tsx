@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, FileDown, Pin } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { API_BASE, api } from "@/lib/api";
+import { API_BASE, api, ApiError } from "@/lib/api";
+import { useRequireRole } from "@/lib/auth/use-require-role";
 import { tanggal } from "@/lib/format";
 import type { Announcement } from "@/lib/types/kesiswaan";
 
@@ -17,11 +19,26 @@ const SCOPE_LABEL: Record<Announcement["scope"], string> = {
 };
 
 export default function AnnouncementsPage() {
+  const { user, loading } = useRequireRole("orangtua");
   const [announcements, setAnnouncements] = useState<Announcement[] | null>(null);
 
   useEffect(() => {
-    api.get<{ announcements: Announcement[] }>("/api/wali/announcements").then((d) => setAnnouncements(d.announcements));
-  }, []);
+    if (user?.role === "orangtua") {
+      api
+        .get<{ announcements: Announcement[] }>("/api/wali/announcements")
+        .then((d) => setAnnouncements(d.announcements))
+        .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat informasi."));
+    }
+  }, [user]);
+
+  if (loading || !user || user.role !== "orangtua") {
+    return (
+      <main className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-32 w-full" />
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-dvh bg-canvas">

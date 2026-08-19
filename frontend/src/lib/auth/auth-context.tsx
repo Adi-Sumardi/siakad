@@ -12,6 +12,20 @@ export type User = {
   school_unit?: { ulid: string; code: string; label: string } | null;
 };
 
+/**
+ * Where a signed-in user belongs, by role. One place for this mapping so a
+ * role guard on /admin or /guru sending the wrong role elsewhere, and the
+ * wali dashboard sending staff onward, can't drift out of sync with each
+ * other - they did, briefly, when "/" stopped being the wali home and
+ * neither layout guard was told.
+ */
+export function homePathFor(role: User["role"]): string {
+  if (role === "admin" || role === "admin_unit") return "/admin";
+  if (role === "guru") return "/guru";
+
+  return "/dashboard";
+}
+
 /** What the server tells us after a code has been sent. */
 export type OtpChallenge = {
   channel: "email" | "whatsapp";

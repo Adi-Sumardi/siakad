@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ScrollText, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PointMeter } from "@/components/point-meter";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 type Row = {
   student: { ulid: string; nama_lengkap: string; unit: string | null };
@@ -20,10 +21,13 @@ export default function AdminPointsPage() {
   const [rows, setRows] = useState<Row[] | null>(null);
 
   useEffect(() => {
-    api.get<{ term: string | null; students: Row[] }>("/api/admin/points").then((d) => {
-      setTerm(d.term);
-      setRows(d.students);
-    });
+    api
+      .get<{ term: string | null; students: Row[] }>("/api/admin/points")
+      .then((d) => {
+        setTerm(d.term);
+        setRows(d.students);
+      })
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data poin."));
   }, []);
 
   const flagged = rows?.filter((r) => r.threshold) ?? [];

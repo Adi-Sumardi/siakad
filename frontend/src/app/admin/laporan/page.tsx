@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { rupiah } from "@/lib/format";
 
 type Receivables = {
@@ -35,11 +36,17 @@ export default function ReportsPage() {
   const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
 
   useEffect(() => {
-    api.get<Receivables>("/api/admin/reports/receivables").then(setReceivables);
+    api
+      .get<Receivables>("/api/admin/reports/receivables")
+      .then(setReceivables)
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat laporan tunggakan."));
   }, []);
 
   useEffect(() => {
-    api.get<Collections>(`/api/admin/reports/collections?from=${from}&to=${to}`).then(setCollections);
+    api
+      .get<Collections>(`/api/admin/reports/collections?from=${from}&to=${to}`)
+      .then(setCollections)
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat laporan penerimaan."));
   }, [from, to]);
 
   return (

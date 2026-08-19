@@ -39,7 +39,10 @@ export default function GenerateBillsPage() {
   const [result, setResult] = useState<{ bills_created: number; total_amount: number } | null>(null);
 
   useEffect(() => {
-    api.get<{ fee_types: FeeType[] }>("/api/admin/fee-types").then((d) => setFeeTypes(d.fee_types));
+    api
+      .get<{ fee_types: FeeType[] }>("/api/admin/fee-types")
+      .then((d) => setFeeTypes(d.fee_types))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat jenis biaya."));
   }, []);
 
   const isMonthly = feeTypes?.find((t) => t.code === feeTypeCode)?.recurrence === "monthly";

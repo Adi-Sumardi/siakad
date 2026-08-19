@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api";
-import { useAuth, type OtpChallenge } from "@/lib/auth/auth-context";
+import { homePathFor, useAuth, type OtpChallenge } from "@/lib/auth/auth-context";
 
 /**
  * One way in, for everyone.
@@ -22,7 +22,7 @@ import { useAuth, type OtpChallenge } from "@/lib/auth/auth-context";
  * support. Two steps: who you are, then the code.
  */
 function LoginForm() {
-  const { requestOtp, verifyOtp } = useAuth();
+  const { user, loading, requestOtp, verifyOtp } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
 
@@ -32,6 +32,14 @@ function LoginForm() {
   const [cooldown, setCooldown] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // A visitor who is already signed in - a stale bookmark, the back button
+  // after logging in - gets sent straight to their own area instead of the
+  // form again.
+  useEffect(() => {
+    if (loading || !user) return;
+    router.replace(params.get("redirect") ?? homePathFor(user.role));
+  }, [loading, user, router, params]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -71,7 +79,7 @@ function LoginForm() {
     try {
       const user = await verifyOtp(identifier.trim(), value);
       toast.success(`Selamat datang, ${user.name}`);
-      router.replace(params.get("redirect") ?? "/dashboard");
+      router.replace(params.get("redirect") ?? homePathFor(user.role));
     } catch (err) {
       setError(readError(err, "code"));
       setCode("");

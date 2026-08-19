@@ -105,14 +105,26 @@ export default function FeeRatesPage() {
   const [years, setYears] = useState<Option[]>([]);
 
   function load() {
-    api.get<{ fee_types: FeeType[] }>("/api/admin/fee-types").then((d) => setFeeTypes(d.fee_types));
-    api.get<{ rates: Rate[] }>("/api/admin/fee-rates").then((d) => setRates(d.rates));
+    api
+      .get<{ fee_types: FeeType[] }>("/api/admin/fee-types")
+      .then((d) => setFeeTypes(d.fee_types))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat jenis biaya."));
+    api
+      .get<{ rates: Rate[] }>("/api/admin/fee-rates")
+      .then((d) => setRates(d.rates))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat tarif."));
   }
 
   useEffect(() => {
     load();
-    api.get<{ school_units: Option[] }>("/api/admin/school-units").then((d) => setUnits(d.school_units));
-    api.get<{ academic_years: Option[] }>("/api/admin/academic-years").then((d) => setYears(d.academic_years));
+    api
+      .get<{ school_units: Option[] }>("/api/admin/school-units")
+      .then((d) => setUnits(d.school_units))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar unit."));
+    api
+      .get<{ academic_years: Option[] }>("/api/admin/academic-years")
+      .then((d) => setYears(d.academic_years))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat tahun ajaran."));
   }, []);
 
   if (!isCentral) {

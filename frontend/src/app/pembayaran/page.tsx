@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { useRequireRole } from "@/lib/auth/use-require-role";
 import { rupiah, tanggal } from "@/lib/format";
 import type { Payment } from "@/lib/types/billing";
 
@@ -22,11 +24,26 @@ const STATUS_LABEL: Record<string, { label: string; variant: "good" | "warn" | "
 };
 
 export default function PaymentsPage() {
+  const { user, loading } = useRequireRole("orangtua");
   const [payments, setPayments] = useState<Payment[] | null>(null);
 
   useEffect(() => {
-    api.get<{ payments: Payment[] }>("/api/wali/payments").then((d) => setPayments(d.payments));
-  }, []);
+    if (user?.role === "orangtua") {
+      api
+        .get<{ payments: Payment[] }>("/api/wali/payments")
+        .then((d) => setPayments(d.payments))
+        .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat riwayat pembayaran."));
+    }
+  }, [user]);
+
+  if (loading || !user || user.role !== "orangtua") {
+    return (
+      <main className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-32 w-full" />
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-dvh bg-canvas">

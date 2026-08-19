@@ -2,15 +2,16 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { GraduationCap, LogOut, Megaphone, Receipt } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useRequireRole } from "@/lib/auth/use-require-role";
 import { PointMeter } from "@/components/point-meter";
 import type { PointThresholdInfo } from "@/lib/types/kesiswaan";
 
@@ -26,31 +27,16 @@ type Student = {
 };
 
 export default function DashboardPage() {
-  const { user, loading, logout } = useAuth();
-  const router = useRouter();
+  const { user, loading } = useRequireRole("orangtua");
+  const { logout } = useAuth();
   const [students, setStudents] = useState<Student[] | null>(null);
 
   useEffect(() => {
-    if (loading) return;
-
-    if (!user) {
-      router.replace("/login");
-      return;
-    }
-
-    // This screen is the wali home. Staff land here right after signing in
-    // too - the same session works for every role - so they are sent on to
-    // their own area rather than shown a page built for a different job.
-    if (user.role === "admin" || user.role === "admin_unit") {
-      router.replace("/admin");
-    } else if (user.role === "guru") {
-      router.replace("/guru");
-    }
-  }, [loading, user, router]);
-
-  useEffect(() => {
     if (user?.role === "orangtua") {
-      api.get<{ students: Student[] }>("/api/wali/students").then(({ students }) => setStudents(students));
+      api
+        .get<{ students: Student[] }>("/api/wali/students")
+        .then(({ students }) => setStudents(students))
+        .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data anak."));
     }
   }, [user]);
 

@@ -104,17 +104,29 @@ export default function PointRulesPage() {
   const [units, setUnits] = useState<Unit[]>([]);
 
   function load() {
-    api.get<{ rules: Rule[] }>("/api/admin/point-rules").then((d) => setRules(d.rules));
+    api
+      .get<{ rules: Rule[] }>("/api/admin/point-rules")
+      .then((d) => setRules(d.rules))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat aturan poin."));
   }
 
   useEffect(() => {
     load();
-    if (isCentral) api.get<{ school_units: Unit[] }>("/api/admin/school-units").then((d) => setUnits(d.school_units));
+    if (isCentral) {
+      api
+        .get<{ school_units: Unit[] }>("/api/admin/school-units")
+        .then((d) => setUnits(d.school_units))
+        .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar unit."));
+    }
   }, [isCentral]);
 
   async function toggleActive(rule: Rule) {
-    await api.patch(`/api/admin/point-rules/${rule.ulid}`, { is_active: !rule.is_active });
-    load();
+    try {
+      await api.patch(`/api/admin/point-rules/${rule.ulid}`, { is_active: !rule.is_active });
+      load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengubah status aturan.");
+    }
   }
 
   async function remove(rule: Rule) {

@@ -88,11 +88,15 @@ function SingleRecordForm({ student, rules, onDone, onCancel }: {
 
 function LedgerPanel({ student }: { student: StudentRow }) {
   const [records, setRecords] = useState<PointRecord[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [reason, setReason] = useState("");
 
   function load() {
-    api.get<{ records: PointRecord[] }>(`/api/guru/students/${student.ulid}/points`).then((d) => setRecords(d.records));
+    api
+      .get<{ records: PointRecord[] }>(`/api/guru/students/${student.ulid}/points`)
+      .then((d) => setRecords(d.records))
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Gagal memuat riwayat poin."));
   }
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -110,6 +114,7 @@ function LedgerPanel({ student }: { student: StudentRow }) {
     }
   }
 
+  if (error) return <p className="mt-3 text-sm text-bad">{error}</p>;
   if (records === null) return <Skeleton className="mt-3 h-16 w-full" />;
   if (records.length === 0) return <p className="mt-3 text-sm text-muted-foreground">Belum ada catatan semester ini.</p>;
 
@@ -146,6 +151,7 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
 
   const [className, setClassName] = useState("");
   const [students, setStudents] = useState<StudentRow[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [rules, setRules] = useState<Rule[]>([]);
   const [openForm, setOpenForm] = useState<string | null>(null);
   const [openLedger, setOpenLedger] = useState<string | null>(null);
@@ -156,8 +162,10 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   function load() {
-    api.get<{ classroom: { name: string }; students: StudentRow[] }>(`/api/guru/classrooms/${ulid}/students`)
-      .then((d) => { setClassName(d.classroom.name); setStudents(d.students); });
+    api
+      .get<{ classroom: { name: string }; students: StudentRow[] }>(`/api/guru/classrooms/${ulid}/students`)
+      .then((d) => { setClassName(d.classroom.name); setStudents(d.students); })
+      .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Gagal memuat kelas."));
   }
 
   useEffect(() => {
@@ -196,6 +204,18 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
     } finally {
       setBulkSubmitting(false);
     }
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Link href="/guru" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="size-4" />
+          Kelas saya
+        </Link>
+        <Card className="p-6 text-sm text-muted-foreground">{loadError}</Card>
+      </div>
+    );
   }
 
   return (

@@ -8,17 +8,21 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { API_BASE, api, ApiError } from "@/lib/api";
+import { useRequireRole } from "@/lib/auth/use-require-role";
 import { rupiah, tanggal } from "@/lib/format";
 import type { Bill, Payment } from "@/lib/types/billing";
 
 export default function BillDetailPage({ params }: { params: Promise<{ ulid: string }> }) {
   const { ulid } = use(params);
+  const { user, loading } = useRequireRole("orangtua");
 
   const [bill, setBill] = useState<Bill | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (user?.role !== "orangtua") return;
+
     api
       .get<{ bill: Bill; payments: Payment[] }>(`/api/wali/bills/${ulid}`)
       .then((data) => {
@@ -28,7 +32,16 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
       .catch((err) =>
         setError(err instanceof ApiError ? err.message : "Tidak dapat memuat tagihan."),
       );
-  }, [ulid]);
+  }, [ulid, user]);
+
+  if (loading || !user || user.role !== "orangtua") {
+    return (
+      <main className="mx-auto flex max-w-2xl flex-col gap-3 p-6">
+        <Skeleton className="h-8 w-40" />
+        <Skeleton className="h-48 w-full" />
+      </main>
+    );
+  }
 
   if (error) {
     return (

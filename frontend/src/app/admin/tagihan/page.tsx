@@ -100,7 +100,10 @@ export default function AdminBillsPage() {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (q) params.set("q", q);
-    api.get<{ bills: Paginated<Bill> }>(`/api/admin/bills?${params}`).then((d) => setBills(d.bills));
+    api
+      .get<{ bills: Paginated<Bill> }>(`/api/admin/bills?${params}`)
+      .then((d) => setBills(d.bills))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan."));
   }, [status, q]);
 
   useEffect(() => { load(); }, [load]);
