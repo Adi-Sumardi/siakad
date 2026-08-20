@@ -88,10 +88,17 @@ class BillController extends Controller
             'bill_ulids' => 'required|array|min:1|max:50',
             'bill_ulids.*' => 'required|string',
             'method' => 'required|in:virtual_account,e_wallet,qris,bank_transfer,credit_card',
+            'custom_amounts' => 'nullable|array',
+            'custom_amounts.*' => 'numeric|min:1',
         ]);
 
         try {
-            $payment = $checkout->start($request->user(), $validated['bill_ulids'], $validated['method']);
+            $payment = $checkout->start(
+                $request->user(),
+                $validated['bill_ulids'],
+                $validated['method'],
+                $validated['custom_amounts'] ?? [],
+            );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }

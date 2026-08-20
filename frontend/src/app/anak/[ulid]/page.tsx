@@ -2,8 +2,9 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, FileDown, Plus, X } from "lucide-react";
+import { ArrowLeft, Award, FileDown, Plus, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
+import { WaliShell } from "@/components/layout/wali-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -30,31 +31,31 @@ const STATUS_LABEL: Record<Achievement["status"], { label: string; variant: "goo
 
 function PointHistory({ points }: { points: PointSummary }) {
   if (points.records.length === 0) {
-    return <p className="p-5 text-sm text-muted-foreground">Belum ada catatan poin semester ini.</p>;
+    return <p className="p-5 text-sm text-muted-foreground text-center">Belum ada catatan poin semester ini.</p>;
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col divide-y divide-border">
       {points.records.map((record) => (
         <div
           key={record.ulid}
-          className={`flex items-start justify-between gap-4 border-b border-border px-5 py-3 last:border-b-0 ${record.status === "revoked" ? "opacity-50" : ""}`}
+          className={`flex items-start justify-between gap-4 px-5 py-3.5 ${record.status === "revoked" ? "opacity-50" : ""}`}
         >
-          <div className="min-w-0">
-            <p className="text-sm font-medium">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-foreground">
               {record.description}
               {record.status === "revoked" && <span className="ml-2 text-xs text-muted-foreground">(dibatalkan)</span>}
             </p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground mt-0.5">
               {tanggal(record.occurred_on)}
               {record.rule && ` · ${record.rule.category}`}
-              {record.recorded_by && ` · dicatat ${record.recorded_by}`}
+              {record.recorded_by && ` · dicatat oleh ${record.recorded_by}`}
             </p>
             {record.status === "revoked" && record.revoke_reason && (
               <p className="mt-1 text-xs text-muted-foreground">Alasan: {record.revoke_reason}</p>
             )}
           </div>
-          <span className={`tabular shrink-0 text-sm font-semibold ${record.points > 0 ? "text-good" : "text-bad"}`}>
+          <span className={`tabular shrink-0 text-sm font-bold ${record.points > 0 ? "text-good" : "text-bad"}`}>
             {record.points > 0 ? `+${record.points}` : record.points}
           </span>
         </div>
@@ -67,12 +68,12 @@ function AchievementCard({ achievement }: { achievement: Achievement }) {
   const status = STATUS_LABEL[achievement.status];
 
   return (
-    <Card className="flex flex-col gap-2 p-4">
+    <Card className="flex flex-col gap-3 p-5 border-border/80 hover:border-primary/40 transition-colors">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="font-semibold">{achievement.nama_prestasi}</p>
-          <p className="text-sm text-muted-foreground">
-            {achievement.kategori} · {achievement.tingkat}
+          <p className="font-bold text-foreground text-base">{achievement.nama_prestasi}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {achievement.kategori} · Tingkat {achievement.tingkat}
             {achievement.juara && ` · Juara ${achievement.juara}`}
           </p>
         </div>
@@ -80,18 +81,20 @@ function AchievementCard({ achievement }: { achievement: Achievement }) {
       </div>
 
       {achievement.nama_event && (
-        <p className="text-sm text-muted-foreground">
-          {achievement.nama_event}
+        <p className="text-xs text-muted-foreground">
+          Event: <strong className="text-foreground">{achievement.nama_event}</strong>
           {achievement.tanggal_event && ` · ${tanggal(achievement.tanggal_event)}`}
         </p>
       )}
 
       {achievement.status === "rejected" && achievement.rejection_reason && (
-        <p className="text-sm text-bad">Alasan ditolak: {achievement.rejection_reason}</p>
+        <p className="text-xs text-bad bg-bad-soft/40 p-2 rounded-lg">
+          Alasan penolakan: {achievement.rejection_reason}
+        </p>
       )}
 
       {achievement.point_awarded && (
-        <p className="text-sm font-medium text-good">+{achievement.point_awarded} poin diberikan</p>
+        <p className="text-xs font-bold text-good">+{achievement.point_awarded} poin apresiasi diberikan</p>
       )}
 
       {achievement.has_sertifikat && (
@@ -99,10 +102,10 @@ function AchievementCard({ achievement }: { achievement: Achievement }) {
           href={`${API_BASE}/api/files/achievements/${achievement.ulid}/sertifikat`}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex w-fit items-center gap-1 text-xs text-primary"
+          className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
         >
-          <FileDown className="size-3" />
-          Lihat sertifikat
+          <FileDown className="size-3.5" />
+          <span>Lihat Sertifikat Piagam</span>
         </a>
       )}
     </Card>
@@ -121,7 +124,7 @@ function SubmitAchievementForm({ studentUlid, onSubmitted }: { studentUlid: stri
 
     try {
       await api.post(`/api/wali/students/${studentUlid}/achievements`, new FormData(event.currentTarget));
-      toast.success("Prestasi diajukan. Menunggu verifikasi dari sekolah.");
+      toast.success("Prestasi berhasil diajukan. Menunggu verifikasi dari sekolah.");
       setOpen(false);
       onSubmitted();
     } catch (err) {
@@ -133,70 +136,80 @@ function SubmitAchievementForm({ studentUlid, onSubmitted }: { studentUlid: stri
 
   if (!open) {
     return (
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+      <Button onClick={() => setOpen(true)} className="gap-2 shadow-xs text-xs">
         <Plus className="size-4" />
-        Ajukan prestasi
+        <span>Ajukan Prestasi Baru</span>
       </Button>
     );
   }
 
   return (
-    <Card className="p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <p className="font-semibold">Ajukan prestasi</p>
-        <button type="button" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">
+    <Card className="p-6 border-primary/40 shadow-lg">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h3 className="font-bold text-foreground text-base">Ajukan Prestasi Ananda</h3>
+          <p className="text-xs text-muted-foreground">Unggah sertifikat/piagam kejuaraan atau perlombaan ananda.</p>
+        </div>
+        <button type="button" onClick={() => setOpen(false)} className="rounded-lg p-1 text-muted-foreground hover:bg-accent">
           <X className="size-4" />
         </button>
       </div>
 
-      <form onSubmit={submit} className="flex flex-col gap-3" noValidate>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="nama_prestasi">Nama prestasi</Label>
-          <Input id="nama_prestasi" name="nama_prestasi" required placeholder="Juara 1 Lomba Tahfidz" />
+      <form onSubmit={submit} className="flex flex-col gap-3.5" noValidate>
+        <div>
+          <Label htmlFor="nama_prestasi" className="text-xs">Nama Prestasi / Juara</Label>
+          <Input id="nama_prestasi" name="nama_prestasi" required placeholder="misal: Juara 1 Lomba Tahfidz Al-Quran" className="mt-1" />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="kategori">Kategori</Label>
-            <select id="kategori" name="kategori" required className="h-10 rounded-lg border border-input bg-card px-3 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <Label htmlFor="kategori" className="text-xs">Kategori</Label>
+            <select id="kategori" name="kategori" required className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:ring-2 focus:ring-primary">
               {KATEGORI_OPTIONS.map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="tingkat">Tingkat</Label>
-            <select id="tingkat" name="tingkat" required className="h-10 rounded-lg border border-input bg-card px-3 text-sm">
+          <div>
+            <Label htmlFor="tingkat" className="text-xs">Tingkat Perlombaan</Label>
+            <select id="tingkat" name="tingkat" required className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:ring-2 focus:ring-primary">
               {TINGKAT_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="juara">Juara (opsional)</Label>
-            <select id="juara" name="juara" className="h-10 rounded-lg border border-input bg-card px-3 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <Label htmlFor="juara" className="text-xs">Peringkat Juara (Opsional)</Label>
+            <select id="juara" name="juara" className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:ring-2 focus:ring-primary">
               <option value="">—</option>
               {JUARA_OPTIONS.map((j) => <option key={j} value={j}>{j}</option>)}
             </select>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="tanggal_event">Tanggal</Label>
-            <Input id="tanggal_event" name="tanggal_event" type="date" max={new Date().toISOString().slice(0, 10)} />
+          <div>
+            <Label htmlFor="tanggal_event" className="text-xs">Tanggal Pelaksanaan</Label>
+            <Input id="tanggal_event" name="tanggal_event" type="date" max={new Date().toISOString().slice(0, 10)} className="mt-1" />
           </div>
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="nama_event">Nama acara (opsional)</Label>
-          <Input id="nama_event" name="nama_event" placeholder="Lomba Tahfidz Kecamatan" />
+        <div>
+          <Label htmlFor="nama_event" className="text-xs">Nama Acara / Penyelenggara</Label>
+          <Input id="nama_event" name="nama_event" placeholder="misal: Festival Anak Sholeh Tingkat Provinsi" className="mt-1" />
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="sertifikat">Sertifikat (opsional)</Label>
-          <input id="sertifikat" name="sertifikat" type="file" accept=".jpg,.jpeg,.png,.pdf" className="text-sm" />
+        <div>
+          <Label htmlFor="sertifikat" className="text-xs">Unggah Sertifikat / Piagam (PDF / Gambar)</Label>
+          <input id="sertifikat" name="sertifikat" type="file" accept=".jpg,.jpeg,.png,.pdf" className="mt-1 block w-full text-xs text-muted-foreground file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20" />
         </div>
 
-        {error && <p role="alert" className="rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">{error}</p>}
+        {error && <p role="alert" className="rounded-lg bg-destructive/10 p-2.5 text-xs text-destructive">{error}</p>}
 
-        <Button type="submit" disabled={submitting}>{submitting ? "Mengirim…" : "Kirim pengajuan"}</Button>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>
+            Batal
+          </Button>
+          <Button type="submit" size="sm" disabled={submitting}>
+            {submitting ? "Mengirim Pengajuan…" : "Kirim Ajuan Prestasi"}
+          </Button>
+        </div>
       </form>
     </Card>
   );
@@ -225,78 +238,122 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
       .then(setPoints)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
     loadAchievements();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ulid, user]);
 
   if (loading || !user || user.role !== "orangtua") {
     return (
-      <main className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
-      </main>
+      <WaliShell>
+        <div className="space-y-4">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      </WaliShell>
     );
   }
 
   if (error) {
     return (
-      <main className="mx-auto max-w-2xl p-6">
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground">{error}</p>
-          <Link href="/dashboard" className="mt-4 inline-block text-sm text-primary">Kembali ke beranda</Link>
+      <WaliShell>
+        <Card className="p-8 text-center space-y-3">
+          <p className="text-sm text-destructive">{error}</p>
+          <Link href="/dashboard">
+            <Button variant="outline" size="sm">Kembali ke Beranda</Button>
+          </Link>
         </Card>
-      </main>
+      </WaliShell>
     );
   }
 
   return (
-    <div className="min-h-dvh bg-canvas">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto max-w-2xl px-6 py-3.5">
-          <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-4" />
-            Beranda
-          </Link>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-2xl px-6 py-8">
-        <h1 className="text-xl font-bold tracking-tight">
-          {points ? `Poin & Prestasi — ${points.student.nama_panggilan ?? points.student.nama_lengkap}` : "Poin & Prestasi"}
-        </h1>
-        {points?.term && <p className="mt-1 text-sm text-muted-foreground">Semester {points.term}</p>}
-
-        <Card className="mt-6 overflow-hidden p-0">
-          <div className="flex items-center justify-between border-b border-border px-5 py-3">
-            <h2 className="text-sm font-semibold">Poin</h2>
+    <WaliShell>
+      <div className="space-y-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Link href="/dashboard" className="text-xs font-semibold text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                <ArrowLeft className="size-3.5" />
+                <span>Kembali ke Beranda</span>
+              </Link>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground mt-1">
+              {points ? `${points.student.nama_lengkap}` : "Detail Perkembangan Ananda"}
+            </h1>
+            {points?.term && (
+              <p className="text-sm text-muted-foreground">
+                Rekapitulasi Tata Tertib & Prestasi · Semester {points.term}
+              </p>
+            )}
           </div>
-          {points === null ? (
-            <div className="p-5"><Skeleton className="h-10 w-40" /></div>
-          ) : (
-            <>
-              <div className="p-5">
-                <PointMeter balance={points.balance} threshold={points.threshold} />
-                {points.threshold?.action && (
-                  <p className="mt-2 text-sm text-muted-foreground">{points.threshold.action}</p>
-                )}
-              </div>
+        </div>
+
+        {/* SECTION 1: POINT METER & HISTORY */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <Card className="p-6 border-border/80 lg:col-span-1 flex flex-col justify-between">
+            <div>
+              <h2 className="text-base font-bold text-foreground flex items-center gap-2 mb-4">
+                <Sparkles className="size-5 text-amber-500" />
+                <span>Poin Kedisiplinan</span>
+              </h2>
+              {points === null ? (
+                <Skeleton className="h-20 w-full" />
+              ) : (
+                <div className="space-y-3">
+                  <PointMeter balance={points.balance} threshold={points.threshold} />
+                  {points.threshold?.action && (
+                    <div className="mt-3 p-3 rounded-xl bg-muted/40 text-xs text-muted-foreground">
+                      <strong>Tindakan Pembinaan:</strong> {points.threshold.action}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Card>
+
+          <Card className="overflow-hidden border-border/80 lg:col-span-2">
+            <div className="border-b border-border bg-muted/30 px-5 py-3.5">
+              <h2 className="text-sm font-bold text-foreground">Riwayat Catatan Poin Semester Ini</h2>
+            </div>
+            {points === null ? (
+              <div className="p-5"><Skeleton className="h-24 w-full" /></div>
+            ) : (
               <PointHistory points={points} />
-            </>
-          )}
-        </Card>
-
-        <div className="mt-8 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-muted-foreground">Prestasi</h2>
-          <SubmitAchievementForm studentUlid={ulid} onSubmitted={loadAchievements} />
+            )}
+          </Card>
         </div>
 
-        <div className="mt-3 flex flex-col gap-2">
-          {achievements === null && <Skeleton className="h-24 w-full" />}
+        {/* SECTION 2: PRESTASI */}
+        <section className="space-y-4 pt-4 border-t border-border">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <Award className="size-5 text-primary" />
+                <span>Prestasi & Kejuaraan Ananda</span>
+              </h2>
+              <p className="text-xs text-muted-foreground">Koleksi prestasi terverifikasi dan ajuan piagam penghargaan.</p>
+            </div>
+            <SubmitAchievementForm studentUlid={ulid} onSubmitted={loadAchievements} />
+          </div>
+
+          {achievements === null && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Skeleton className="h-24 w-full rounded-2xl" />
+              <Skeleton className="h-24 w-full rounded-2xl" />
+            </div>
+          )}
+
           {achievements?.length === 0 && (
-            <Card className="p-5 text-sm text-muted-foreground">Belum ada prestasi tercatat.</Card>
+            <Card className="p-8 text-center text-sm text-muted-foreground">
+              Belum ada prestasi yang tercatat. Klik tombol &quot;Ajukan Prestasi Baru&quot; di atas untuk mendaftarkan prestasi ananda.
+            </Card>
           )}
-          {achievements?.map((a) => <AchievementCard key={a.ulid} achievement={a} />)}
-        </div>
-      </main>
-    </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {achievements?.map((a) => (
+              <AchievementCard key={a.ulid} achievement={a} />
+            ))}
+          </div>
+        </section>
+      </div>
+    </WaliShell>
   );
 }

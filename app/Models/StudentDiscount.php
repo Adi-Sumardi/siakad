@@ -32,6 +32,11 @@ class StudentDiscount extends Model
         return $this->belongsTo(DiscountScheme::class, 'discount_scheme_id');
     }
 
+    public function academicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class);
+    }
+
     /** In force on a given date - a scholarship that ended in June must not touch a July bill. */
     public function scopeEffectiveOn($query, Carbon $date)
     {

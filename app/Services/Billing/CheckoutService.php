@@ -29,8 +29,9 @@ class CheckoutService
 
     /**
      * @param  list<string>  $billUlids
+     * @param  array<string, float>  $customAmounts
      */
-    public function start(User $user, array $billUlids, string $method): Payment
+    public function start(User $user, array $billUlids, string $method, array $customAmounts = []): Payment
     {
         $bills = $this->collectPayable($user, $billUlids);
         $guardian = $user->guardian;
@@ -39,13 +40,27 @@ class CheckoutService
             throw new RuntimeException('Akun ini tidak terhubung ke data wali murid.');
         }
 
-        $amount = round((float) $bills->sum('remaining_amount'), 2);
+        $allocations = [];
+        foreach ($bills as $bill) {
+            $max = (float) $bill->remaining_amount;
+            if (isset($customAmounts[$bill->ulid])) {
+                $custom = round((float) $customAmounts[$bill->ulid], 2);
+                if ($custom <= 0 || $custom > $max) {
+                    throw new RuntimeException("Jumlah pembayaran untuk {$bill->description} tidak valid (Maksimal Rp ".number_format($max, 0, ',', '.').').');
+                }
+                $allocations[$bill->id] = $custom;
+            } else {
+                $allocations[$bill->id] = $max;
+            }
+        }
+
+        $amount = round(array_sum($allocations), 2);
 
         if ($amount <= 0) {
             throw new RuntimeException('Tidak ada tagihan yang perlu dibayar.');
         }
 
-        $payment = DB::transaction(function () use ($guardian, $amount, $method, $bills) {
+        $payment = DB::transaction(function () use ($guardian, $amount, $method, $bills, $allocations) {
             // A bill may have at most one live invoice. Without this, a
             // double-click or two open tabs each mint their own pending
             // payment for the same bill, and if a parent somehow settles both
@@ -70,7 +85,7 @@ class CheckoutService
             // and no bill looks paid until the money actually lands.
             $this->allocator->allocate(
                 $payment,
-                $bills->mapWithKeys(fn (Bill $bill) => [$bill->id => (float) $bill->remaining_amount])->all(),
+                $allocations,
             );
 
             return $payment;

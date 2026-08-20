@@ -179,6 +179,8 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     // unit regardless of what was asked for.
     Route::get('/fee-types', [FeeSettingController::class, 'types']);
     Route::get('/fee-rates', [FeeSettingController::class, 'rates']);
+    Route::get('/discount-schemes', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'schemes']);
+    Route::get('/student-discounts', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'studentDiscounts']);
 
     // Pickers every admin form needs - none of it sensitive, so one response
     // shape for both admin kinds.
@@ -188,9 +190,8 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 });
 
 /*
- * Setting prices is central-admin only, the same split PMB draws around its
- * settings: a per-unit admin bills their unit but does not decide what it
- * charges.
+ * Setting prices & discounts is central-admin only, the same split PMB draws around its
+ * settings: a per-unit admin bills their unit but does not decide what it charges.
  */
 Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
     Route::post('/fee-types', [FeeSettingController::class, 'storeType']);
@@ -198,4 +199,11 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
 
     Route::post('/fee-rates', [FeeSettingController::class, 'storeRate']);
     Route::patch('/fee-rates/{feeRate}', [FeeSettingController::class, 'updateRate']);
+
+    Route::post('/discount-schemes', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'storeScheme']);
+    Route::patch('/discount-schemes/{discountScheme}', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'updateScheme']);
+    Route::delete('/discount-schemes/{discountScheme}', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'destroyScheme']);
+
+    Route::post('/student-discounts', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'assignStudentDiscount']);
+    Route::delete('/student-discounts/{studentDiscount}', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'revokeStudentDiscount']);
 });

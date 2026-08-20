@@ -25,6 +25,16 @@ class DiscountScheme extends Model
         return $this->belongsTo(FeeType::class);
     }
 
+    public function schoolUnit(): BelongsTo
+    {
+        return $this->belongsTo(SchoolUnit::class);
+    }
+
+    public function studentDiscounts(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(StudentDiscount::class);
+    }
+
     /** What this scheme takes off a given subtotal, never more than the subtotal itself. */
     public function amountFor(float $subtotal): float
     {

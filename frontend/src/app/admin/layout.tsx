@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Award,
+  BadgePercent,
   LayoutDashboard,
   Megaphone,
   Percent,
@@ -18,13 +19,14 @@ import { homePathFor, useAuth } from "@/lib/auth/auth-context";
 
 const NAV: StaffNavItem[] = [
   { href: "/admin", label: "Ringkasan", icon: LayoutDashboard },
-  { href: "/admin/tagihan", label: "Tagihan", icon: Receipt },
+  { href: "/admin/tagihan", label: "Tagihan & Transaksi", icon: Receipt },
   { href: "/admin/generate", label: "Terbitkan SPP", icon: Wallet },
-  { href: "/admin/tarif", label: "Tarif", icon: Percent, centralOnly: true },
-  { href: "/admin/laporan", label: "Laporan", icon: ScrollText },
-  { href: "/admin/poin", label: "Poin siswa", icon: Sparkles },
-  { href: "/admin/prestasi", label: "Prestasi", icon: Award },
-  { href: "/admin/informasi", label: "Informasi", icon: Megaphone },
+  { href: "/admin/tarif", label: "Kelola Tarif SPP", icon: Percent, centralOnly: true },
+  { href: "/admin/diskon", label: "Kelola Diskon", icon: BadgePercent, centralOnly: true },
+  { href: "/admin/laporan", label: "Laporan Keuangan", icon: ScrollText },
+  { href: "/admin/poin", label: "Poin & Tata Tertib", icon: Sparkles },
+  { href: "/admin/prestasi", label: "Prestasi Siswa", icon: Award },
+  { href: "/admin/informasi", label: "Pengumuman", icon: Megaphone },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

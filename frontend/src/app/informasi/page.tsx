@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, FileDown, Pin } from "lucide-react";
+import { FileDown, Megaphone, Pin, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { WaliShell } from "@/components/layout/wali-shell";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { API_BASE, api, ApiError } from "@/lib/api";
@@ -13,90 +15,116 @@ import { tanggal } from "@/lib/format";
 import type { Announcement } from "@/lib/types/kesiswaan";
 
 const SCOPE_LABEL: Record<Announcement["scope"], string> = {
-  school: "Seluruh sekolah",
-  unit: "Unit",
-  classroom: "Kelas",
+  school: "Seluruh Sekolah",
+  unit: "Unit Sekolah",
+  classroom: "Kelas Khusus",
 };
 
 export default function AnnouncementsPage() {
   const { user, loading } = useRequireRole("orangtua");
   const [announcements, setAnnouncements] = useState<Announcement[] | null>(null);
 
+  function load() {
+    api
+      .get<{ announcements: Announcement[] }>("/api/wali/announcements")
+      .then((d) => setAnnouncements(d.announcements))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat informasi."));
+  }
+
   useEffect(() => {
     if (user?.role === "orangtua") {
-      api
-        .get<{ announcements: Announcement[] }>("/api/wali/announcements")
-        .then((d) => setAnnouncements(d.announcements))
-        .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat informasi."));
+      load();
     }
   }, [user]);
 
   if (loading || !user || user.role !== "orangtua") {
     return (
-      <main className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32 w-full" />
-      </main>
+      <WaliShell>
+        <div className="space-y-4">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      </WaliShell>
     );
   }
 
   return (
-    <div className="min-h-dvh bg-canvas">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto max-w-2xl px-6 py-3.5">
-          <Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-4" />
-            Beranda
-          </Link>
+    <WaliShell>
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Pusat Informasi & Pengumuman</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Kabar terbaru, agenda kegiatan, dan pengumuman resmi dari yayasan, unit, atau wali kelas.
+            </p>
+          </div>
+
+          <Button variant="outline" size="sm" onClick={load} className="gap-2 self-start sm:self-auto">
+            <RefreshCw className="size-4" />
+            <span>Segarkan</span>
+          </Button>
         </div>
-      </header>
 
-      <main className="mx-auto max-w-2xl px-6 py-8">
-        <h1 className="text-xl font-bold tracking-tight">Informasi</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Pengumuman untuk sekolah, unit, atau kelas anak Anda.
-        </p>
+        {announcements === null && (
+          <div className="space-y-3">
+            <Skeleton className="h-32 w-full rounded-2xl" />
+            <Skeleton className="h-32 w-full rounded-2xl" />
+          </div>
+        )}
 
-        <div className="mt-6 flex flex-col gap-3">
-          {announcements === null && <Skeleton className="h-28 w-full" />}
+        {announcements?.length === 0 && (
+          <Card className="p-8 text-center text-sm text-muted-foreground">
+            Belum ada pengumuman untuk unit atau kelas ananda saat ini.
+          </Card>
+        )}
 
-          {announcements?.length === 0 && (
-            <Card className="p-6 text-sm text-muted-foreground">Belum ada pengumuman.</Card>
-          )}
-
+        <div className="grid grid-cols-1 gap-4">
           {announcements?.map((a) => (
-            <Card key={a.ulid} className="flex flex-col gap-2 p-5">
+            <Card key={a.ulid} className="p-6 border-border/80 hover:border-primary/40 transition-colors">
               <div className="flex items-start justify-between gap-3">
-                <p className="font-semibold">{a.title}</p>
-                {a.is_pinned && <Pin className="size-4 shrink-0 text-primary" />}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-lg font-bold text-foreground">{a.title}</h2>
+                  {a.is_pinned && (
+                    <Badge variant="primary" className="gap-1 font-bold text-[10px]">
+                      <Pin className="size-3" />
+                      <span>DIPASANG</span>
+                    </Badge>
+                  )}
+                </div>
+                {a.published_at && (
+                  <span className="text-xs font-medium text-muted-foreground shrink-0">
+                    {tanggal(a.published_at)}
+                  </span>
+                )}
               </div>
 
-              <p className="whitespace-pre-line text-sm text-muted-foreground">{a.body}</p>
+              <div className="mt-3 text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
+                {a.body}
+              </div>
 
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                <Badge>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
+                <Badge variant="default">
                   {SCOPE_LABEL[a.scope]}
-                  {a.classroom && ` · ${a.classroom}`}
+                  {a.classroom && ` · Kelas ${a.classroom}`}
                   {!a.classroom && a.school_unit && ` · ${a.school_unit}`}
                 </Badge>
-                {a.published_at && <span className="text-xs text-muted-foreground">{tanggal(a.published_at)}</span>}
-              </div>
 
-              {a.has_file && (
-                <a
-                  href={`${API_BASE}/api/files/announcements/${a.ulid}/file`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 inline-flex w-fit items-center gap-1 text-xs text-primary"
-                >
-                  <FileDown className="size-3" />
-                  {a.file_name ?? "Lampiran"}
-                </a>
-              )}
+                {a.has_file && (
+                  <a
+                    href={`${API_BASE}/api/files/announcements/${a.ulid}/file`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
+                  >
+                    <FileDown className="size-3.5" />
+                    <span>{a.file_name ?? "Unduh Lampiran Dokumen"}</span>
+                  </a>
+                )}
+              </div>
             </Card>
           ))}
         </div>
-      </main>
-    </div>
+      </div>
+    </WaliShell>
   );
 }
