@@ -87,7 +87,7 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
   if (loading || !user || user.role !== "orangtua") {
     return (
       <WaliShell>
-        <div className="space-y-4 max-w-4xl mx-auto">
+        <div className="space-y-4">
           <Skeleton className="h-10 w-48" />
           <Skeleton className="h-64 w-full rounded-2xl" />
         </div>
@@ -117,7 +117,7 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
 
   return (
     <WaliShell>
-      <div className="max-w-4xl mx-auto space-y-6 pb-20">
+      <div className="space-y-6 pb-20">
         {/* Back Link & Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/80 pb-4">
           <div className="space-y-1">

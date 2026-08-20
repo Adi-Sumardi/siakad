@@ -110,7 +110,7 @@ export default function WaliPrestasiPage() {
   if (loading || !user || user.role !== "orangtua") {
     return (
       <WaliShell>
-        <div className="space-y-4 max-w-5xl mx-auto">
+        <div className="space-y-4">
           <Skeleton className="h-8 w-48" />
           <Skeleton className="h-32 w-full rounded-2xl" />
         </div>
@@ -125,7 +125,7 @@ export default function WaliPrestasiPage() {
 
   return (
     <WaliShell>
-      <div className="max-w-5xl mx-auto space-y-6 pb-24">
+      <div className="space-y-6 pb-24">
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>

@@ -52,7 +52,7 @@ export default function WaliProfilePage() {
   if (loading || !user || user.role !== "orangtua") {
     return (
       <WaliShell>
-        <div className="space-y-4 max-w-4xl mx-auto">
+        <div className="space-y-4">
           <Skeleton className="h-8 w-48" />
           <Skeleton className="h-64 w-full rounded-2xl" />
         </div>
@@ -62,7 +62,7 @@ export default function WaliProfilePage() {
 
   return (
     <WaliShell>
-      <div className="max-w-4xl mx-auto space-y-6 pb-24">
+      <div className="space-y-6 pb-24">
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
