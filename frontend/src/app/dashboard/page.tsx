@@ -5,23 +5,23 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   ArrowRight,
-  Award,
   ChevronRight,
   CreditCard,
   GraduationCap,
   Megaphone,
   Receipt,
   Sparkles,
-  User,
 } from "lucide-react";
 import { WaliShell } from "@/components/layout/wali-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
 import { PointMeter } from "@/components/point-meter";
+import { rupiah } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { PointThresholdInfo } from "@/lib/types/kesiswaan";
 
 type Student = {
@@ -33,11 +33,13 @@ type Student = {
   unit: { code: string; label: string } | null;
   kelas: { name: string; tingkat: number; wali_kelas: string | null } | null;
   poin: { balance: number; threshold: PointThresholdInfo | null } | null;
+  tunggakan: number;
 };
 
 export default function DashboardPage() {
   const { user, loading } = useRequireRole("orangtua");
   const [students, setStudents] = useState<Student[] | null>(null);
+  const [announcementCount, setAnnouncementCount] = useState<number | null>(null);
 
   useEffect(() => {
     if (user?.role === "orangtua") {
@@ -45,8 +47,15 @@ export default function DashboardPage() {
         .get<{ students: Student[] }>("/api/wali/students")
         .then(({ students }) => setStudents(students))
         .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data anak."));
+      api
+        .get<{ announcements: unknown[] }>("/api/wali/announcements")
+        .then((d) => setAnnouncementCount(d.announcements.length))
+        .catch(() => setAnnouncementCount(0));
     }
   }, [user]);
+
+  const totalTunggakan = students?.reduce((sum, s) => sum + s.tunggakan, 0) ?? 0;
+  const flaggedStudents = students?.filter((s) => s.poin?.threshold) ?? [];
 
   if (loading || !user || user.role !== "orangtua") {
     return (
@@ -59,87 +68,95 @@ export default function DashboardPage() {
   return (
     <WaliShell>
       <div className="space-y-8">
-        {/* Welcome Greeting Banner */}
-        <div className="rounded-3xl bg-linear-to-r from-primary/10 via-primary/5 to-accent/30 p-6 sm:p-8 border border-primary/20">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-              <Badge variant="primary" className="mb-2">Portal Wali Murid YAPI</Badge>
-              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground">
-                Assalamu&apos;alaikum, {user.name}
-              </h1>
-              <p className="text-sm text-muted-foreground mt-1">
-                Pantau perkembangan akademik, kedisiplinan, prestasi, dan administrasi SPP ananda di sini.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Link href="/tagihan">
-                <Button className="gap-2 shadow-md">
-                  <Receipt className="size-4" />
-                  <span>Bayar Tagihan SPP</span>
-                </Button>
-              </Link>
-            </div>
+        {/* Welcome banner - same gradient PMB uses on its own dashboard, so
+            a family coming from either app lands on a screen that reads as
+            the same product. */}
+        <div className="rounded-2xl bg-linear-to-br from-[#13286B] to-[#2856E0] p-6 sm:p-7 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-lg font-semibold" style={{ fontFamily: "var(--font-display)" }}>
+              Assalamu&apos;alaikum, {user.name}
+            </h1>
+            <p className="text-sm text-white/80 mt-1 max-w-lg">
+              Pantau perkembangan akademik, kedisiplinan, prestasi, dan administrasi SPP ananda di sini.
+            </p>
           </div>
+
+          <Link href="/tagihan" className="shrink-0">
+            <Button variant="ghost" className="bg-white/15 text-white border border-white/20 hover:bg-white/25 gap-2">
+              <Receipt className="size-4" />
+              <span>Bayar Tagihan SPP</span>
+              <ArrowRight className="size-4" />
+            </Button>
+          </Link>
         </div>
 
-        {/* Quick Menu Action Bar */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {/* Stat grid - PMB's pattern: icon-badge + value + status badge,
+            not just a navigation shortcut, so the number that matters is
+            visible before a tap. */}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Link href="/tagihan">
-            <Card className="group p-4 hover:border-primary transition-all duration-200 shadow-xs cursor-pointer">
-              <div className="flex items-center gap-3">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary group-hover:bg-primary group-hover:text-white transition-colors">
-                  <Receipt className="size-5" />
-                </span>
-                <div>
-                  <p className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">Tagihan SPP</p>
-                  <p className="text-[11px] text-muted-foreground">Multi-bayar & cicilan</p>
+            <Card className="py-4 gap-2 hover:border-primary transition-colors">
+              <CardContent className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Tunggakan SPP</span>
+                  <span className={cn("flex size-7 items-center justify-center rounded-lg", totalTunggakan > 0 ? "bg-warn-soft text-warn" : "bg-good-soft text-good")}>
+                    <Receipt className="size-3.5" />
+                  </span>
                 </div>
-              </div>
+                <span className="tabular text-sm font-semibold">{rupiah(totalTunggakan)}</span>
+                <Badge variant={totalTunggakan > 0 ? "warn" : "good"} className="w-fit">
+                  {totalTunggakan > 0 ? "Ada tunggakan" : "Lunas semua"}
+                </Badge>
+              </CardContent>
             </Card>
           </Link>
 
           <Link href="/pembayaran">
-            <Card className="group p-4 hover:border-primary transition-all duration-200 shadow-xs cursor-pointer">
-              <div className="flex items-center gap-3">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-500/10 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                  <CreditCard className="size-5" />
-                </span>
-                <div>
-                  <p className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">Riwayat Bayar</p>
-                  <p className="text-[11px] text-muted-foreground">Struk & bukti transaksi</p>
+            <Card className="py-4 gap-2 hover:border-primary transition-colors">
+              <CardContent className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Riwayat Bayar</span>
+                  <span className="flex size-7 items-center justify-center rounded-lg bg-accent text-accent-foreground">
+                    <CreditCard className="size-3.5" />
+                  </span>
                 </div>
-              </div>
+                <span className="text-sm font-semibold">Struk & bukti</span>
+                <Badge className="w-fit">Lihat transaksi</Badge>
+              </CardContent>
             </Card>
           </Link>
 
           <Link href="/informasi">
-            <Card className="group p-4 hover:border-primary transition-all duration-200 shadow-xs cursor-pointer">
-              <div className="flex items-center gap-3">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-amber-500/10 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
-                  <Megaphone className="size-5" />
-                </span>
-                <div>
-                  <p className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">Pengumuman</p>
-                  <p className="text-[11px] text-muted-foreground">Kabar & agenda sekolah</p>
+            <Card className="py-4 gap-2 hover:border-primary transition-colors">
+              <CardContent className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Pengumuman</span>
+                  <span className="flex size-7 items-center justify-center rounded-lg bg-accent text-accent-foreground">
+                    <Megaphone className="size-3.5" />
+                  </span>
                 </div>
-              </div>
+                <span className="text-sm font-semibold">
+                  {announcementCount === null ? "…" : `${announcementCount} pengumuman`}
+                </span>
+                <Badge className="w-fit">Kabar & agenda</Badge>
+              </CardContent>
             </Card>
           </Link>
 
-          <Link href="/dashboard">
-            <Card className="group p-4 hover:border-primary transition-all duration-200 shadow-xs cursor-pointer border-primary/40 bg-primary/5">
-              <div className="flex items-center gap-3">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground transition-colors">
-                  <GraduationCap className="size-5" />
+          <Card className="py-4 gap-2">
+            <CardContent className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Poin Tata Tertib</span>
+                <span className={cn("flex size-7 items-center justify-center rounded-lg", flaggedStudents.length > 0 ? "bg-warn-soft text-warn" : "bg-good-soft text-good")}>
+                  <Sparkles className="size-3.5" />
                 </span>
-                <div>
-                  <p className="text-xs font-bold text-primary">Data Ananda</p>
-                  <p className="text-[11px] text-muted-foreground">{students?.length ?? 0} terdaftar</p>
-                </div>
               </div>
-            </Card>
-          </Link>
+              <span className="text-sm font-semibold">{students?.length ?? 0} ananda terdaftar</span>
+              <Badge variant={flaggedStudents.length > 0 ? "warn" : "good"} className="w-fit">
+                {flaggedStudents.length > 0 ? `${flaggedStudents.length} perlu perhatian` : "Semua baik"}
+              </Badge>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Student Cards Section */}
