@@ -26,17 +26,23 @@
 
 ---
 
-## 💳 Gateway Pembayaran: SendagoPay
+## 💳 Fitur Keuangan & Pembayaran
+- **Gateway**: SendagoPay Checkout & QRIS Invoices.
 - **Inbound Webhook Endpoint**: `https://siakad.yapinet.id/api/webhooks/sendagopay`
-- **Controller**: `App\Http\Controllers\Api\Webhooks\SendagoPayController`
-- **Gateway Service**: `App\Services\Payment\SendagoPayGateway`
-- **Verifikasi Keamanan**: HMAC-SHA256 via header `X-Sendago-Signature` menggunakan `SENDAGOPAY_WEBHOOK_SECRET`.
-- **Fitur Idempotensi**: Menggunakan tabel `integration_events` untuk mencegah double settlement / pemrosesan ganda.
-- **Settlement**: Otomatis melalui `PaymentAllocator` untuk melunasi tagihan yang di-checkout wali murid.
-- **Kredensial `.env`**:
-  - `SENDAGOPAY_PUBLIC_KEY=sg_live_pk_7d1231d3a1d7861f0243b1fac45fb0ed`
-  - `SENDAGOPAY_SECRET_KEY=sg_live_sk_17c0e7d2c90fed0ca129ae3ebfb614eaf7aa39fa11eec804`
-  - `SENDAGOPAY_WEBHOOK_SECRET=whsec_live_1048dc2a77e79419ff3684db9e95eb7f8b966dc2`
+- **Multi-Payment**: Wali murid dapat memilih banyak tagihan (multi-bulan / multi-anak) dan membayar sekaligus dalam 1x checkout SendagoPay.
+- **Custom / Partial Payment**: Mendukung pembayaran cicilan atau nominal custom per tagihan (`allow_installment = true`).
+- **Kelola SPP & Tarif**: `/admin/tarif` (Katalog jenis biaya, tarif per unit, per tingkat, per tahun ajaran, dan tanggal jatuh tempo).
+- **Kelola Diskon & Beasiswa**: `/admin/diskon` (CRUD skema diskon persen/nominal dan penetapan diskon siswa per tahun ajaran).
+- **Generate SPP Massal**: `/admin/generate` (Pratinjau batch & generate tagihan bulanan dengan diskon otomatis terhitung).
+
+---
+
+## 🎨 Desain UI & Layout Responsif
+- **Fullspan Modern Layout**: Seluruh portal (Admin, Guru, Wali) memanfaatkan lebar monitor besar (`w-full max-w-7xl 2xl:max-w-full`) dengan padding terstruktur.
+- **Mobile First & Slide-over Drawer**:
+  - `StaffShell` (`/admin` & `/guru`): Topbar responsif + drawer navigasi hamburger dengan backdrop blur.
+  - `WaliShell` (`/dashboard`, `/tagihan`, `/pembayaran`, `/informasi`, `/anak/[ulid]`): Header terpadu + bottom quick-navigation bar + slide-over drawer di layar mobile.
+- **Favicon Resmi**: Logo YAPI (`logo-yapi.png`) terpasang pada metadata icon dan apple-touch-icon.
 
 ---
 
