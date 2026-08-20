@@ -36,7 +36,9 @@ export default function AdminBillsPage() {
   const [status, setStatus] = useState("open");
   const [q, setQ] = useState("");
   const [unitCode, setUnitCode] = useState("");
+  const [academicYear, setAcademicYear] = useState("");
   const [units, setUnits] = useState<Option[]>([]);
+  const [years, setYears] = useState<{ ulid: string; year: string; is_active: boolean }[]>([]);
   const [action, setAction] = useState<Action | null>(null);
 
   // Form states
@@ -50,6 +52,7 @@ export default function AdminBillsPage() {
     if (status) params.set("status", status);
     if (q) params.set("q", q);
     if (unitCode) params.set("unit", unitCode);
+    if (academicYear) params.set("year", academicYear);
 
     try {
       const d = await api.get<{ bills: Paginated<Bill> }>(`/api/admin/bills?${params}`);
@@ -57,7 +60,7 @@ export default function AdminBillsPage() {
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan.");
     }
-  }, [status, q, unitCode]);
+  }, [status, q, unitCode, academicYear]);
 
   useEffect(() => {
     load();
@@ -67,6 +70,11 @@ export default function AdminBillsPage() {
     api
       .get<{ school_units: Option[] }>("/api/admin/school-units")
       .then((d) => setUnits(d.school_units))
+      .catch(() => {});
+
+    api
+      .get<{ academic_years: { ulid: string; year: string; is_active: boolean }[] }>("/api/admin/academic-years")
+      .then((d) => setYears(d.academic_years))
       .catch(() => {});
   }, []);
 
@@ -146,6 +154,19 @@ export default function AdminBillsPage() {
             <Filter className="size-3.5" />
             <span>Filter:</span>
           </div>
+
+          <select
+            value={academicYear}
+            onChange={(e) => setAcademicYear(e.target.value)}
+            className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
+          >
+            <option value="">Semua Tahun Ajaran</option>
+            {years.map((y) => (
+              <option key={y.ulid} value={y.year}>
+                Tahun {y.year} {y.is_active ? "(Aktif)" : ""}
+              </option>
+            ))}
+          </select>
 
           <select
             value={unitCode}

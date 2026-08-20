@@ -131,6 +131,8 @@ Route::middleware('auth:sanctum')->prefix('files')->group(function () {
  * alone would let one unit's admin open another unit's student.
  */
 Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->group(function () {
+    Route::get('/dashboard/billing-chart', [\App\Http\Controllers\Api\Admin\DashboardChartController::class, 'billingChart']);
+    Route::get('/dashboard/achievements-chart', [\App\Http\Controllers\Api\Admin\DashboardChartController::class, 'achievementsChart']);
     Route::get('/students', [\App\Http\Controllers\Api\Admin\StudentController::class, 'index']);
     Route::get('/bills', [AdminBillController::class, 'index']);
     Route::get('/bills/{ulid}/pdf', [AdminBillController::class, 'pdf']);
@@ -214,4 +216,14 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('/users', [\App\Http\Controllers\Api\Admin\UserController::class, 'store']);
     Route::patch('/users/{user}', [\App\Http\Controllers\Api\Admin\UserController::class, 'update']);
     Route::delete('/users/{user}', [\App\Http\Controllers\Api\Admin\UserController::class, 'destroy']);
+
+    // Academic year management
+    Route::post('/academic-years', [ReferenceController::class, 'storeAcademicYear']);
+    Route::post('/academic-years/{academicYear}/activate', [ReferenceController::class, 'activateAcademicYear']);
+
+    // Bulk Import endpoints
+    Route::post('/import/students', [\App\Http\Controllers\Api\Admin\ImportController::class, 'importStudents']);
+    Route::post('/import/fee-rates', [\App\Http\Controllers\Api\Admin\ImportController::class, 'importFeeRates']);
+    Route::get('/import/students/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadStudentTemplate']);
+    Route::get('/import/fee-rates/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadFeeRateTemplate']);
 });

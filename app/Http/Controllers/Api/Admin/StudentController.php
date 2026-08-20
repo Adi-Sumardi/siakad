@@ -15,12 +15,22 @@ use Illuminate\Http\Request;
 class StudentController extends Controller
 {
     /**
-     * List all students per unit, per jenjang, with SPP rates and active discounts.
+     * List all students per unit, per jenjang, with SPP rates and active discounts for specified/active academic year.
      */
     public function index(Request $request): JsonResponse
     {
-        $activeYear = AcademicYear::where('is_active', true)->first()
-            ?? AcademicYear::latest('starts_on')->first();
+        $yearInput = $request->string('academic_year')->value() ?: $request->string('year')->value();
+
+        $selectedYear = null;
+        if (! empty($yearInput)) {
+            $selectedYear = AcademicYear::where('year', $yearInput)->first()
+                ?? AcademicYear::where('ulid', $yearInput)->first();
+        }
+
+        if (! $selectedYear) {
+            $selectedYear = AcademicYear::where('is_active', true)->first()
+                ?? AcademicYear::latest('starts_on')->first();
+        }
 
         $sppType = FeeType::where('code', 'spp')->first();
 
@@ -30,7 +40,9 @@ class StudentController extends Controller
                 'schoolUnit',
                 'entryYear',
                 'guardians',
-                'enrollments' => fn ($q) => $q->where('status', 'active')->with('classroom.homeroomTeacher'),
+                'enrollments' => fn ($q) => $q->where('status', 'active')
+                    ->when($selectedYear, fn ($eq) => $eq->where('academic_year_id', $selectedYear->id))
+                    ->with('classroom.homeroomTeacher'),
             ])
             ->when($request->string('search')->value(), function ($q, $search) {
                 $q->where(function ($sq) use ($search) {
@@ -47,10 +59,10 @@ class StudentController extends Controller
 
         $students = $studentsQuery->paginate($request->integer('per_page', 25));
 
-        // Preload all SPP rates for quick lookup
-        $feeRates = $sppType && $activeYear
+        // Preload all SPP rates for selected academic year
+        $feeRates = $sppType && $selectedYear
             ? FeeRate::where('fee_type_id', $sppType->id)
-                ->where('academic_year_id', $activeYear->id)
+                ->where('academic_year_id', $selectedYear->id)
                 ->where('is_active', true)
                 ->get()
             : collect();
@@ -141,7 +153,8 @@ class StudentController extends Controller
                     'last_page' => $students->lastPage(),
                     'total' => $students->total(),
                     'per_page' => $students->perPage(),
-                    'active_academic_year' => $activeYear?->year,
+                    'selected_academic_year' => $selectedYear?->year,
+                    'selected_academic_year_ulid' => $selectedYear?->ulid,
                 ],
             ],
         ]);

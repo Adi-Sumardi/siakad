@@ -2,7 +2,21 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Building2, CheckCircle2, Filter, Layers, Plus, Search, Trash2 } from "lucide-react";
+import {
+  Building2,
+  Calendar,
+  CheckCircle2,
+  Download,
+  Filter,
+  Layers,
+  Plus,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Trash2,
+  UploadCloud,
+  X,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -35,7 +49,7 @@ type Rate = {
   is_active: boolean;
 };
 
-type Option = { ulid: string; code?: string; label?: string; year?: string; is_active?: boolean };
+type Option = { ulid: string; code?: string; label?: string; year?: string; is_active?: boolean; starts_on?: string; ends_on?: string };
 
 const RECURRENCE_LABEL: Record<string, string> = {
   monthly: "Bulanan (SPP)",
@@ -56,10 +70,13 @@ export default function FeeRatesPage() {
   // Filters
   const [filterUnit, setFilterUnit] = useState<string>("");
   const [filterType, setFilterType] = useState<string>("");
+  const [filterYear, setFilterYear] = useState<string>("");
 
   // Modals
   const [showRateModal, setShowRateModal] = useState(false);
   const [showTypeModal, setShowTypeModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [showYearModal, setShowYearModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Forms
@@ -81,11 +98,24 @@ export default function FeeRatesPage() {
     allow_installment: false,
   });
 
+  const [newYearName, setNewYearName] = useState("2027/2028");
+  const [newYearStarts, setNewYearStarts] = useState("2027-07-01");
+  const [newYearEnds, setNewYearEnds] = useState("2028-06-30");
+
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ message: string; imported: number; updated: number; errors: string[] } | null>(null);
+
   const loadData = useCallback(async () => {
     try {
+      const queryParams = new URLSearchParams();
+      if (filterUnit) queryParams.set("unit", filterUnit);
+      if (filterType) queryParams.set("type", filterType);
+      if (filterYear) queryParams.set("year", filterYear);
+
       const [ftRes, rRes, uRes, yRes] = await Promise.all([
         api.get<{ fee_types: FeeType[] }>("/api/admin/fee-types"),
-        api.get<{ rates: Rate[] }>("/api/admin/fee-rates"),
+        api.get<{ rates: Rate[] }>(`/api/admin/fee-rates?${queryParams.toString()}`),
         api.get<{ school_units: Option[] }>("/api/admin/school-units"),
         api.get<{ academic_years: Option[] }>("/api/admin/academic-years"),
       ]);
@@ -106,7 +136,7 @@ export default function FeeRatesPage() {
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal memuat data tarif.");
     }
-  }, [rateForm.fee_type_ulid]);
+  }, [filterUnit, filterType, filterYear, rateForm.fee_type_ulid]);
 
   useEffect(() => {
     loadData();
@@ -162,9 +192,75 @@ export default function FeeRatesPage() {
     }
   }
 
+  async function handleCreateYear(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      await api.post("/api/admin/academic-years", {
+        year: newYearName,
+        starts_on: newYearStarts,
+        ends_on: newYearEnds,
+        is_active: false,
+      });
+      toast.success(`Tahun ajaran ${newYearName} berhasil ditambahkan.`);
+      loadData();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal menambahkan tahun ajaran.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleActivateYear(yearUlid: string, yearLabel: string) {
+    try {
+      await api.post(`/api/admin/academic-years/${yearUlid}/activate`);
+      toast.success(`Tahun ajaran ${yearLabel} telah diaktifkan.`);
+      loadData();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengaktifkan tahun ajaran.");
+    }
+  }
+
+  async function handleImportTariff(e: React.FormEvent) {
+    e.preventDefault();
+    if (!importFile) {
+      toast.error("Silakan pilih file CSV tarif.");
+      return;
+    }
+
+    setImporting(true);
+    setImportResult(null);
+
+    const form = new FormData();
+    form.set("file", importFile);
+
+    try {
+      const res = await api.post<{
+        message: string;
+        imported_count: number;
+        updated_count: number;
+        errors: string[];
+      }>("/api/admin/import/fee-rates", form);
+
+      toast.success(res.message);
+      setImportResult({
+        message: res.message,
+        imported: res.imported_count,
+        updated: res.updated_count,
+        errors: res.errors || [],
+      });
+      loadData();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengimpor tarif.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   const filteredRates = rates?.filter((r) => {
     if (filterUnit && r.unit.code !== filterUnit) return false;
     if (filterType && r.fee_type.code !== filterType) return false;
+    if (filterYear && r.academic_year !== filterYear) return false;
     return true;
   });
 
@@ -181,20 +277,44 @@ export default function FeeRatesPage() {
       {/* Header section */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Kelola Tarif SPP & Biaya Sekolah</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Pengaturan Biaya & SPP Sekolah</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Atur katalog jenis biaya (SPP, Gedung, Seragam) serta nominal tarif per unit sekolah, tingkat kelas, dan tahun ajaran.
+            Atur jenis tagihan (SPP, Gedung, Seragam), nominal tarif per unit/tingkat kelas, dan master tahun ajaran.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            onClick={() => setShowYearModal(true)}
+            variant="outline"
+            size="sm"
+            className="gap-1.5 font-semibold text-xs h-9"
+          >
+            <Calendar className="size-4 text-primary" />
+            <span>Kelola Tahun Ajaran</span>
+          </Button>
+
+          <Button
+            onClick={() => {
+              setImportFile(null);
+              setImportResult(null);
+              setShowImportModal(true);
+            }}
+            variant="outline"
+            size="sm"
+            className="gap-1.5 font-semibold text-xs h-9"
+          >
+            <UploadCloud className="size-4 text-primary" />
+            <span>Import Tarif SPP (CSV)</span>
+          </Button>
+
           {activeTab === "rates" ? (
-            <Button onClick={() => setShowRateModal(true)} className="gap-2 shadow-xs">
+            <Button onClick={() => setShowRateModal(true)} size="sm" className="gap-1.5 font-bold text-xs h-9 shadow-xs">
               <Plus className="size-4" />
               <span>Tambah Tarif Baru</span>
             </Button>
           ) : (
-            <Button onClick={() => setShowTypeModal(true)} className="gap-2 shadow-xs">
+            <Button onClick={() => setShowTypeModal(true)} size="sm" className="gap-1.5 font-bold text-xs h-9 shadow-xs">
               <Plus className="size-4" />
               <span>Tambah Jenis Biaya</span>
             </Button>
@@ -204,31 +324,33 @@ export default function FeeRatesPage() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card className="p-5 border-border/80">
+        <Card className="p-5 border-border/80 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Tarif Aktif</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Tarif Terpasang</span>
             <Building2 className="size-5 text-primary" />
           </div>
           <p className="mt-2 text-2xl font-bold">{rates?.length ?? <Skeleton className="h-8 w-16" />}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Daftar tarif terpasang di sistem</p>
+          <p className="mt-1 text-xs text-muted-foreground">Kombinasi unit, kelas & tahun ajaran</p>
         </Card>
 
-        <Card className="p-5 border-border/80">
+        <Card className="p-5 border-border/80 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Jenis Biaya</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Master Jenis Biaya</span>
             <Layers className="size-5 text-indigo-600" />
           </div>
           <p className="mt-2 text-2xl font-bold">{feeTypes?.length ?? <Skeleton className="h-8 w-16" />}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Kategori tagihan (SPP, Kegiatan, dll)</p>
+          <p className="mt-1 text-xs text-muted-foreground">Kategori tagihan (SPP, Gedung, Seragam, dll)</p>
         </Card>
 
-        <Card className="p-5 border-border/80">
+        <Card className="p-5 border-border/80 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Unit Sekolah</span>
-            <CheckCircle2 className="size-5 text-emerald-600" />
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tahun Ajaran Terdaftar</span>
+            <Calendar className="size-5 text-emerald-600" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{units.length}</p>
-          <p className="mt-1 text-xs text-muted-foreground">TK, SD, SMP, SMA YAPI</p>
+          <p className="mt-2 text-2xl font-bold">{years.length} Tahun</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Aktif: <strong>{years.find((y) => y.is_active)?.year ?? "—"}</strong>
+          </p>
         </Card>
       </div>
 
@@ -260,25 +382,40 @@ export default function FeeRatesPage() {
       {activeTab === "rates" && (
         <div className="space-y-4">
           {/* Filters Bar */}
-          <div className="flex flex-wrap items-center gap-3 bg-muted/40 p-3 rounded-xl border border-border">
-            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-3 bg-muted/40 p-3.5 rounded-xl border border-border">
+            <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
               <Filter className="size-4" />
               <span>Filter:</span>
             </div>
+
+            <select
+              value={filterYear}
+              onChange={(e) => setFilterYear(e.target.value)}
+              className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-2xs"
+            >
+              <option value="">Semua Tahun Ajaran</option>
+              {years.map((y) => (
+                <option key={y.ulid} value={y.year}>
+                  Tahun {y.year} {y.is_active ? "(Aktif)" : ""}
+                </option>
+              ))}
+            </select>
+
             <select
               value={filterUnit}
               onChange={(e) => setFilterUnit(e.target.value)}
-              className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
+              className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-2xs"
             >
               <option value="">Semua Unit Sekolah</option>
               {units.map((u) => (
                 <option key={u.ulid} value={u.code}>{u.label}</option>
               ))}
             </select>
+
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
-              className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
+              className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-2xs"
             >
               <option value="">Semua Jenis Biaya</option>
               {feeTypes?.map((t) => (
@@ -287,10 +424,10 @@ export default function FeeRatesPage() {
             </select>
           </div>
 
-          <Card className="overflow-hidden border-border/80">
+          <Card className="overflow-hidden border-border/80 shadow-xs">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-border bg-muted/40 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-border bg-muted/40 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                   <tr>
                     <th className="px-5 py-3.5">Jenis Tagihan</th>
                     <th className="px-5 py-3.5">Unit Sekolah</th>
@@ -318,21 +455,21 @@ export default function FeeRatesPage() {
                   {filteredRates?.map((r) => (
                     <tr key={r.ulid} className="hover:bg-muted/20 transition-colors">
                       <td className="px-5 py-4">
-                        <p className="font-bold text-foreground">{r.fee_type.name}</p>
+                        <p className="font-bold text-foreground text-sm">{r.fee_type.name}</p>
                         <span className="text-xs font-mono text-muted-foreground">{r.fee_type.code}</span>
                       </td>
                       <td className="px-5 py-4 font-medium text-foreground">{r.unit.label}</td>
                       <td className="px-5 py-4">
                         <Badge variant="default">{r.tingkat ? `Kelas ${r.tingkat}` : "Semua Tingkat"}</Badge>
                       </td>
-                      <td className="px-5 py-4 text-muted-foreground">{r.academic_year}</td>
+                      <td className="px-5 py-4 text-muted-foreground font-semibold">{r.academic_year}</td>
                       <td className="px-5 py-4">
                         <span className="text-xs font-medium text-muted-foreground">
                           {r.due_day ? `Tgl ${r.due_day} tiap bulan` : "—"}
                         </span>
                       </td>
                       <td className="px-5 py-4 text-right">
-                        <span className="font-bold text-primary text-base">{rupiah(r.amount)}</span>
+                        <span className="font-bold text-primary text-sm font-mono">{rupiah(r.amount)}</span>
                       </td>
                     </tr>
                   ))}
@@ -345,10 +482,10 @@ export default function FeeRatesPage() {
 
       {/* TAB 2: MASTER JENIS BIAYA */}
       {activeTab === "types" && (
-        <Card className="overflow-hidden border-border/80">
+        <Card className="overflow-hidden border-border/80 shadow-xs">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-border bg-muted/40 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-border bg-muted/40 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="px-5 py-3.5">Kode</th>
                   <th className="px-5 py-3.5">Nama Tagihan</th>
@@ -362,13 +499,13 @@ export default function FeeRatesPage() {
                 {feeTypes?.map((t) => (
                   <tr key={t.ulid} className="hover:bg-muted/20 transition-colors">
                     <td className="px-5 py-4 font-mono font-bold text-primary">{t.code}</td>
-                    <td className="px-5 py-4 font-bold text-foreground">{t.name}</td>
+                    <td className="px-5 py-4 font-bold text-foreground text-sm">{t.name}</td>
                     <td className="px-5 py-4 text-muted-foreground">
                       {RECURRENCE_LABEL[t.recurrence] ?? t.recurrence}
                     </td>
                     <td className="px-5 py-4">
                       <Badge variant={t.allow_installment ? "good" : "default"}>
-                        {t.allow_installment ? "Ya (Cicilan)" : "Penuh Sekaligus"}
+                        {t.allow_installment ? "Ya (Cicilan / Custom)" : "Penuh Sekaligus"}
                       </Badge>
                     </td>
                     <td className="px-5 py-4 font-semibold">{t.rate_count} tarif unit</td>
@@ -385,16 +522,113 @@ export default function FeeRatesPage() {
         </Card>
       )}
 
+      {/* MODAL: KELOLA TAHUN AJARAN */}
+      {showYearModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-lg p-6 border-border shadow-2xl space-y-5 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <Calendar className="size-5 text-primary" />
+                <span>Kelola Master Tahun Ajaran</span>
+              </h2>
+              <button onClick={() => setShowYearModal(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {/* List Tahun Ajaran */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Daftar Tahun Ajaran Terdaftar:</Label>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {years.map((y) => (
+                  <div
+                    key={y.ulid}
+                    className={`flex items-center justify-between p-3 rounded-xl border transition-colors ${
+                      y.is_active ? "border-primary bg-primary/10" : "border-border bg-card"
+                    }`}
+                  >
+                    <div>
+                      <p className="font-bold text-sm text-foreground flex items-center gap-2">
+                        <span>Tahun Ajaran {y.year}</span>
+                        {y.is_active && <Badge variant="primary" className="text-[10px]">Aktif Saat Ini</Badge>}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Periode: {y.starts_on || "01 Jul"} s/d {y.ends_on || "30 Jun"}
+                      </p>
+                    </div>
+
+                    {!y.is_active && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleActivateYear(y.ulid, y.year || "")}
+                        className="text-xs font-semibold h-8"
+                      >
+                        Jadikan Aktif
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Form Tambah Tahun Ajaran Baru */}
+            <form onSubmit={handleCreateYear} className="border-t border-border pt-4 space-y-3 text-xs">
+              <p className="font-bold text-foreground">Tambah Tahun Ajaran Baru:</p>
+              <div>
+                <Label className="text-xs">Nama Tahun Ajaran</Label>
+                <Input
+                  value={newYearName}
+                  onChange={(e) => setNewYearName(e.target.value)}
+                  placeholder="contoh: 2027/2028"
+                  required
+                  className="mt-1 font-bold"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Tanggal Mulai</Label>
+                  <Input
+                    type="date"
+                    value={newYearStarts}
+                    onChange={(e) => setNewYearStarts(e.target.value)}
+                    required
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Tanggal Selesai</Label>
+                  <Input
+                    type="date"
+                    value={newYearEnds}
+                    onChange={(e) => setNewYearEnds(e.target.value)}
+                    required
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <Button type="submit" disabled={submitting} className="font-bold shadow-xs">
+                  {submitting ? "Menyimpan…" : "Simpan Tahun Ajaran"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
       {/* MODAL: TAMBAH TARIF BARU */}
       {showRateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-card p-6 shadow-2xl border border-border">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="w-full max-w-lg rounded-2xl bg-card p-6 shadow-2xl border border-border my-8">
             <h2 className="text-lg font-bold text-foreground">Tambah Tarif Biaya Baru</h2>
             <p className="text-xs text-muted-foreground mt-1">
               Tentukan nominal biaya untuk kombinasi jenis tagihan, unit, dan tingkat kelas.
             </p>
 
-            <form onSubmit={handleCreateRate} className="mt-5 space-y-4">
+            <form onSubmit={handleCreateRate} className="mt-5 space-y-4 text-xs">
               <div>
                 <Label htmlFor="rate_fee_type" className="text-xs">Jenis Biaya</Label>
                 <select
@@ -402,7 +636,7 @@ export default function FeeRatesPage() {
                   value={rateForm.fee_type_ulid}
                   onChange={(e) => setRateForm({ ...rateForm, fee_type_ulid: e.target.value })}
                   required
-                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
+                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-xs"
                 >
                   {feeTypes?.map((t) => (
                     <option key={t.ulid} value={t.ulid}>{t.name} ({t.code})</option>
@@ -418,7 +652,7 @@ export default function FeeRatesPage() {
                     value={rateForm.school_unit_ulid}
                     onChange={(e) => setRateForm({ ...rateForm, school_unit_ulid: e.target.value })}
                     required
-                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
+                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-xs"
                   >
                     {units.map((u) => (
                       <option key={u.ulid} value={u.ulid}>{u.label}</option>
@@ -432,10 +666,10 @@ export default function FeeRatesPage() {
                     value={rateForm.academic_year_ulid}
                     onChange={(e) => setRateForm({ ...rateForm, academic_year_ulid: e.target.value })}
                     required
-                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
+                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-xs"
                   >
                     {years.map((y) => (
-                      <option key={y.ulid} value={y.ulid}>{y.year}</option>
+                      <option key={y.ulid} value={y.ulid}>{y.year} {y.is_active ? "(Aktif)" : ""}</option>
                     ))}
                   </select>
                 </div>
@@ -496,11 +730,11 @@ export default function FeeRatesPage() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3">
-                <Button type="button" variant="outline" onClick={() => setShowRateModal(false)}>
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-border">
+                <Button type="button" variant="ghost" onClick={() => setShowRateModal(false)}>
                   Batal
                 </Button>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className="font-bold shadow-xs">
                   {submitting ? "Menyimpan..." : "Simpan Tarif"}
                 </Button>
               </div>
@@ -511,14 +745,14 @@ export default function FeeRatesPage() {
 
       {/* MODAL: TAMBAH JENIS BIAYA */}
       {showTypeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-2xl border border-border">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-2xl border border-border my-8">
             <h2 className="text-lg font-bold text-foreground">Tambah Jenis Biaya Baru</h2>
             <p className="text-xs text-muted-foreground mt-1">
               Tambahkan kategori tagihan ke katalog sekolah.
             </p>
 
-            <form onSubmit={handleCreateType} className="mt-5 space-y-4">
+            <form onSubmit={handleCreateType} className="mt-5 space-y-4 text-xs">
               <div>
                 <Label htmlFor="type_code" className="text-xs">Kode Kategori</Label>
                 <Input
@@ -539,7 +773,7 @@ export default function FeeRatesPage() {
                   value={typeForm.name}
                   onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })}
                   required
-                  className="mt-1"
+                  className="mt-1 font-bold"
                 />
               </div>
 
@@ -549,7 +783,7 @@ export default function FeeRatesPage() {
                   id="type_recurrence"
                   value={typeForm.recurrence}
                   onChange={(e) => setTypeForm({ ...typeForm, recurrence: e.target.value as "monthly" | "per_term" | "once" })}
-                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
+                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-xs"
                 >
                   <option value="monthly">Bulanan (seperti SPP)</option>
                   <option value="per_term">Per Semester</option>
@@ -563,23 +797,90 @@ export default function FeeRatesPage() {
                   id="type_allow_installment"
                   checked={typeForm.allow_installment}
                   onChange={(e) => setTypeForm({ ...typeForm, allow_installment: e.target.checked })}
-                  className="rounded border-input text-primary"
+                  className="rounded border-input text-primary size-4"
                 />
-                <Label htmlFor="type_allow_installment" className="text-xs font-medium cursor-pointer">
+                <Label htmlFor="type_allow_installment" className="text-xs font-semibold cursor-pointer">
                   Izinkan Pembayaran Sebagian / Cicilan
                 </Label>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3">
-                <Button type="button" variant="outline" onClick={() => setShowTypeModal(false)}>
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-border">
+                <Button type="button" variant="ghost" onClick={() => setShowTypeModal(false)}>
                   Batal
                 </Button>
-                <Button type="submit" disabled={submitting}>
+                <Button type="submit" disabled={submitting} className="font-bold shadow-xs">
                   {submitting ? "Menyimpan..." : "Simpan Kategori"}
                 </Button>
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* MODAL: IMPORT TARIF */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-lg p-6 border-border shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <UploadCloud className="size-5 text-primary" />
+                <span>Import Tarif SPP & Biaya (CSV)</span>
+              </h2>
+              <button onClick={() => setShowImportModal(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="bg-primary/5 border border-primary/20 rounded-xl p-3.5 text-xs text-muted-foreground space-y-2">
+              <p className="font-semibold text-foreground">Format Spreadsheet yang Didukung:</p>
+              <p>
+                File .CSV dengan kolom: <code>fee_type_code</code> (contoh: <code>spp</code>, <code>uang_gedung</code>), <code>unit_code</code> (contoh: <code>sd</code>, <code>smp</code>), <code>tingkat</code> (1-12 atau kosong untuk semua tingkat), <code>academic_year</code> (contoh: <code>2027/2028</code>), <code>amount</code> (nominal angka), <code>due_day</code> (tgl jatuh tempo).
+              </p>
+              <a
+                href="/api/admin/import/fee-rates/template"
+                download
+                className="inline-flex items-center gap-1.5 font-bold text-primary hover:underline pt-1"
+              >
+                <Download className="size-3.5" />
+                <span>Unduh Format Template CSV Tarif SPP</span>
+              </a>
+            </div>
+
+            <form onSubmit={handleImportTariff} className="space-y-4 text-xs">
+              <div>
+                <Label className="text-xs font-semibold">Pilih File CSV Tarif:</Label>
+                <input
+                  type="file"
+                  accept=".csv,.txt"
+                  required
+                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                  className="mt-1 block w-full text-xs text-muted-foreground file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
+                />
+              </div>
+
+              {importResult && (
+                <div className="rounded-xl border border-good/30 bg-good/10 p-3 text-xs space-y-1">
+                  <p className="font-bold text-good">{importResult.message}</p>
+                  {importResult.errors.length > 0 && (
+                    <div className="mt-2 text-destructive font-mono text-[11px] max-h-24 overflow-y-auto">
+                      {importResult.errors.map((err, i) => (
+                        <p key={i}>⚠️ {err}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="ghost" onClick={() => setShowImportModal(false)} disabled={importing}>
+                  Tutup
+                </Button>
+                <Button type="submit" disabled={importing || !importFile} className="font-bold shadow-xs">
+                  {importing ? "Mengimpor Tarif…" : "Mulai Import Tarif"}
+                </Button>
+              </div>
+            </form>
+          </Card>
         </div>
       )}
     </div>

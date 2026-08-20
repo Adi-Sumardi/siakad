@@ -4,18 +4,23 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   BadgePercent,
-  BookOpen,
+  Calendar,
   ChevronRight,
+  Download,
+  FileSpreadsheet,
   Filter,
   GraduationCap,
   Percent,
   Phone,
+  Plus,
   RefreshCw,
   Search,
   Sparkles,
+  UploadCloud,
   User,
   Users,
   Wallet,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -67,18 +72,27 @@ type StudentItem = {
 };
 
 type SchoolUnit = { ulid: string; code: string; label: string; jenjang_group: string };
+type AcademicYear = { ulid: string; year: string; is_active: boolean };
 
 export default function AdminStudentsPage() {
   const [students, setStudents] = useState<StudentItem[] | null>(null);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
+  const [years, setYears] = useState<AcademicYear[]>([]);
+  const [selectedYear, setSelectedYear] = useState<string>("");
   const [loading, setLoading] = useState(true);
-  const [activeYear, setActiveYear] = useState<string>("");
 
   // Filters
   const [search, setSearch] = useState("");
   const [unitFilter, setUnitFilter] = useState("");
   const [jenjangFilter, setJenjangFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
+
+  // Import Modal
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importYearUlid, setImportYearUlid] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ message: string; imported: number; updated: number; errors: string[] } | null>(null);
 
   function loadStudents() {
     setLoading(true);
@@ -87,32 +101,84 @@ export default function AdminStudentsPage() {
     if (unitFilter) params.set("unit", unitFilter);
     if (jenjangFilter) params.set("jenjang", jenjangFilter);
     if (statusFilter) params.set("status", statusFilter);
+    if (selectedYear) params.set("academic_year", selectedYear);
 
     api
-      .get<{ students: { data: StudentItem[]; meta: { active_academic_year: string } } }>(
+      .get<{ students: { data: StudentItem[]; meta: { selected_academic_year: string } } }>(
         `/api/admin/students?${params.toString()}`,
       )
       .then((d) => {
         setStudents(d.students.data);
-        if (d.students.meta?.active_academic_year) {
-          setActiveYear(d.students.meta.active_academic_year);
-        }
       })
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data siswa."))
       .finally(() => setLoading(false));
   }
 
   useEffect(() => {
-    loadStudents();
+    api
+      .get<{ academic_years: AcademicYear[] }>("/api/admin/academic-years")
+      .then((d) => {
+        setYears(d.academic_years);
+        const active = d.academic_years.find((y) => y.is_active) ?? d.academic_years[0];
+        if (active) {
+          setSelectedYear(active.year);
+          setImportYearUlid(active.ulid);
+        }
+      })
+      .catch(() => {});
+
     api
       .get<{ school_units: SchoolUnit[] }>("/api/admin/school-units")
       .then((d) => setUnits(d.school_units))
       .catch(() => {});
-  }, [unitFilter, jenjangFilter, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (selectedYear) {
+      loadStudents();
+    }
+  }, [selectedYear, unitFilter, jenjangFilter, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
     loadStudents();
+  }
+
+  async function handleImportSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!importFile) {
+      toast.error("Silakan pilih file CSV terlebih dahulu.");
+      return;
+    }
+
+    setImporting(true);
+    setImportResult(null);
+
+    const form = new FormData();
+    form.set("file", importFile);
+    if (importYearUlid) form.set("academic_year_ulid", importYearUlid);
+
+    try {
+      const res = await api.post<{
+        message: string;
+        imported_count: number;
+        updated_count: number;
+        errors: string[];
+      }>("/api/admin/import/students", form);
+
+      toast.success(res.message);
+      setImportResult({
+        message: res.message,
+        imported: res.imported_count,
+        updated: res.updated_count,
+        errors: res.errors || [],
+      });
+      loadStudents();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengimpor data siswa.");
+    } finally {
+      setImporting(false);
+    }
   }
 
   // Summary Metrics
@@ -126,17 +192,48 @@ export default function AdminStudentsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Data Siswa & Tarif SPP</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Data Siswa & Nilai SPP</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Daftar lengkap seluruh siswa per jenjang & unit sekolah beserta kalkulasi SPP dan potongan beasiswa ({activeYear || "Tahun Ajaran Aktif"}).
+            Daftar siswa per jenjang & unit sekolah beserta kalkulasi SPP dan potongan beasiswa ({selectedYear || "Tahun Ajaran Aktif"}).
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Academic Year Selector */}
+          <div className="flex items-center gap-1.5 bg-card border border-input px-3 py-1.5 rounded-lg shadow-2xs">
+            <Calendar className="size-3.5 text-primary shrink-0" />
+            <span className="text-xs font-semibold text-muted-foreground">Tahun:</span>
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              className="bg-transparent text-xs font-bold text-foreground focus:outline-hidden"
+            >
+              {years.map((y) => (
+                <option key={y.ulid} value={y.year}>
+                  {y.year} {y.is_active ? "(Aktif)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <Button
+            onClick={() => {
+              setImportFile(null);
+              setImportResult(null);
+              setShowImportModal(true);
+            }}
+            variant="outline"
+            size="sm"
+            className="gap-1.5 font-semibold text-xs h-9"
+          >
+            <UploadCloud className="size-4 text-primary" />
+            <span>Import Siswa (CSV/Excel)</span>
+          </Button>
+
           <Link href="/admin/diskon">
             <Button variant="outline" size="sm" className="gap-1.5 font-semibold text-xs h-9">
               <BadgePercent className="size-4" />
-              <span>Kelola Diskon Siswa</span>
+              <span>Kelola Diskon</span>
             </Button>
           </Link>
           <Link href="/admin/tarif">
@@ -155,7 +252,7 @@ export default function AdminStudentsPage() {
             <GraduationCap className="size-5.5" />
           </span>
           <div>
-            <p className="text-xs font-medium text-muted-foreground">Total Siswa Terdata</p>
+            <p className="text-xs font-medium text-muted-foreground">Total Siswa ({selectedYear})</p>
             <p className="text-xl font-bold text-foreground mt-0.5">{totalStudents} Siswa</p>
           </div>
         </Card>
@@ -175,7 +272,7 @@ export default function AdminStudentsPage() {
             <BadgePercent className="size-5.5" />
           </span>
           <div>
-            <p className="text-xs font-medium text-muted-foreground">Total Beasiswa & Diskon</p>
+            <p className="text-xs font-medium text-muted-foreground">Total Potongan Beasiswa</p>
             <p className="text-lg font-bold text-good mt-0.5">− {rupiah(totalDiscount)}</p>
           </div>
         </Card>
@@ -391,6 +488,88 @@ export default function AdminStudentsPage() {
           </table>
         </div>
       </Card>
+
+      {/* MODAL: IMPORT SISWA */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-lg p-6 border-border shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <UploadCloud className="size-5 text-primary" />
+                <span>Import Data Siswa Massal (CSV/Excel)</span>
+              </h2>
+              <button onClick={() => setShowImportModal(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="bg-primary/5 border border-primary/20 rounded-xl p-3.5 text-xs text-muted-foreground space-y-2">
+              <p className="font-semibold text-foreground">Format File yang Didukung:</p>
+              <p>
+                File spreadsheet (.CSV). Pastikan berisi kolom: <code>nama_lengkap</code>, <code>nis</code>, <code>nisn</code>, <code>jenis_kelamin</code> (L/P), <code>unit_code</code> (contoh: <code>sd</code>, <code>smp</code>, <code>sma</code>), <code>kelas</code>, <code>wali_nama</code>, <code>wali_phone</code>, <code>wali_email</code>.
+              </p>
+              <a
+                href="/api/admin/import/students/template"
+                download
+                className="inline-flex items-center gap-1.5 font-bold text-primary hover:underline pt-1"
+              >
+                <Download className="size-3.5" />
+                <span>Unduh Format Template CSV Siswa</span>
+              </a>
+            </div>
+
+            <form onSubmit={handleImportSubmit} className="space-y-4 text-xs">
+              <div>
+                <Label className="text-xs font-semibold">Tahun Ajaran Penempatan Kelas:</Label>
+                <select
+                  value={importYearUlid}
+                  onChange={(e) => setImportYearUlid(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                >
+                  {years.map((y) => (
+                    <option key={y.ulid} value={y.ulid}>
+                      Tahun Ajaran {y.year} {y.is_active ? "(Aktif Saat Ini)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <Label className="text-xs font-semibold">Pilih File CSV Siswa:</Label>
+                <input
+                  type="file"
+                  accept=".csv,.txt"
+                  required
+                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                  className="mt-1 block w-full text-xs text-muted-foreground file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
+                />
+              </div>
+
+              {importResult && (
+                <div className="rounded-xl border border-good/30 bg-good/10 p-3 text-xs space-y-1">
+                  <p className="font-bold text-good">{importResult.message}</p>
+                  {importResult.errors.length > 0 && (
+                    <div className="mt-2 text-destructive font-mono text-[11px] max-h-24 overflow-y-auto">
+                      {importResult.errors.map((err, i) => (
+                        <p key={i}>⚠️ {err}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="ghost" onClick={() => setShowImportModal(false)} disabled={importing}>
+                  Tutup
+                </Button>
+                <Button type="submit" disabled={importing || !importFile} className="font-bold shadow-xs">
+                  {importing ? "Mengimpor Data…" : "Mulai Import Siswa"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

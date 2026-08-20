@@ -12,7 +12,8 @@ class Achievement extends Model
     use HasUlidKey;
 
     protected $fillable = [
-        'student_id', 'nama_prestasi', 'kategori', 'tingkat', 'juara',
+        'achiever_type', 'student_id', 'teacher_user_id', 'school_unit_id',
+        'nama_prestasi', 'kategori', 'tingkat', 'juara',
         'nama_event', 'penyelenggara', 'tanggal_event', 'tempat_event',
         'sertifikat_path', 'sertifikat_name', 'foto_kegiatan_path', 'foto_kegiatan_name', 'source', 'status', 'point_awarded',
         'recorded_by', 'verified_at', 'verified_by', 'rejection_reason',
@@ -27,6 +28,16 @@ class Achievement extends Model
     public function student(): BelongsTo
     {
         return $this->belongsTo(Student::class);
+    }
+
+    public function teacher(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'teacher_user_id');
+    }
+
+    public function schoolUnit(): BelongsTo
+    {
+        return $this->belongsTo(SchoolUnit::class);
     }
 
     public function recordedBy(): BelongsTo
@@ -57,6 +68,26 @@ class Achievement extends Model
 
     public function scopeVisibleTo($query, ?User $user)
     {
-        return $query->whereHas('student', fn ($q) => $q->visibleTo($user));
+        if (! $user) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        if ($user->isSuperAdmin()) {
+            return $query;
+        }
+
+        if ($user->isUnitScoped()) {
+            return $query->where(function ($q) use ($user) {
+                $q->whereHas('student', fn ($sq) => $sq->where('school_unit_id', $user->school_unit_id))
+                    ->orWhere('school_unit_id', $user->school_unit_id)
+                    ->orWhereHas('teacher', fn ($tq) => $tq->where('school_unit_id', $user->school_unit_id));
+            });
+        }
+
+        if ($user->isGuardian()) {
+            return $query->whereHas('student', fn ($q) => $q->visibleTo($user));
+        }
+
+        return $query->whereRaw('1 = 0');
     }
 }

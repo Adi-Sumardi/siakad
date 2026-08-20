@@ -6,15 +6,22 @@ import {
   AlertTriangle,
   Award,
   BadgePercent,
+  BarChart3,
+  Calendar,
+  CheckCircle2,
   ChevronRight,
   FileSpreadsheet,
+  Filter,
   GraduationCap,
   Megaphone,
   Percent,
   Receipt,
+  RefreshCw,
   SlidersHorizontal,
   Sparkles,
   TrendingDown,
+  TrendingUp,
+  Trophy,
   UserCheck,
   Users,
   Wallet,
@@ -23,62 +30,173 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth/auth-context";
 import { api, ApiError } from "@/lib/api";
 import { rupiah } from "@/lib/format";
 
-type ReceivablesSummary = {
-  outstanding: number;
-  bills: number;
-  families: number;
-  overdue_bills: number;
+type UnitBillingData = {
+  unit_id: number;
+  unit_code: string;
+  unit_label: string;
+  jenjang: string;
+  total_billed: number;
+  total_paid: number;
+  total_outstanding: number;
+  collection_rate: number;
+  bill_count: number;
+  paid_count: number;
+  unpaid_count: number;
+  overdue_count: number;
 };
+
+type BillingChartResponse = {
+  summary: {
+    total_billed: number;
+    total_paid: number;
+    total_outstanding: number;
+    collection_rate: number;
+    total_bills: number;
+  };
+  units: UnitBillingData[];
+};
+
+type UnitAchievementData = {
+  unit_id: number;
+  unit_code: string;
+  unit_label: string;
+  jenjang: string;
+  total_achievements: number;
+  siswa_count: number;
+  guru_count: number;
+  by_tingkat: Record<string, number>;
+  recent: Array<{
+    nama_prestasi: string;
+    tingkat: string;
+    juara: string | null;
+    achiever: string;
+    achiever_type: string;
+    tanggal: string | null;
+  }>;
+};
+
+type AchievementChartResponse = {
+  summary: {
+    total_achievements: number;
+    total_siswa: number;
+    total_guru: number;
+    by_level: Record<string, number>;
+  };
+  units: UnitAchievementData[];
+};
+
+type AcademicYear = { ulid: string; year: string; is_active: boolean };
 
 export default function AdminHomePage() {
   const { user } = useAuth();
-  const [summary, setSummary] = useState<ReceivablesSummary | null>(null);
-  const [pendingAchievements, setPendingAchievements] = useState<number | null>(null);
   const [studentCount, setStudentCount] = useState<number | null>(null);
+  const [years, setYears] = useState<AcademicYear[]>([]);
+
+  // Billing Chart State
+  const [billingStartDate, setBillingStartDate] = useState("");
+  const [billingEndDate, setBillingEndDate] = useState("");
+  const [billingYear, setBillingYear] = useState("");
+  const [billingData, setBillingData] = useState<BillingChartResponse | null>(null);
+  const [loadingBilling, setLoadingBilling] = useState(true);
+
+  // Achievement Chart State
+  const [achieverType, setAchieverType] = useState<"all" | "siswa" | "guru">("all");
+  const [achieveStartDate, setAchieveStartDate] = useState("");
+  const [achieveEndDate, setAchieveEndDate] = useState("");
+  const [achievementData, setAchievementData] = useState<AchievementChartResponse | null>(null);
+  const [loadingAchieve, setLoadingAchieve] = useState(true);
+
+  function loadBillingChart() {
+    setLoadingBilling(true);
+    const params = new URLSearchParams();
+    if (billingStartDate) params.set("start_date", billingStartDate);
+    if (billingEndDate) params.set("end_date", billingEndDate);
+    if (billingYear) params.set("academic_year", billingYear);
+
+    api
+      .get<BillingChartResponse>(`/api/admin/dashboard/billing-chart?${params.toString()}`)
+      .then((d) => setBillingData(d))
+      .catch(() => toast.error("Gagal memuat grafik tagihan."))
+      .finally(() => setLoadingBilling(false));
+  }
+
+  function loadAchievementChart() {
+    setLoadingAchieve(true);
+    const params = new URLSearchParams();
+    if (achieverType !== "all") params.set("achiever_type", achieverType);
+    if (achieveStartDate) params.set("start_date", achieveStartDate);
+    if (achieveEndDate) params.set("end_date", achieveEndDate);
+
+    api
+      .get<AchievementChartResponse>(`/api/admin/dashboard/achievements-chart?${params.toString()}`)
+      .then((d) => setAchievementData(d))
+      .catch(() => toast.error("Gagal memuat grafik prestasi."))
+      .finally(() => setLoadingAchieve(false));
+  }
 
   useEffect(() => {
-    api
-      .get<{ summary: ReceivablesSummary }>("/api/admin/reports/receivables")
-      .then((d) => setSummary(d.summary))
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat ringkasan tunggakan."));
+    loadBillingChart();
+    loadAchievementChart();
 
     api
-      .get<{ achievements: unknown[] }>("/api/admin/achievements?status=pending")
-      .then((d) => setPendingAchievements(d.achievements.length))
+      .get<{ academic_years: AcademicYear[] }>("/api/admin/academic-years")
+      .then((d) => {
+        setYears(d.academic_years);
+        const active = d.academic_years.find((y) => y.is_active);
+        if (active) setBillingYear(active.year);
+      })
       .catch(() => {});
 
     api
       .get<{ students: { meta: { total: number } } }>("/api/admin/students?per_page=1")
       .then((d) => setStudentCount(d.students.meta?.total ?? 0))
       .catch(() => {});
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    loadBillingChart();
+  }, [billingYear]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    loadAchievementChart();
+  }, [achieverType]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Max value for billing bars calculation
+  const maxBilled = billingData?.units
+    ? Math.max(...billingData.units.map((u) => u.total_billed), 1)
+    : 1;
+
+  // Max value for achievement bars calculation
+  const maxAchievements = achievementData?.units
+    ? Math.max(...achievementData.units.map((u) => u.total_achievements), 1)
+    : 1;
 
   return (
     <div className="space-y-8">
       {/* Welcome Banner */}
-      <div className="rounded-3xl bg-linear-to-r from-primary/10 via-primary/5 to-accent/20 p-6 sm:p-8 border border-primary/20 shadow-xs">
+      <div className="rounded-3xl bg-linear-to-r from-primary/15 via-primary/5 to-accent/30 p-6 sm:p-8 border border-primary/20 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <Badge variant="primary" className="mb-2">Portal Administrasi Yayasan YAPI</Badge>
+            <Badge variant="primary" className="mb-2">Portal Eksekutif & Administrasi Yayasan YAPI</Badge>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground">
               Assalamu&apos;alaikum, {user?.name}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {user?.role === "admin"
-                ? "Kelola data akademik, penetapan tarif SPP, diskon/beasiswa, transaksi pembayaran, dan hak akses pengguna."
-                : `Ringkasan data operasional ${user?.school_unit?.label ?? "unit sekolah"}.`}
+              Pantau arus kas tagihan/piutang per unit sekolah dan grafik apresiasi prestasi siswa & guru secara real-time.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
             <Link href="/admin/siswa">
               <Button variant="outline" className="gap-2 font-bold text-xs shadow-xs">
                 <GraduationCap className="size-4" />
-                <span>Lihat Data Siswa & SPP</span>
+                <span>Data Siswa & SPP</span>
               </Button>
             </Link>
             <Link href="/admin/generate">
@@ -91,179 +209,312 @@ export default function AdminHomePage() {
         </div>
       </div>
 
-      {/* Main KPI Stat Cards */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-bold text-foreground">Ringkasan Keuangan & Operasional</h2>
-          <Link href="/admin/laporan" className="text-xs font-semibold text-primary hover:underline inline-flex items-center gap-1">
-            Lihat Laporan Lengkap <ChevronRight className="size-3.5" />
-          </Link>
-        </div>
+      {/* KPI Cards Summary */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="p-5 border-border/80 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Siswa Terdaftar</span>
+            <GraduationCap className="size-5 text-primary" />
+          </div>
+          <p className="mt-2 text-2xl font-black text-foreground">
+            {studentCount !== null ? `${studentCount} Siswa` : <Skeleton className="h-8 w-28" />}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">Aktif di 8 unit sekolah</p>
+        </Card>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Card className="p-5 border-border/80 hover:border-primary/40 transition-all shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Siswa Terdaftar</span>
-              <GraduationCap className="size-5 text-primary" />
-            </div>
-            <p className="mt-2 text-2xl font-black text-foreground">
-              {studentCount !== null ? `${studentCount} Siswa` : <Skeleton className="h-8 w-28" />}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">Aktif di 8 unit sekolah</p>
-          </Card>
+        <Card className="p-5 border-border/80 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Penerimaan Kas (Terbayar)</span>
+            <TrendingUp className="size-5 text-good" />
+          </div>
+          <p className="mt-2 text-2xl font-black text-good">
+            {billingData ? rupiah(billingData.summary.total_paid) : <Skeleton className="h-8 w-32" />}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {billingData ? `Tingkat Pelunasan: ${billingData.summary.collection_rate}%` : "Memuat..."}
+          </p>
+        </Card>
 
-          <Card className="p-5 border-border/80 hover:border-primary/40 transition-all shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Piutang Berjalan</span>
-              <TrendingDown className="size-5 text-destructive" />
-            </div>
-            <p className="mt-2 text-2xl font-black text-foreground">
-              {summary ? rupiah(summary.outstanding) : <Skeleton className="h-8 w-32" />}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {summary ? `Dari ${summary.families} keluarga wali murid` : "Memuat..."}
-            </p>
-          </Card>
+        <Card className="p-5 border-border/80 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sisa Piutang / Tunggakan</span>
+            <TrendingDown className="size-5 text-destructive" />
+          </div>
+          <p className="mt-2 text-2xl font-black text-destructive">
+            {billingData ? rupiah(billingData.summary.total_outstanding) : <Skeleton className="h-8 w-32" />}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">Perlu pemantauan & tindak lanjut</p>
+        </Card>
 
-          <Card className="p-5 border-border/80 hover:border-primary/40 transition-all shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tagihan Belum Lunas</span>
-              <Receipt className="size-5 text-amber-600" />
-            </div>
-            <p className="mt-2 text-2xl font-black text-foreground">
-              {summary ? `${summary.bills} tagihan` : <Skeleton className="h-8 w-20" />}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">Termasuk SPP & biaya unit</p>
-          </Card>
-
-          <Card className="p-5 border-border/80 hover:border-primary/40 transition-all shadow-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Verifikasi Prestasi</span>
-              <Award className="size-5 text-emerald-600" />
-            </div>
-            <p className="mt-2 text-2xl font-black text-foreground">
-              {pendingAchievements !== null ? `${pendingAchievements} pengajuan` : <Skeleton className="h-8 w-20" />}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">Menunggu validasi staff/guru</p>
-          </Card>
-        </div>
+        <Card className="p-5 border-border/80 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Prestasi Terverifikasi</span>
+            <Trophy className="size-5 text-amber-500" />
+          </div>
+          <p className="mt-2 text-2xl font-black text-foreground">
+            {achievementData ? `${achievementData.summary.total_achievements} Prestasi` : <Skeleton className="h-8 w-24" />}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {achievementData ? `${achievementData.summary.total_siswa} Siswa · ${achievementData.summary.total_guru} Guru` : "Memuat..."}
+          </p>
+        </Card>
       </div>
 
-      {/* Core Feature Navigation Matrix */}
-      <div>
-        <h2 className="text-base font-bold text-foreground mb-3.5">Modul & Fitur Administrasi Utama</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Link href="/admin/siswa">
-            <Card className="group h-full p-5 border-border/80 hover:border-primary transition-all duration-200 shadow-xs hover:shadow-md cursor-pointer flex items-start gap-4">
-              <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-blue-500/10 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                <GraduationCap className="size-6" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-bold text-foreground group-hover:text-primary transition-colors">Data Siswa & Tarif SPP</p>
-                <p className="text-xs text-muted-foreground mt-1">Daftar siswa per jenjang & unit, rincian SPP pokok, potongan beasiswa, dan SPP bersih.</p>
-              </div>
-            </Card>
-          </Link>
+      {/* ========================================================================= */}
+      {/* 1. GRAFIK DATA TAGIHAN & PIUTANG PER UNIT DENGAN CUSTOM DATE RANGE */}
+      {/* ========================================================================= */}
+      <Card className="p-6 border-border/80 shadow-md space-y-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-border/70 pb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <BarChart3 className="size-5 text-primary" />
+              <h2 className="text-lg font-bold text-foreground">Grafik Arus Tagihan & Piutang per Unit Sekolah</h2>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Perbandingan tagihan terbit, kas masuk, dan sisa piutang dengan filter rentang tanggal fleksibel.
+            </p>
+          </div>
 
-          <Link href="/admin/tarif">
-            <Card className="group h-full p-5 border-border/80 hover:border-primary transition-all duration-200 shadow-xs hover:shadow-md cursor-pointer flex items-start gap-4">
-              <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-indigo-500/10 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                <SlidersHorizontal className="size-6" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-bold text-foreground group-hover:text-primary transition-colors">Pengaturan Biaya & SPP</p>
-                <p className="text-xs text-muted-foreground mt-1">Atur jenis tagihan, nominal SPP per tingkat, uang gedung, seragam, jatuh tempo & denda.</p>
-              </div>
-            </Card>
-          </Link>
+          {/* Custom Date Range & Year Filter */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              loadBillingChart();
+            }}
+            className="flex flex-wrap items-center gap-2 text-xs"
+          >
+            <div>
+              <select
+                value={billingYear}
+                onChange={(e) => {
+                  setBillingYear(e.target.value);
+                  setBillingStartDate("");
+                  setBillingEndDate("");
+                }}
+                className="h-8.5 rounded-lg border border-input bg-card px-2.5 text-xs font-semibold shadow-2xs"
+              >
+                <option value="">Semua Tahun Ajaran</option>
+                {years.map((y) => (
+                  <option key={y.ulid} value={y.year}>
+                    Tahun {y.year} {y.is_active ? "(Aktif)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <Link href="/admin/diskon">
-            <Card className="group h-full p-5 border-border/80 hover:border-primary transition-all duration-200 shadow-xs hover:shadow-md cursor-pointer flex items-start gap-4">
-              <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-amber-500/10 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
-                <BadgePercent className="size-6" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-bold text-foreground group-hover:text-primary transition-colors">Kelola Diskon & Beasiswa</p>
-                <p className="text-xs text-muted-foreground mt-1">Master skema potongan SPP (% atau Rp) dan penetapan beasiswa per siswa.</p>
-              </div>
-            </Card>
-          </Link>
+            <div className="flex items-center gap-1.5 bg-muted/40 p-1 rounded-lg border border-border">
+              <Calendar className="size-3.5 text-muted-foreground ml-1" />
+              <Input
+                type="date"
+                value={billingStartDate}
+                onChange={(e) => setBillingStartDate(e.target.value)}
+                className="h-7 text-xs w-32 bg-card"
+                placeholder="Tgl Mulai"
+              />
+              <span className="text-muted-foreground font-bold">s/d</span>
+              <Input
+                type="date"
+                value={billingEndDate}
+                onChange={(e) => setBillingEndDate(e.target.value)}
+                className="h-7 text-xs w-32 bg-card"
+                placeholder="Tgl Selesai"
+              />
+            </div>
 
-          <Link href="/admin/generate">
-            <Card className="group h-full p-5 border-border/80 hover:border-primary transition-all duration-200 shadow-xs hover:shadow-md cursor-pointer flex items-start gap-4">
-              <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                <Wallet className="size-6" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-bold text-foreground group-hover:text-primary transition-colors">Terbitkan SPP Massal</p>
-                <p className="text-xs text-muted-foreground mt-1">Pratinjau otomatis pemotongan beasiswa dan generate invoice SPP bulanan.</p>
-              </div>
-            </Card>
-          </Link>
+            <Button type="submit" size="sm" className="h-8.5 text-xs font-semibold gap-1 shadow-xs">
+              <Filter className="size-3" />
+              <span>Terapkan</span>
+            </Button>
 
-          <Link href="/admin/tagihan">
-            <Card className="group h-full p-5 border-border/80 hover:border-primary transition-all duration-200 shadow-xs hover:shadow-md cursor-pointer flex items-start gap-4">
-              <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                <Receipt className="size-6" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-bold text-foreground group-hover:text-primary transition-colors">Tagihan & Transaksi</p>
-                <p className="text-xs text-muted-foreground mt-1">Catat pembayaran kasir/front desk, pembatalan, pembebasan tagihan, dan unduh PDF invoice.</p>
-              </div>
-            </Card>
-          </Link>
-
-          {user?.role === "admin" && (
-            <Link href="/admin/users">
-              <Card className="group h-full p-5 border-border/80 hover:border-primary transition-all duration-200 shadow-xs hover:shadow-md cursor-pointer flex items-start gap-4">
-                <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-cyan-500/10 text-cyan-600 group-hover:bg-cyan-600 group-hover:text-white transition-colors">
-                  <Users className="size-6" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="font-bold text-foreground group-hover:text-primary transition-colors">Manajemen Pengguna</p>
-                  <p className="text-xs text-muted-foreground mt-1">Kelola akun dan hak akses Super Admin, Tata Usaha Unit, Guru, dan Wali Murid.</p>
-                </div>
-              </Card>
-            </Link>
-          )}
-
-          <Link href="/admin/laporan">
-            <Card className="group h-full p-5 border-border/80 hover:border-primary transition-all duration-200 shadow-xs hover:shadow-md cursor-pointer flex items-start gap-4">
-              <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-purple-500/10 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors">
-                <FileSpreadsheet className="size-6" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-bold text-foreground group-hover:text-primary transition-colors">Laporan Keuangan</p>
-                <p className="text-xs text-muted-foreground mt-1">Rekap penerimaan kas, penuaan piutang per unit/kelas, dan ekspor data.</p>
-              </div>
-            </Card>
-          </Link>
-
-          <Link href="/admin/prestasi">
-            <Card className="group h-full p-5 border-border/80 hover:border-primary transition-all duration-200 shadow-xs hover:shadow-md cursor-pointer flex items-start gap-4">
-              <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-rose-500/10 text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition-colors">
-                <Award className="size-6" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-bold text-foreground group-hover:text-primary transition-colors">Verifikasi Prestasi Siswa</p>
-                <p className="text-xs text-muted-foreground mt-1">Validasi piagam lomba, ajuan prestasi wali murid, dan pemberian poin reward.</p>
-              </div>
-            </Card>
-          </Link>
-
-          <Link href="/admin/poin">
-            <Card className="group h-full p-5 border-border/80 hover:border-primary transition-all duration-200 shadow-xs hover:shadow-md cursor-pointer flex items-start gap-4">
-              <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-amber-500/10 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition-colors">
-                <Sparkles className="size-6" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-bold text-foreground group-hover:text-primary transition-colors">Poin & Tata Tertib</p>
-                <p className="text-xs text-muted-foreground mt-1">Buku rekapitulasi poin pelanggaran & apresiasi serta ambang surat peringatan.</p>
-              </div>
-            </Card>
-          </Link>
+            {(billingStartDate || billingEndDate) && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setBillingStartDate("");
+                  setBillingEndDate("");
+                  loadBillingChart();
+                }}
+                className="h-8.5 text-xs"
+              >
+                Reset
+              </Button>
+            )}
+          </form>
         </div>
-      </div>
+
+        {/* Visual Bar Chart Breakdown */}
+        {loadingBilling && <Skeleton className="h-64 w-full rounded-2xl" />}
+
+        {!loadingBilling && billingData && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 gap-4">
+              {billingData.units.map((unit) => {
+                const paidWidthPercent = unit.total_billed > 0 ? (unit.total_paid / maxBilled) * 100 : 0;
+                const outstandingWidthPercent = unit.total_billed > 0 ? (unit.total_outstanding / maxBilled) * 100 : 0;
+
+                return (
+                  <div key={unit.unit_id} className="p-4 rounded-xl bg-card border border-border/60 hover:border-primary/50 transition-all shadow-2xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="default" className="font-mono text-[10px] uppercase">
+                          {unit.jenjang}
+                        </Badge>
+                        <span className="font-bold text-sm text-foreground">{unit.unit_label}</span>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs font-semibold">
+                        <span className="text-good">Lunas: {rupiah(unit.total_paid)}</span>
+                        <span className="text-destructive">Piutang: {rupiah(unit.total_outstanding)}</span>
+                        <Badge variant={unit.collection_rate >= 80 ? "good" : unit.collection_rate >= 50 ? "warn" : "bad"}>
+                          {unit.collection_rate}% Terbayar
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {/* Progress Track Bars */}
+                    <div className="space-y-1.5">
+                      <div className="h-3 w-full bg-muted/60 rounded-full overflow-hidden flex">
+                        <div
+                          style={{ width: `${paidWidthPercent}%` }}
+                          className="h-full bg-good transition-all duration-500 rounded-l-full"
+                          title={`Kas Masuk: ${rupiah(unit.total_paid)}`}
+                        />
+                        <div
+                          style={{ width: `${outstandingWidthPercent}%` }}
+                          className="h-full bg-destructive/70 transition-all duration-500 rounded-r-full"
+                          title={`Sisa Piutang: ${rupiah(unit.total_outstanding)}`}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[11px] text-muted-foreground">
+                        <span>Total Tagihan: <strong>{rupiah(unit.total_billed)}</strong> ({unit.bill_count} tagihan)</span>
+                        <span>{unit.overdue_count > 0 ? `⚠️ ${unit.overdue_count} tagihan lewat jatuh tempo` : "Jatuh tempo aman"}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* ========================================================================= */}
+      {/* 2. GRAFIK PRESTASI SEKOLAH PER UNIT DENGAN FILTER SISWA VS GURU */}
+      {/* ========================================================================= */}
+      <Card className="p-6 border-border/80 shadow-md space-y-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-border/70 pb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Trophy className="size-5 text-amber-500" />
+              <h2 className="text-lg font-bold text-foreground">Grafik Capaian Prestasi per Unit Sekolah</h2>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Statistik perolehan juara dan penghargaan tingkat Sekolah, Kecamatan, Kota, Provinsi hingga Nasional.
+            </p>
+          </div>
+
+          {/* Filter Siswa vs Guru & Date */}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <div className="flex items-center bg-muted/60 p-1 rounded-xl border border-border">
+              <button
+                type="button"
+                onClick={() => setAchieverType("all")}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  achieverType === "all" ? "bg-primary text-primary-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Semua ({achievementData?.summary.total_achievements ?? 0})
+              </button>
+              <button
+                type="button"
+                onClick={() => setAchieverType("siswa")}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  achieverType === "siswa" ? "bg-primary text-primary-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Prestasi Murid ({achievementData?.summary.total_siswa ?? 0})
+              </button>
+              <button
+                type="button"
+                onClick={() => setAchieverType("guru")}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  achieverType === "guru" ? "bg-primary text-primary-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Prestasi Guru ({achievementData?.summary.total_guru ?? 0})
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Visual Achievements Grid */}
+        {loadingAchieve && <Skeleton className="h-56 w-full rounded-2xl" />}
+
+        {!loadingAchieve && achievementData && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {achievementData.units.map((unit) => {
+              const heightBarPercent = (unit.total_achievements / maxAchievements) * 100;
+
+              return (
+                <Card key={unit.unit_id} className="p-4.5 border-border/80 hover:border-primary/50 transition-all shadow-xs flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <Badge variant="default" className="text-[10px] font-mono uppercase">
+                          {unit.jenjang}
+                        </Badge>
+                        <h3 className="font-bold text-sm text-foreground mt-1">{unit.unit_label}</h3>
+                      </div>
+                      <span className="flex size-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 font-extrabold text-base">
+                        {unit.total_achievements}
+                      </span>
+                    </div>
+
+                    {/* Breakdown Siswa vs Guru */}
+                    <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-border/60 text-xs">
+                      <span className="font-medium text-foreground">Siswa: <strong>{unit.siswa_count}</strong></span>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="font-medium text-foreground">Guru: <strong>{unit.guru_count}</strong></span>
+                    </div>
+
+                    {/* Breakdown Tingkat */}
+                    <div className="flex flex-wrap gap-1 mt-2.5">
+                      {unit.by_tingkat["Nasional"] > 0 && (
+                        <Badge variant="bad" className="text-[10px] font-bold">
+                          {unit.by_tingkat["Nasional"]} Nasional
+                        </Badge>
+                      )}
+                      {unit.by_tingkat["Provinsi"] > 0 && (
+                        <Badge variant="warn" className="text-[10px] font-bold">
+                          {unit.by_tingkat["Provinsi"]} Provinsi
+                        </Badge>
+                      )}
+                      {unit.by_tingkat["Kabupaten/Kota"] > 0 && (
+                        <Badge variant="primary" className="text-[10px] font-bold">
+                          {unit.by_tingkat["Kabupaten/Kota"]} Kota/Kab
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Recent Prestasi Snippet */}
+                  {unit.recent.length > 0 && (
+                    <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground">
+                      <p className="font-semibold text-foreground truncate">
+                        🏆 {unit.recent[0].nama_prestasi}
+                      </p>
+                      <p className="truncate text-[10px]">
+                        Oleh: {unit.recent[0].achiever} ({unit.recent[0].achiever_type === "guru" ? "Guru" : "Siswa"})
+                      </p>
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
