@@ -41,6 +41,7 @@ use Illuminate\Support\Facades\Route;
 
 // Machine to machine. Outside auth:sanctum on purpose - PMB has no session,
 // it proves itself with an HMAC signature over the raw body instead.
+Route::get('/login', fn () => response()->json(['message' => 'Unauthenticated.'], 401))->name('login');
 Route::post('/webhooks/pmb/students', [PmbHandoffController::class, 'store'])
     ->middleware('pmb.signature');
 
