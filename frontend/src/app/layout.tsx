@@ -28,6 +28,14 @@ const fontBrand = Fraunces({
 export const metadata: Metadata = {
   title: "Siakad YAPI",
   description: "Aplikasi sekolah YAPI: data siswa, prestasi, poin, dan tagihan.",
+  icons: {
+    icon: [
+      { url: "/images/logo-yapi.png", type: "image/png" },
+      { url: "/favicon.png", type: "image/png" },
+    ],
+    shortcut: "/images/logo-yapi.png",
+    apple: "/images/logo-yapi.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
