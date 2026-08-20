@@ -7,6 +7,7 @@ export type User = {
   ulid: string;
   name: string;
   email: string | null;
+  phone?: string | null;
   role: "admin" | "admin_unit" | "guru" | "orangtua";
   is_active: boolean;
   school_unit?: { ulid: string; code: string; label: string } | null;

@@ -107,15 +107,16 @@ export default function BillsPage() {
         method: "virtual_account",
       });
 
-      if (payment.invoice_url) {
+      toast.success("Invoice pembayaran berhasil diterbitkan.");
+      setSelected(new Set());
+      await load();
+
+      if (payment.invoice_url && !payment.invoice_url.includes("/pembayaran")) {
         window.location.href = payment.invoice_url;
         return;
       }
 
-      toast.success("Pembayaran berhasil dibuat.");
-      setSelected(new Set());
-      await load();
-      router.push("/pembayaran");
+      router.push(`/pembayaran?payment=${payment.ulid}`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Tidak dapat memproses pembayaran.");
       await load();
@@ -144,15 +145,16 @@ export default function BillsPage() {
         },
       });
 
-      if (payment.invoice_url) {
+      toast.success("Pembayaran kustom berhasil dibuat.");
+      setCustomBill(null);
+      await load();
+
+      if (payment.invoice_url && !payment.invoice_url.includes("/pembayaran")) {
         window.location.href = payment.invoice_url;
         return;
       }
 
-      toast.success("Pembayaran kustom berhasil dibuat.");
-      setCustomBill(null);
-      await load();
-      router.push("/pembayaran");
+      router.push(`/pembayaran?payment=${payment.ulid}`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal membuat pembayaran kustom.");
     } finally {
@@ -285,18 +287,20 @@ export default function BillsPage() {
                         </div>
 
                         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setCustomBill(bill);
-                              setCustomAmount(String(bill.remaining_amount));
-                            }}
-                            className="text-xs font-semibold gap-1.5 h-8"
-                          >
-                            <Coins className="size-3.5" />
-                            <span>Bayar Cicilan / Custom</span>
-                          </Button>
+                          {bill.allow_installment && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setCustomBill(bill);
+                                setCustomAmount(String(bill.remaining_amount));
+                              }}
+                              className="text-xs font-semibold gap-1.5 h-8 text-primary border-primary/30 hover:bg-primary/5"
+                            >
+                              <Coins className="size-3.5" />
+                              <span>Bayar Cicilan / Custom</span>
+                            </Button>
+                          )}
 
                           <Link
                             href={`/tagihan/${bill.ulid}`}

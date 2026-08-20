@@ -5,7 +5,15 @@ export type Bill = {
   bill_number: string;
   description: string;
   fee_type?: { code: string; name: string };
-  student?: { ulid: string; nama_lengkap: string; nama_panggilan: string | null };
+  feeType?: { code: string; name: string };
+  student?: {
+    ulid: string;
+    nama_lengkap: string;
+    nama_panggilan: string | null;
+    nis?: string | null;
+    schoolUnit?: { label: string; code: string };
+  };
+  academicYear?: { year: string };
   period_month: number | null;
   subtotal: number;
   discount_amount: number;
@@ -16,6 +24,8 @@ export type Bill = {
   status: BillStatus;
   due_date: string | null;
   days_to_due: number | null;
+  allow_installment?: boolean;
+  issued_at?: string | null;
   lines?: { name: string; qty: number; unit_price: number; amount: number; size_option: string | null }[];
 };
 

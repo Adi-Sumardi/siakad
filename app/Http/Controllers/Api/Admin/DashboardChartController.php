@@ -38,13 +38,14 @@ class DashboardChartController extends Controller
 
         $billsQuery = Bill::query()
             ->visibleTo($request->user())
-            ->whereNotIn('status', ['cancelled']);
+            ->whereNotIn('status', ['cancelled'])
+            ->with(['student:id,school_unit_id']);
 
         if (! empty($startDate)) {
-            $billsQuery->whereDate('issued_date', '>=', Carbon::parse($startDate)->toDateString());
+            $billsQuery->whereDate('issued_at', '>=', Carbon::parse($startDate)->toDateString());
         }
         if (! empty($endDate)) {
-            $billsQuery->whereDate('issued_date', '<=', Carbon::parse($endDate)->toDateString());
+            $billsQuery->whereDate('issued_at', '<=', Carbon::parse($endDate)->toDateString());
         }
 
         if ($activeYear && empty($startDate) && empty($endDate)) {
@@ -52,7 +53,7 @@ class DashboardChartController extends Controller
         }
 
         $allBills = $billsQuery->get([
-            'id', 'school_unit_id', 'amount', 'paid_amount', 'remaining_amount', 'status', 'due_date',
+            'id', 'student_id', 'total_amount', 'paid_amount', 'remaining_amount', 'status', 'due_date',
         ]);
 
         $unitData = [];
@@ -61,8 +62,8 @@ class DashboardChartController extends Controller
         $grandTotalOutstanding = 0;
 
         foreach ($units as $unit) {
-            $unitBills = $allBills->where('school_unit_id', $unit->id);
-            $billed = (float) $unitBills->sum('amount');
+            $unitBills = $allBills->filter(fn ($b) => $b->student && $b->student->school_unit_id === $unit->id);
+            $billed = (float) $unitBills->sum('total_amount');
             $paid = (float) $unitBills->sum('paid_amount');
             $outstanding = (float) $unitBills->sum('remaining_amount');
 
@@ -71,7 +72,7 @@ class DashboardChartController extends Controller
             $grandTotalOutstanding += $outstanding;
 
             $paidCount = $unitBills->where('status', 'paid')->count();
-            $partialCount = $unitBills->where('status', 'partially_paid')->count();
+            $partialCount = $unitBills->where('status', 'partial')->count();
             $unpaidCount = $unitBills->where('status', 'unpaid')->count();
             $overdueCount = $unitBills->filter(fn ($b) => $b->remaining_amount > 0 && $b->due_date && Carbon::parse($b->due_date)->isPast())->count();
 

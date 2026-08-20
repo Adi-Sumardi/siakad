@@ -44,6 +44,9 @@ class CheckoutService
         foreach ($bills as $bill) {
             $max = (float) $bill->remaining_amount;
             if (isset($customAmounts[$bill->ulid])) {
+                if (! $bill->allow_installment) {
+                    throw new RuntimeException("Tagihan {$bill->description} tidak mengizinkan pembayaran cicilan/kustom. Pembayaran harus dilakukan lunas.");
+                }
                 $custom = round((float) $customAmounts[$bill->ulid], 2);
                 if ($custom <= 0 || $custom > $max) {
                     throw new RuntimeException("Jumlah pembayaran untuk {$bill->description} tidak valid (Maksimal Rp ".number_format($max, 0, ',', '.').').');

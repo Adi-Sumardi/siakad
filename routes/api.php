@@ -75,10 +75,9 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
     Route::get('/bills', [WaliBillController::class, 'index']);
     Route::get('/bills/{ulid}', [WaliBillController::class, 'show']);
     Route::get('/bills/{ulid}/pdf', [WaliBillController::class, 'pdf']);
-    // One invoice for however many bills were ticked - the whole point of
-    // payment_allocations.
     Route::post('/checkout', [WaliBillController::class, 'checkout'])->middleware('throttle:20,1');
     Route::get('/payments', [WaliBillController::class, 'payments']);
+    Route::post('/payments/{ulid}/simulate-settle', [WaliBillController::class, 'simulateSettle']);
 
     Route::get('/students/{ulid}/points', [WaliPointController::class, 'index']);
     Route::get('/students/{ulid}/achievements', [WaliAchievementController::class, 'index']);

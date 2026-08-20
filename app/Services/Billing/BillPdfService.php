@@ -25,12 +25,19 @@ class BillPdfService
             ->unique('id')
             ->values();
 
+        $logoPath = public_path('images/logo-yapi.png');
+        $logoBase64 = '';
+        if (file_exists($logoPath)) {
+            $logoBase64 = 'data:image/png;base64,'.base64_encode(file_get_contents($logoPath));
+        }
+
         return Pdf::loadView('pdf.bill', [
             'bill' => $bill,
             'isPaid' => $bill->status === 'paid',
             'payments' => $payments,
             'kelas' => $bill->student->currentEnrollment()?->classroom?->name,
             'schoolName' => config('app.name'),
+            'logoBase64' => $logoBase64,
             'money' => fn (float $amount) => 'Rp '.number_format($amount, 0, ',', '.'),
         ])->setPaper('a4');
     }

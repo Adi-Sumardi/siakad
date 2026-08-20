@@ -112,11 +112,40 @@ class BillController extends Controller
     {
         $payments = Payment::query()
             ->visibleTo($request->user())
-            ->with(['bills.feeType', 'bills.student'])
+            ->with(['bills.feeType', 'bills.student.schoolUnit'])
             ->latest()
             ->limit(100)
             ->get();
 
         return response()->json(['payments' => PaymentResource::collection($payments)]);
+    }
+
+    /**
+     * Settle payment for testing and simulation purposes.
+     */
+    public function simulateSettle(Request $request, string $ulid, \App\Services\Billing\PaymentAllocator $allocator): JsonResponse
+    {
+        $payment = Payment::query()
+            ->visibleTo($request->user())
+            ->where('ulid', $ulid)
+            ->firstOrFail();
+
+        if ($payment->status === 'completed') {
+            return response()->json([
+                'message' => 'Pembayaran ini sudah berstatus lunas.',
+                'payment' => new PaymentResource($payment),
+            ]);
+        }
+
+        $allocator->settle($payment, 'tx_sim_'.uniqid(), [
+            'simulated' => true,
+            'actor' => $request->user()->name,
+            'settled_at' => now()->toIso8601String(),
+        ]);
+
+        return response()->json([
+            'message' => 'Pembayaran berhasil diverifikasi & status tagihan telah LUNAS!',
+            'payment' => new PaymentResource($payment->fresh(['bills.feeType', 'bills.student.schoolUnit'])),
+        ]);
     }
 }

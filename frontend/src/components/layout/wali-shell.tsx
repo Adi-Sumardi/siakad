@@ -3,17 +3,30 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CreditCard, GraduationCap, Home, LogOut, Megaphone, Menu, Receipt, User, X } from "lucide-react";
+import {
+  Award,
+  CreditCard,
+  Home,
+  LogOut,
+  Megaphone,
+  Menu,
+  Receipt,
+  User,
+  Users,
+  X,
+} from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth/auth-context";
 import { cn } from "@/lib/utils";
 
-const WALI_NAV = [
+export const WALI_NAV = [
   { href: "/dashboard", label: "Beranda", icon: Home },
-  { href: "/tagihan", label: "Tagihan", icon: Receipt },
+  { href: "/tagihan", label: "Tagihan SPP", icon: Receipt },
   { href: "/pembayaran", label: "Riwayat Bayar", icon: CreditCard },
-  { href: "/informasi", label: "Informasi", icon: Megaphone },
+  { href: "/prestasi", label: "Prestasi Siswa", icon: Award },
+  { href: "/informasi", label: "Pengumuman", icon: Megaphone },
+  { href: "/profil", label: "Profil Akun", icon: User },
 ];
 
 export function WaliShell({
@@ -26,153 +39,168 @@ export function WaliShell({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <div className="min-h-dvh bg-canvas flex flex-col">
-      {/* Mobile Drawer Backdrop */}
+    <div className="min-h-dvh bg-canvas md:flex">
+      {/* Mobile Backdrop */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs md:hidden"
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs transition-opacity md:hidden"
           onClick={() => setMobileOpen(false)}
         />
       )}
 
-      {/* Mobile Drawer */}
+      {/* Mobile Slide-over Drawer */}
       <aside
         className={cn(
-          "fixed inset-y-0 right-0 z-50 flex w-72 flex-col bg-card shadow-2xl transition-transform duration-300 ease-in-out md:hidden",
-          mobileOpen ? "translate-x-0" : "translate-x-full",
+          "fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-card shadow-2xl transition-transform duration-300 ease-in-out md:hidden",
+          mobileOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <BrandMark />
           <button
             onClick={() => setMobileOpen(false)}
-            className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent"
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label="Tutup menu"
           >
             <X className="size-5" />
           </button>
         </div>
 
         <div className="p-4 border-b border-border bg-accent/30">
-          <p className="text-xs text-muted-foreground">Masuk sebagai Wali Murid</p>
-          <p className="text-sm font-bold text-foreground truncate mt-0.5">{user?.name}</p>
-          {user?.email && <p className="text-xs text-muted-foreground truncate">{user.email}</p>}
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary font-bold text-base shadow-2xs">
+              {user?.name?.charAt(0) ?? "W"}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-primary">Portal Wali Murid</p>
+              <p className="text-sm font-bold text-foreground truncate">{user?.name}</p>
+              {user?.phone && <p className="text-xs text-muted-foreground truncate">{user.phone}</p>}
+            </div>
+          </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-1">
-          {WALI_NAV.map((item) => {
-            const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}`));
-            const Icon = item.icon;
-
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all",
-                  active
-                    ? "bg-primary text-primary-foreground font-semibold shadow-sm"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-              >
-                <Icon className="size-4.5 shrink-0" />
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="border-t border-border p-4">
-          <Button variant="ghost" size="sm" onClick={logout} className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10">
-            <LogOut className="size-4" />
-            Keluar
-          </Button>
-        </div>
-      </aside>
-
-      {/* Main Top Header */}
-      <header className="sticky top-0 z-30 border-b border-border bg-card/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-7xl 2xl:max-w-full items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 py-3.5">
-          <BrandMark />
-
-          {/* Desktop Navigation Tabs */}
-          <nav className="hidden md:flex items-center gap-1 bg-muted/60 p-1 rounded-xl border border-border/50">
+        <div className="flex-1 overflow-y-auto px-3 py-4">
+          <div className="mb-2 px-3">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Menu Portal</p>
+          </div>
+          <nav className="flex flex-col gap-1">
             {WALI_NAV.map((item) => {
-              const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}`));
+              const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
               const Icon = item.icon;
 
               return (
                 <Link
                   key={item.href}
                   href={item.href}
+                  onClick={() => setMobileOpen(false)}
                   className={cn(
-                    "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all",
+                    "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all",
                     active
-                      ? "bg-card text-foreground shadow-xs font-bold"
-                      : "text-muted-foreground hover:text-foreground hover:bg-card/50",
+                      ? "bg-primary text-primary-foreground shadow-sm font-semibold"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )}
                 >
-                  <Icon className="size-3.5" />
+                  <Icon className="size-4.5 shrink-0" />
                   <span>{item.label}</span>
                 </Link>
               );
             })}
           </nav>
+        </div>
 
-          {/* Desktop User Info & Logout */}
-          <div className="hidden md:flex items-center gap-3">
-            <div className="text-right">
-              <p className="text-xs font-bold text-foreground truncate">{user?.name}</p>
-              <p className="text-[11px] text-muted-foreground">Wali Murid</p>
+        <div className="border-t border-border p-4 bg-card/60">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={logout}
+            className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          >
+            <LogOut className="size-4" />
+            <span>Keluar dari Akun</span>
+          </Button>
+        </div>
+      </aside>
+
+      {/* Desktop Fixed Sidebar */}
+      <aside className="hidden border-r border-border bg-card md:flex md:w-64 md:shrink-0 md:flex-col md:justify-between">
+        <div>
+          <div className="border-b border-border/70 px-5 py-4.5">
+            <BrandMark />
+          </div>
+
+          <div className="px-3 py-4">
+            <div className="mb-2 px-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Menu Portal</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground hover:text-destructive gap-1.5 text-xs px-2.5">
-              <LogOut className="size-3.5" />
-              Keluar
-            </Button>
-          </div>
+            <nav className="flex flex-col gap-1">
+              {WALI_NAV.map((item) => {
+                const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
+                const Icon = item.icon;
 
-          {/* Mobile Hamburger Button */}
-          <div className="flex items-center gap-2 md:hidden">
-            <button
-              onClick={() => setMobileOpen(true)}
-              className="flex items-center justify-center rounded-lg p-2 text-foreground hover:bg-accent"
-              aria-label="Buka menu navigasi"
-            >
-              <Menu className="size-5" />
-            </button>
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all",
+                      active
+                        ? "bg-primary text-primary-foreground shadow-sm font-semibold"
+                        : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="size-4.5 shrink-0" />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
           </div>
         </div>
-      </header>
 
-      {/* Main Fullspan Container */}
-      <main className="w-full flex-1 max-w-7xl 2xl:max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8">
-        {children}
-      </main>
-
-      {/* Mobile Bottom Quick Navigation Bar */}
-      <div className="sticky bottom-0 z-20 border-t border-border bg-card/95 backdrop-blur md:hidden">
-        <div className="grid grid-cols-4 gap-1 p-1.5">
-          {WALI_NAV.map((item) => {
-            const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}`));
-            const Icon = item.icon;
-
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-xl text-[11px] font-medium transition-colors",
-                  active
-                    ? "text-primary font-bold bg-primary/10"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Icon className="size-4" />
-                <span className="truncate">{item.label}</span>
-              </Link>
-            );
-          })}
+        {/* User Card in Desktop Sidebar */}
+        <div className="border-t border-border bg-card/40 p-4">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary font-bold text-sm shadow-2xs">
+              {user?.name?.charAt(0) ?? "W"}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-foreground">{user?.name}</p>
+              <p className="truncate text-xs text-muted-foreground">Wali Murid YAPI</p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={logout}
+            className="mt-3 w-full justify-start gap-2 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+          >
+            <LogOut className="size-4" />
+            <span>Keluar</span>
+          </Button>
         </div>
+      </aside>
+
+      {/* Main Content Container */}
+      <div className="min-w-0 flex-1 flex flex-col">
+        {/* Mobile Header Bar */}
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border bg-card/95 backdrop-blur px-4 py-3 md:hidden">
+          <button
+            onClick={() => setMobileOpen(true)}
+            className="flex items-center justify-center rounded-lg p-2 text-foreground hover:bg-accent"
+            aria-label="Buka menu navigasi"
+          >
+            <Menu className="size-5" />
+          </button>
+          <BrandMark />
+          <div className="size-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
+            {user?.name?.charAt(0) ?? "W"}
+          </div>
+        </header>
+
+        {/* Responsive Content Area */}
+        <main className="w-full flex-1 max-w-7xl 2xl:max-w-full mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-6 md:py-8">
+          {children}
+        </main>
       </div>
     </div>
   );
