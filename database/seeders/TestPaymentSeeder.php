@@ -83,15 +83,26 @@ class TestPaymentSeeder extends Seeder
             ['amount' => 750000, 'due_day' => 10, 'late_fee_amount' => 0, 'is_active' => true]
         );
 
-        // 5. Create / Update User Wali Murid with requested WhatsApp phone 081292702075
+        // 5. Create / Update User Wali Murid with requested WhatsApp phone 081292702075 & email adiesumardy@gmail.com
         $guardianPhone = '081292702075';
-        $guardianEmail = 'adisumardi888@gmail.com';
-        $guardianName = 'Adi Sumardi';
+        $guardianEmail = 'adiesumardy@gmail.com';
+        $guardianName = 'Adi Sumardi (Wali)';
 
-        $user = User::where('email', $guardianEmail)->first();
-        if (! $user) {
-            $user = new User();
+        // Ensure admin user adisumardi888@gmail.com stays clean as admin
+        $adminUser = User::where('email', 'adisumardi888@gmail.com')->first();
+        if ($adminUser) {
+            $adminUser->role = 'admin';
+            $adminUser->phone = null;
+            $adminUser->save();
         }
+
+        $encrypter = app(\App\Services\Security\FieldEncrypter::class);
+        $phoneHash = $encrypter->blindIndex(\App\Services\Notification\PhoneNumberFormatter::toWhatsAppFormat($guardianPhone));
+
+        $user = User::where('phone_hash', $phoneHash)->first()
+            ?? User::where('email', $guardianEmail)->first()
+            ?? new User();
+
         $user->name = $guardianName;
         $user->email = $guardianEmail;
         $user->phone = $guardianPhone;
@@ -104,11 +115,11 @@ class TestPaymentSeeder extends Seeder
         $guardian = Guardian::updateOrCreate(
             ['user_id' => $user->id],
             [
-                'nama' => $guardianName,
+                'nama' => 'Adi Sumardi',
                 'hubungan' => 'ayah',
                 'no_hp' => $guardianPhone,
                 'email' => $guardianEmail,
-                'alamat' => 'Jakarta',
+                'alamat' => 'Jakarta Timur',
             ]
         );
 
@@ -201,14 +212,18 @@ class TestPaymentSeeder extends Seeder
         $monthName = now()->translatedFormat('F Y');
 
         // Bill for SD Student (Rp 650.000)
-        $billSD = Bill::updateOrCreate(
-            [
+        $billSD = Bill::where('student_id', $studentSD->id)
+            ->where('fee_type_id', $sppType->id)
+            ->where('academic_year_id', $year->id)
+            ->where('period_month', $currentMonth)
+            ->first();
+
+        if (! $billSD) {
+            $billSD = Bill::create([
                 'student_id' => $studentSD->id,
                 'fee_type_id' => $sppType->id,
                 'academic_year_id' => $year->id,
                 'period_month' => $currentMonth,
-            ],
-            [
                 'bill_number' => Bill::generateNumber($sppType, $year->year, $currentMonth),
                 'term_id' => $term->id,
                 'fee_rate_id' => $sdRate->id,
@@ -224,8 +239,8 @@ class TestPaymentSeeder extends Seeder
                 'due_date' => now()->addDays(10)->toDateString(),
                 'allow_installment' => true,
                 'issued_at' => now(),
-            ]
-        );
+            ]);
+        }
 
         BillLine::updateOrCreate(
             ['bill_id' => $billSD->id, 'name' => "SPP {$monthName}"],
@@ -238,14 +253,18 @@ class TestPaymentSeeder extends Seeder
         );
 
         // Bill for SMP 12 Student (Rp 750.000)
-        $billSMP = Bill::updateOrCreate(
-            [
+        $billSMP = Bill::where('student_id', $studentSMP->id)
+            ->where('fee_type_id', $sppType->id)
+            ->where('academic_year_id', $year->id)
+            ->where('period_month', $currentMonth)
+            ->first();
+
+        if (! $billSMP) {
+            $billSMP = Bill::create([
                 'student_id' => $studentSMP->id,
                 'fee_type_id' => $sppType->id,
                 'academic_year_id' => $year->id,
                 'period_month' => $currentMonth,
-            ],
-            [
                 'bill_number' => Bill::generateNumber($sppType, $year->year, $currentMonth),
                 'term_id' => $term->id,
                 'fee_rate_id' => $smpRate->id,
@@ -261,8 +280,8 @@ class TestPaymentSeeder extends Seeder
                 'due_date' => now()->addDays(10)->toDateString(),
                 'allow_installment' => true,
                 'issued_at' => now(),
-            ]
-        );
+            ]);
+        }
 
         BillLine::updateOrCreate(
             ['bill_id' => $billSMP->id, 'name' => "SPP {$monthName}"],
