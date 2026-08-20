@@ -131,6 +131,7 @@ Route::middleware('auth:sanctum')->prefix('files')->group(function () {
  * alone would let one unit's admin open another unit's student.
  */
 Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->group(function () {
+    Route::get('/students', [\App\Http\Controllers\Api\Admin\StudentController::class, 'index']);
     Route::get('/bills', [AdminBillController::class, 'index']);
     Route::get('/bills/{ulid}/pdf', [AdminBillController::class, 'pdf']);
     Route::post('/bills/{ulid}/waive', [AdminBillController::class, 'waive']);
@@ -183,6 +184,9 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/discount-schemes', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'schemes']);
     Route::get('/student-discounts', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'studentDiscounts']);
 
+    // User management (viewable by admins)
+    Route::get('/users', [\App\Http\Controllers\Api\Admin\UserController::class, 'index']);
+
     // Pickers every admin form needs - none of it sensitive, so one response
     // shape for both admin kinds.
     Route::get('/school-units', [ReferenceController::class, 'schoolUnits']);
@@ -191,8 +195,7 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 });
 
 /*
- * Setting prices & discounts is central-admin only, the same split PMB draws around its
- * settings: a per-unit admin bills their unit but does not decide what it charges.
+ * Setting prices & discounts and full user CRUD is central-admin only.
  */
 Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
     Route::post('/fee-types', [FeeSettingController::class, 'storeType']);
@@ -207,4 +210,8 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
 
     Route::post('/student-discounts', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'assignStudentDiscount']);
     Route::delete('/student-discounts/{studentDiscount}', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'revokeStudentDiscount']);
+
+    Route::post('/users', [\App\Http\Controllers\Api\Admin\UserController::class, 'store']);
+    Route::patch('/users/{user}', [\App\Http\Controllers\Api\Admin\UserController::class, 'update']);
+    Route::delete('/users/{user}', [\App\Http\Controllers\Api\Admin\UserController::class, 'destroy']);
 });

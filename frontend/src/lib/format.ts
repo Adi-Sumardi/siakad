@@ -25,3 +25,14 @@ export function tanggal(iso: string | null): string {
     year: "numeric",
   });
 }
+
+export function tanggalWaktu(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("id-ID", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
