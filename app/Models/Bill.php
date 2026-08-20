@@ -114,7 +114,19 @@ class Bill extends Model
         $period = $month ? str_pad((string) $month, 2, '0', STR_PAD_LEFT) : null;
 
         $like = implode('/', array_filter([$prefix, $year, $period])).'/%';
-        $sequence = static::where('bill_number', 'like', $like)->count() + 1;
+
+        // The highest sequence actually in use, not how many rows happen to
+        // match: count()+1 collided in production the first time a gap
+        // opened up (two independent callers numbering the same fee
+        // type/year/month, one seeded test data after the other had already
+        // issued real bills) - count() stayed put while the taken numbers
+        // did not, so it kept handing out one that was already claimed.
+        $maxSequence = static::where('bill_number', 'like', $like)
+            ->pluck('bill_number')
+            ->map(fn (string $number) => (int) mb_substr($number, -5))
+            ->max();
+
+        $sequence = ($maxSequence ?? 0) + 1;
 
         return implode('/', array_filter([
             $prefix, $year, $period, str_pad((string) $sequence, 5, '0', STR_PAD_LEFT),

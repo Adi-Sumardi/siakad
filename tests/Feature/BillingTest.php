@@ -166,6 +166,39 @@ class BillingTest extends TestCase
         $this->assertCount(1, $bill->lines);
     }
 
+    public function test_a_bill_number_collision_from_an_out_of_sequence_row_is_retried_not_fatal(): void
+    {
+        $this->rate();
+        $student = $this->student();
+
+        // A row that count()+1 does not predict: one bill exists, so the next
+        // call computes sequence 2 - but something else (a seeder, another
+        // run) already claimed that exact number for an unrelated bill. This
+        // is exactly the shape of the collision seen in production logs.
+        // Graduated, so the generator itself never tries to bill them - the
+        // stray row is only here to occupy a number out of sequence.
+        $strayStudent = Student::create([
+            'nama_lengkap' => 'Sudah Lulus', 'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->unit->id, 'status' => 'graduated',
+        ]);
+        Bill::create([
+            'student_id' => $strayStudent->id,
+            'academic_year_id' => $this->year->id,
+            'fee_type_id' => $this->spp->id,
+            'dedup_key' => 'unrelated-dedup-key',
+            'bill_number' => 'SPP/2026/08/00002',
+            'description' => 'Out-of-sequence bill', 'subtotal' => 1, 'total_amount' => 1,
+            'remaining_amount' => 1, 'status' => 'unpaid', 'due_date' => now(), 'issued_at' => now(),
+        ]);
+
+        $run = $this->generator()->run($this->spp, $this->year, $this->unit, 8);
+
+        $this->assertSame(1, $run->bills_created);
+        $bill = Bill::where('student_id', $student->id)->first();
+        // Retried past the collision to a number nothing else holds.
+        $this->assertNotSame('SPP/2026/08/00002', $bill->bill_number);
+    }
+
     public function test_running_the_generator_twice_issues_nothing_the_second_time(): void
     {
         $this->rate();

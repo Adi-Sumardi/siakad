@@ -110,7 +110,25 @@ class TestPaymentSeeder extends Seeder
         $user->is_active = true;
         $user->activated_at = now();
         $user->email_verified_at = now();
-        $user->save();
+
+        try {
+            $user->save();
+        } catch (\Illuminate\Database\UniqueConstraintViolationException) {
+            // Neither lookup above found the row this phone number actually
+            // belongs to - most likely APP_KEY changed since it was written,
+            // which changes the blind index everything is hashed against
+            // (see docs: encryption at rest / APP_KEY). Whatever the cause,
+            // a seeder crashing over a re-seed is worse than reusing the row
+            // its own hash points at.
+            $user = User::where('phone_hash', $phoneHash)->firstOrFail();
+            $user->name = $guardianName;
+            $user->email = $guardianEmail;
+            $user->role = 'orangtua';
+            $user->is_active = true;
+            $user->activated_at = now();
+            $user->email_verified_at = now();
+            $user->save();
+        }
 
         $guardian = Guardian::updateOrCreate(
             ['user_id' => $user->id],

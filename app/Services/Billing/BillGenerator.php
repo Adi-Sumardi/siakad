@@ -232,50 +232,59 @@ class BillGenerator
         BillingRun $run,
         ?User $actor,
     ): Bill {
-        return DB::transaction(function () use ($student, $type, $year, $outcome, $run, $actor) {
-            /** @var FeeRate $rate */
-            $rate = $outcome['rate'];
+        /** @var FeeRate $rate */
+        $rate = $outcome['rate'];
 
-            // firstOrCreate against the unique (student_id, dedup_key): two
-            // admins pressing the button at once, or a scheduler that fires
-            // twice, end up with one bill either way.
-            $bill = Bill::firstOrCreate(
-                ['student_id' => $student->id, 'dedup_key' => $outcome['dedup']],
-                [
-                    'bill_number' => Bill::generateNumber($type, $year->year, $run->period_month),
-                    'academic_year_id' => $year->id,
-                    'term_id' => $run->term_id,
-                    'fee_type_id' => $type->id,
-                    'fee_rate_id' => $rate->id,
-                    'billing_run_id' => $run->id,
-                    'period_month' => $run->period_month,
-                    'description' => $this->describe($type, $year, $run->period_month),
-                    'subtotal' => $outcome['subtotal'],
-                    'discount_amount' => $outcome['discount'],
-                    'late_fee' => 0,
-                    'total_amount' => $outcome['total'],
-                    'paid_amount' => 0,
-                    'remaining_amount' => $outcome['total'],
-                    'status' => 'unpaid',
-                    'due_date' => $outcome['due'],
-                    'grace_period_end' => $rate->late_fee_grace_days
-                        ? $outcome['due']->copy()->addDays($rate->late_fee_grace_days)
-                        : null,
-                    // Cast, not passed through: a FeeType built in memory
-                    // without this key holds null, and the column's default
-                    // only applies to rows the database inserts on its own.
-                    'allow_installment' => (bool) $type->allow_installment,
-                    'issued_at' => now(),
-                    'issued_by' => $actor?->id,
-                ]
-            );
+        // generateNumber() is a plain count()+1 - not atomic, and nothing else
+        // in the app is guaranteed to be the only writer touching this fee
+        // type/year/month at once (a billing run and a seeder have collided on
+        // it before). Retrying on a unique-constraint hit, with a freshly
+        // recomputed number each time, is cheap insurance against a crash that
+        // would otherwise stop an entire run partway through hundreds of
+        // students.
+        return retry(3, function () use ($student, $type, $year, $outcome, $run, $actor, $rate) {
+            return DB::transaction(function () use ($student, $type, $year, $outcome, $run, $actor, $rate) {
+                // firstOrCreate against the unique (student_id, dedup_key): two
+                // admins pressing the button at once, or a scheduler that fires
+                // twice, end up with one bill either way.
+                $bill = Bill::firstOrCreate(
+                    ['student_id' => $student->id, 'dedup_key' => $outcome['dedup']],
+                    [
+                        'bill_number' => Bill::generateNumber($type, $year->year, $run->period_month),
+                        'academic_year_id' => $year->id,
+                        'term_id' => $run->term_id,
+                        'fee_type_id' => $type->id,
+                        'fee_rate_id' => $rate->id,
+                        'billing_run_id' => $run->id,
+                        'period_month' => $run->period_month,
+                        'description' => $this->describe($type, $year, $run->period_month),
+                        'subtotal' => $outcome['subtotal'],
+                        'discount_amount' => $outcome['discount'],
+                        'late_fee' => 0,
+                        'total_amount' => $outcome['total'],
+                        'paid_amount' => 0,
+                        'remaining_amount' => $outcome['total'],
+                        'status' => 'unpaid',
+                        'due_date' => $outcome['due'],
+                        'grace_period_end' => $rate->late_fee_grace_days
+                            ? $outcome['due']->copy()->addDays($rate->late_fee_grace_days)
+                            : null,
+                        // Cast, not passed through: a FeeType built in memory
+                        // without this key holds null, and the column's default
+                        // only applies to rows the database inserts on its own.
+                        'allow_installment' => (bool) $type->allow_installment,
+                        'issued_at' => now(),
+                        'issued_by' => $actor?->id,
+                    ]
+                );
 
-            if ($bill->wasRecentlyCreated) {
-                $this->writeLines($bill, $rate, $outcome['discount']);
-            }
+                if ($bill->wasRecentlyCreated) {
+                    $this->writeLines($bill, $rate, $outcome['discount']);
+                }
 
-            return $bill;
-        });
+                return $bill;
+            });
+        }, 0, fn (\Throwable $e) => $e instanceof \Illuminate\Database\UniqueConstraintViolationException);
     }
 
     /**
