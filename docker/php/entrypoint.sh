@@ -16,6 +16,10 @@ if [ ! -f /var/www/.env ]; then
     echo "No .env found in container - expected to be mounted/copied at build/deploy time." >&2
 fi
 
+# Ensure no stale packages or config caches exist from build or volume mounts
+rm -f /var/www/bootstrap/cache/*.php
+
+php artisan package:discover --ansi || true
 php artisan migrate --force
 
 # Config/route caching is safe to run on every boot - cheap, and guarantees the
@@ -23,5 +27,6 @@ php artisan migrate --force
 # cache baked in at build time.
 php artisan config:cache
 php artisan route:cache
+php artisan view:cache || true
 
 exec "$@"

@@ -64,6 +64,17 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
+        User::updateOrCreate(
+            ['email' => 'adisumardi888@gmail.com'],
+            [
+                'name' => 'Administrator',
+                'role' => 'admin',
+                'is_active' => true,
+                'activated_at' => now(),
+                'email_verified_at' => now(),
+            ]
+        );
+
         // Fee catalogue. Codes are the contract the generator and every
         // dedup_key are built on, so they are seeded rather than typed in.
         $feeTypes = [

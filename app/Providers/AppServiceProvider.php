@@ -20,7 +20,14 @@ class AppServiceProvider extends ServiceProvider
         // handoff code knowing which provider is behind it.
         $this->app->bind(MailGateway::class, SendagoMailGateway::class);
         $this->app->bind(WhatsAppGateway::class, SendagoWhatsAppGateway::class);
-        $this->app->bind(PaymentGateway::class, XenditGateway::class);
+        $this->app->bind(PaymentGateway::class, function () {
+            $driver = env('PAYMENT_GATEWAY', 'sendagopay');
+
+            return match ($driver) {
+                'xendit' => app(\App\Services\Payment\XenditGateway::class),
+                default => app(\App\Services\Payment\SendagoPayGateway::class),
+            };
+        });
     }
 
     public function boot(): void

@@ -56,7 +56,15 @@ return [
         'base_url' => env('PMB_BASE_URL'),
     ],
 
-    // Payment gateway. Left unset, checkout still works end to end but produces
+    // Gateway Pembayaran SendagoPay
+    'sendagopay' => [
+        'public_key' => env('SENDAGOPAY_PUBLIC_KEY'),
+        'secret_key' => env('SENDAGOPAY_SECRET_KEY'),
+        'webhook_secret' => env('SENDAGOPAY_WEBHOOK_SECRET'),
+        'base_url' => env('SENDAGOPAY_BASE_URL', 'https://api-sendagopay.adilabs.id'),
+    ],
+
+    // Payment gateway Xendit. Left unset, checkout still works end to end but produces
     // no invoice URL - a laptop must not be able to mint payable invoices.
     'xendit' => [
         'secret_key' => env('XENDIT_SECRET_KEY'),

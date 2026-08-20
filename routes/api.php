@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\Wali\BillController as WaliBillController;
 use App\Http\Controllers\Api\Wali\DashboardController as WaliDashboardController;
 use App\Http\Controllers\Api\Wali\PointController as WaliPointController;
 use App\Http\Controllers\Api\Webhooks\PmbHandoffController;
+use App\Http\Controllers\Api\Webhooks\SendagoPayController;
 use App\Http\Controllers\Api\Webhooks\XenditController;
 use Illuminate\Support\Facades\Route;
 
@@ -46,6 +47,7 @@ Route::post('/webhooks/pmb/students', [PmbHandoffController::class, 'store'])
 // Settles money, so it verifies its own token and records every delivery before
 // acting - see the controller.
 Route::post('/webhooks/xendit', [XenditController::class, 'handle']);
+Route::post('/webhooks/sendagopay', [SendagoPayController::class, 'handle']);
 
 Route::prefix('auth')->group(function () {
     // The only way in, for everyone. The identifier decides the channel: an

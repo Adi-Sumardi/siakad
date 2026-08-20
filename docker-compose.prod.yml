@@ -30,6 +30,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
+      - ./.env:/var/www/.env:ro
       - siakad-storage:/var/www/storage/app
       # Shared read-only with nginx so it serves index.php and static assets
       # from this same build. Docker seeds the named volume from the image on
@@ -54,6 +55,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
+      - ./.env:/var/www/.env:ro
       - siakad-storage:/var/www/storage/app
     networks:
       - siakad-net
@@ -75,6 +77,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
+      - ./.env:/var/www/.env:ro
       - siakad-storage:/var/www/storage/app
     networks:
       - siakad-net

@@ -29,13 +29,9 @@ RUN composer install --no-dev --no-interaction --no-scripts --no-autoloader --pr
 
 COPY . .
 
-# --no-scripts: composer's post-autoload-dump hook runs `artisan package:discover`,
-# which reads composer.json's require-dev list directly (not just what's actually
-# installed) and errors on dev-only packages like laravel/pail that --no-dev never
-# installed. Runtime provider loading (config:cache in entrypoint.sh) introspects
-# vendor/composer/installed.json instead, which only lists what's really there, so
-# skipping the hook here doesn't lose anything.
-RUN composer dump-autoload --optimize --no-dev --no-scripts \
+# Remove any stale bootstrap caches and optimize autoloader for production
+RUN rm -f bootstrap/cache/*.php \
+    && composer dump-autoload --optimize --no-dev --no-scripts \
     && mkdir -p storage/framework/{cache,sessions,testing,views} storage/logs bootstrap/cache \
     && chown -R www-data:www-data storage bootstrap/cache
 

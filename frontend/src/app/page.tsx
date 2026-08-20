@@ -7,7 +7,16 @@ import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const UNITS = ["PG Sakinah", "TK Sakinah", "SD Sakinah", "SMP Sakinah"];
+const UNITS = [
+  "RA Sakinah",
+  "Playgroup Sakinah",
+  "TK Islam Al Azhar 13",
+  "SD Islam Al Azhar 13",
+  "SMP Islam Al Azhar 12",
+  "SMP Islam Al Azhar 55",
+  "SMA Islam Al Azhar 33",
+  "SMA Islam Al Azhar 48",
+];
 
 function RotatingUnit() {
   const [index, setIndex] = useState(0);
