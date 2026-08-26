@@ -131,9 +131,9 @@ class StudentController extends Controller
                     'wali_kelas' => $classroom->homeroomTeacher?->name,
                 ] : null,
                 'guardian' => $primaryGuardian ? [
-                    'name' => $primaryGuardian->nama_lengkap,
+                    'name' => $primaryGuardian->nama,
                     'relationship' => $primaryGuardian->pivot->relationship,
-                    'phone' => $primaryGuardian->phone,
+                    'phone' => $primaryGuardian->no_hp,
                 ] : null,
                 'pricing' => [
                     'has_rate' => $matchedRate !== null,

@@ -126,6 +126,31 @@ class AdminUserAndStudentTest extends TestCase
         $this->assertFalse($emails->contains('wali.smp@example.com'));
     }
 
+    public function test_the_student_list_shows_the_guardians_actual_name_and_phone(): void
+    {
+        $student = Student::create([
+            'nama_lengkap' => 'Budi Santoso', 'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->unit->id, 'status' => 'active',
+        ]);
+
+        $guardianUser = User::create(['name' => 'Pak Budi', 'email' => 'pak.budi@example.com', 'role' => 'orangtua', 'is_active' => true]);
+        $guardian = Guardian::create([
+            'user_id' => $guardianUser->id, 'nama' => 'Budi Santoso Sr.',
+            'hubungan' => 'ayah', 'no_hp' => '081234567890', 'email' => $guardianUser->email,
+        ]);
+        $guardian->students()->attach($student->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+        $response = $this->actingAs($this->admin)->getJson('/api/admin/students');
+
+        // Guardian has no nama_lengkap or phone column - it's nama and
+        // no_hp. Reading the wrong attribute name doesn't error, it just
+        // silently returns null, which is how this shipped with every row's
+        // parent contact column blank.
+        $response->assertOk()
+            ->assertJsonPath('students.data.0.guardian.name', 'Budi Santoso Sr.')
+            ->assertJsonPath('students.data.0.guardian.phone', '081234567890');
+    }
+
     public function test_can_list_students_with_spp_and_discounts(): void
     {
         $sppType = FeeType::create([
