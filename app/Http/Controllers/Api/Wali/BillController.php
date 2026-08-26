@@ -123,8 +123,17 @@ class BillController extends Controller
     /**
      * Settle payment for testing and simulation purposes.
      */
+    /**
+     * Dev-only: settles a payment without any money having moved, so
+     * checkout can be exercised end to end without a live gateway callback.
+     * The route is only ever registered outside production, but a route file
+     * is not something this must trust alone - refusing here too means the
+     * only way to fake a payment is running the app in local/testing.
+     */
     public function simulateSettle(Request $request, string $ulid, \App\Services\Billing\PaymentAllocator $allocator): JsonResponse
     {
+        abort_unless(app()->environment(['local', 'testing']), 404);
+
         $payment = Payment::query()
             ->visibleTo($request->user())
             ->where('ulid', $ulid)

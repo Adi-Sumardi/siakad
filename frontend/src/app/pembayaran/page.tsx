@@ -381,8 +381,13 @@ function PaymentsContent() {
                 </div>
               )}
 
-              {/* Simulation Mode Action for Test Flow */}
-              {selectedPayment.status !== "completed" && (
+              {/* Simulation Mode Action for Test Flow - dev/staging only.
+                  The matching endpoint 404s outside local/testing on the
+                  backend now too; this keeps a real family from ever seeing
+                  a "confirm payment" button that can't do anything, and keeps
+                  it from being the free lunas-without-paying button it was
+                  before that backend guard existed. */}
+              {process.env.NODE_ENV !== "production" && selectedPayment.status !== "completed" && (
                 <div className="pt-2 border-t border-border space-y-2">
                   <Button
                     onClick={() => handleSimulateSettle(selectedPayment)}

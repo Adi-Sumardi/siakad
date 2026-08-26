@@ -77,7 +77,6 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
     Route::get('/bills/{ulid}/pdf', [WaliBillController::class, 'pdf']);
     Route::post('/checkout', [WaliBillController::class, 'checkout'])->middleware('throttle:20,1');
     Route::get('/payments', [WaliBillController::class, 'payments']);
-    Route::post('/payments/{ulid}/simulate-settle', [WaliBillController::class, 'simulateSettle']);
 
     Route::get('/students/{ulid}/points', [WaliPointController::class, 'index']);
     Route::get('/students/{ulid}/achievements', [WaliAchievementController::class, 'index']);
@@ -226,3 +225,17 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::get('/import/students/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadStudentTemplate']);
     Route::get('/import/fee-rates/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadFeeRateTemplate']);
 });
+
+// Dev-only convenience for exercising checkout end to end without a live
+// gateway callback. This settled a guardian's own pending payment - their
+// own bill only, visibleTo() saw to that - but with zero regard for whether
+// any money actually moved, which makes it a free "mark my SPP as paid"
+// button the moment it's reachable outside local/testing. It was: registered
+// under the ordinary wali group with no environment guard at all. Gated at
+// both the route (registered only outside production) and the controller
+// (refuses unless local/testing) - a route file that gets copied without the
+// surrounding comment should not be enough to reopen this.
+if (app()->environment(['local', 'testing'])) {
+    Route::middleware(['auth:sanctum', 'role:orangtua'])
+        ->post('/wali/payments/{ulid}/simulate-settle', [WaliBillController::class, 'simulateSettle']);
+}
