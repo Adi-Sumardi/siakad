@@ -382,10 +382,10 @@ class ImportController extends Controller
                     $allYears->push($year);
                 }
 
-                $amount = (float) preg_replace('/[^0-9.]/', '', $data['amount'] ?? '0');
+                $amount = self::parseRupiah($data['amount'] ?? '0');
                 $tingkat = ! empty($data['tingkat']) ? (int) $data['tingkat'] : null;
                 $dueDay = ! empty($data['due_day']) ? (int) $data['due_day'] : 10;
-                $lateFee = ! empty($data['late_fee_amount']) ? (float) preg_replace('/[^0-9.]/', '', $data['late_fee_amount']) : 0;
+                $lateFee = ! empty($data['late_fee_amount']) ? self::parseRupiah($data['late_fee_amount']) : 0;
 
                 $rate = FeeRate::where('fee_type_id', $feeType->id)
                     ->where('school_unit_id', $unit->id)
@@ -437,6 +437,34 @@ class ImportController extends Controller
                 'message' => 'Terjadi kesalahan saat mengimpor tarif: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * A rupiah amount typed or pasted from a spreadsheet, in whichever of the
+     * two conventions the person filling out the CSV happens to use: plain
+     * digits (650000), or grouped with a period the Indonesian way (650.000).
+     * Stripping only non-digits, as this used to, treats the second form as
+     * a decimal point - "650.000" becomes 650.0 rupiah instead of 650,000,
+     * a thousand-fold under-bill that would go unnoticed until families
+     * either pay far less than intended or the school's revenue doesn't
+     * reconcile. A lone group of exactly three digits after the last
+     * separator is grouping, not cents - rupiah has no subunit in practice
+     * anywhere else in this codebase - so it's dropped along with any
+     * comma; only a genuine one-or-two-digit remainder is kept as a decimal.
+     */
+    private static function parseRupiah(string $raw): float
+    {
+        $raw = trim($raw);
+
+        if (preg_match('/^-?[\d.,]*[.,](\d{1,2})$/', $raw, $m) && strlen($m[1]) <= 2) {
+            $normalized = preg_replace('/[.,](?=\d{1,2}$)/', '#', $raw);
+            $normalized = str_replace(['.', ','], '', $normalized);
+            $normalized = str_replace('#', '.', $normalized);
+
+            return (float) $normalized;
+        }
+
+        return (float) preg_replace('/[^0-9-]/', '', $raw);
     }
 
     /**

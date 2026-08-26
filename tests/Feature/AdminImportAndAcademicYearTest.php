@@ -144,6 +144,26 @@ class AdminImportAndAcademicYearTest extends TestCase
         $this->assertSame('Wali Tanpa Kontak', $attachedGuardian->nama);
     }
 
+    public function test_indonesian_formatted_amounts_are_not_read_as_a_thousandfold_undercharge(): void
+    {
+        // "650.000" is how a Rupiah amount is normally written/pasted from a
+        // spreadsheet - a period grouping thousands, not a decimal point.
+        // Stripping only non-digit characters would keep the period and
+        // read this as 650.0 rupiah.
+        $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n" .
+            "spp,sd,1,2027/2028,650.000,10,25.000\n";
+
+        $file = UploadedFile::fake()->createWithContent('tariffs.csv', $csvContent);
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/import/fee-rates', ['file' => $file]);
+
+        $response->assertOk()->assertJsonPath('imported_count', 1);
+        $this->assertDatabaseHas('fee_rates', [
+            'amount' => 650000,
+            'late_fee_amount' => 25000,
+        ]);
+    }
+
     public function test_can_import_fee_rates_from_csv(): void
     {
         $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n" .
