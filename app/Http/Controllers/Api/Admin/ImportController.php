@@ -195,14 +195,19 @@ class ImportController extends Controller
                     $guardianUser = null;
 
                     if (! empty($waliEmail) || ! empty($waliPhone)) {
-                        $guardianUser = User::where(function ($q) use ($waliEmail, $waliPhone) {
-                            if (! empty($waliEmail)) {
-                                $q->orWhere('email', $waliEmail);
-                            }
-                            if (! empty($waliPhone)) {
-                                $q->orWhere('phone', $waliPhone);
-                            }
-                        })->first();
+                        // phone is an encrypted column (see HasEncryptedAttributes)
+                        // - the ciphertext differs on every save, so a plain
+                        // where('phone', ...) can never match and would silently
+                        // create a fresh duplicate account on every import,
+                        // including a re-import of the exact same file. Only
+                        // findByEncrypted() (the blind-index hash column) can
+                        // look one up by its plaintext value.
+                        if (! empty($waliEmail)) {
+                            $guardianUser = User::where('email', $waliEmail)->first();
+                        }
+                        if (! $guardianUser && ! empty($waliPhone)) {
+                            $guardianUser = User::findByEncrypted('phone', $waliPhone);
+                        }
 
                         if (! $guardianUser) {
                             $guardianUser = User::create([
@@ -215,9 +220,14 @@ class ImportController extends Controller
                         }
                     }
 
-                    $guardian = Guardian::where('user_id', $guardianUser?->id)->first();
+                    // Same encrypted-column trap, and a second one:
+                    // where('user_id', $guardianUser?->id) with a null id matches
+                    // the first guardian row that also has no linked user - an
+                    // unrelated family's orphaned guardian gets silently reused
+                    // for this student whenever a row names a wali by name only.
+                    $guardian = $guardianUser ? Guardian::where('user_id', $guardianUser->id)->first() : null;
                     if (! $guardian && ! empty($waliPhone)) {
-                        $guardian = Guardian::where('no_hp', $waliPhone)->first();
+                        $guardian = Guardian::findByEncrypted('no_hp', $waliPhone);
                     }
 
                     if (! $guardian) {

@@ -105,6 +105,45 @@ class AdminImportAndAcademicYearTest extends TestCase
         ]);
     }
 
+    public function test_reimporting_the_same_csv_does_not_duplicate_the_phone_matched_guardian(): void
+    {
+        // phone is an encrypted column; a naive where('phone', ...) can never
+        // match its own ciphertext, so without findByEncrypted() this row
+        // would mint a brand new guardian/user pair on every re-import.
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code,wali_nama,wali_phone\n" .
+            "Muhammad Farhan,27001,L,sd,Ahmad Syahid,081299887766\n";
+
+        $file1 = UploadedFile::fake()->createWithContent('students.csv', $csvContent);
+        $this->actingAs($this->admin)->postJson('/api/admin/import/students', ['file' => $file1])->assertOk();
+
+        $file2 = UploadedFile::fake()->createWithContent('students.csv', $csvContent);
+        $res = $this->actingAs($this->admin)->postJson('/api/admin/import/students', ['file' => $file2]);
+
+        $res->assertOk()->assertJsonPath('updated_count', 1)->assertJsonPath('imported_count', 0);
+        $this->assertSame(1, \App\Models\Guardian::where('nama', 'Ahmad Syahid')->count());
+        $this->assertSame(1, User::where('role', 'orangtua')->count());
+    }
+
+    public function test_a_name_only_guardian_row_does_not_reuse_an_unrelated_orphan_guardian(): void
+    {
+        // An "orphan" guardian - no linked user account - already exists,
+        // e.g. a secondary contact who was never invited.
+        $orphan = \App\Models\Guardian::create(['nama' => 'Kontak Lama Tidak Terkait', 'hubungan' => 'wali']);
+
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code,wali_nama\n" .
+            "Siswa Baru,27099,L,sd,Wali Tanpa Kontak\n";
+        $file = UploadedFile::fake()->createWithContent('students.csv', $csvContent);
+
+        $this->actingAs($this->admin)->postJson('/api/admin/import/students', ['file' => $file])->assertOk();
+
+        $student = Student::where('nis', '27099')->firstOrFail();
+        $attachedGuardian = $student->guardians()->first();
+
+        $this->assertNotNull($attachedGuardian);
+        $this->assertNotEquals($orphan->id, $attachedGuardian->id, 'Must not reuse an unrelated orphan guardian.');
+        $this->assertSame('Wali Tanpa Kontak', $attachedGuardian->nama);
+    }
+
     public function test_can_import_fee_rates_from_csv(): void
     {
         $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n" .
