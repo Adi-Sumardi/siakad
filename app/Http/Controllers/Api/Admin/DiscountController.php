@@ -22,6 +22,11 @@ class DiscountController extends Controller
     {
         $schemes = DiscountScheme::query()
             ->with(['feeType', 'schoolUnit'])
+            // Same pattern as fee rates and point rules: a per-unit admin
+            // sees their own unit's schemes plus school-wide ones, never
+            // another unit's. This read had no scope at all before - every
+            // admin_unit saw every other unit's discount policy.
+            ->when($request->user()->isUnitScoped(), fn ($q) => $q->where(fn ($sq) => $sq->whereNull('school_unit_id')->orWhere('school_unit_id', $request->user()->school_unit_id)))
             ->when($request->boolean('active_only'), fn ($q) => $q->where('is_active', true))
             ->orderBy('name')
             ->get();
@@ -128,10 +133,16 @@ class DiscountController extends Controller
     {
         $discounts = StudentDiscount::query()
             ->with(['student.schoolUnit', 'scheme.feeType', 'academicYear'])
+            // Which specific student has which scholarship, and why - real
+            // per-family sensitive information (the reason often names a
+            // hardship or circumstance), scoped to the caller's own unit the
+            // same way Student::visibleTo() scopes everywhere else a student
+            // is reached from an admin endpoint.
+            ->when($request->user()->isUnitScoped(), fn ($q) => $q->whereHas('student', fn ($sq) => $sq->where('school_unit_id', $request->user()->school_unit_id)))
             ->when($request->string('student')->value(), function ($q, $search) {
                 $q->whereHas('student', fn ($sq) => $sq->where('nama_lengkap', 'like', "%{$search}%")->orWhere('nis', 'like', "%{$search}%"));
             })
-            ->when($request->string('unit')->value(), function ($q, $unitCode) {
+            ->when(! $request->user()->isUnitScoped() && $request->string('unit')->value(), function ($q, $unitCode) {
                 $q->whereHas('student.schoolUnit', fn ($uq) => $uq->where('code', $unitCode));
             })
             ->latest()

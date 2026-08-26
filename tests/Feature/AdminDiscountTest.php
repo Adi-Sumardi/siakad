@@ -112,4 +112,31 @@ class AdminDiscountTest extends TestCase
         $list->assertStatus(200);
         $list->assertJsonFragment(['nama_lengkap' => 'Fatimah Az Zahra']);
     }
+
+    public function test_a_unit_admin_only_sees_their_own_units_schemes_and_student_discounts(): void
+    {
+        $otherUnit = SchoolUnit::create(['code' => 'SMP-12', 'label' => 'SMP Islam Al Azhar 12', 'jenjang_group' => 'smp']);
+        $unitAdmin = User::create(['name' => 'Admin SD', 'email' => 'admin.sd@example.com', 'role' => 'admin_unit', 'school_unit_id' => $this->unit->id, 'is_active' => true]);
+
+        $schemeSd = DiscountScheme::create(['code' => 'sd_only', 'name' => 'Beasiswa SD', 'type' => 'percent', 'value' => 20, 'school_unit_id' => $this->unit->id, 'is_active' => true]);
+        $schemeSmp = DiscountScheme::create(['code' => 'smp_only', 'name' => 'Beasiswa SMP', 'type' => 'percent', 'value' => 20, 'school_unit_id' => $otherUnit->id, 'is_active' => true]);
+        $schemeSchoolWide = DiscountScheme::create(['code' => 'semua_unit', 'name' => 'Beasiswa Yayasan', 'type' => 'nominal', 'value' => 50000, 'is_active' => true]);
+
+        $schemesRes = $this->actingAs($unitAdmin)->getJson('/api/admin/discount-schemes');
+        $schemeNames = collect($schemesRes->json('schemes'))->pluck('name');
+        $this->assertTrue($schemeNames->contains('Beasiswa SD'));
+        $this->assertTrue($schemeNames->contains('Beasiswa Yayasan'));
+        $this->assertFalse($schemeNames->contains('Beasiswa SMP'));
+
+        $studentSd = Student::create(['nama_lengkap' => 'Anak SD', 'jenis_kelamin' => 'L', 'school_unit_id' => $this->unit->id, 'status' => 'active']);
+        $studentSmp = Student::create(['nama_lengkap' => 'Anak SMP', 'jenis_kelamin' => 'L', 'school_unit_id' => $otherUnit->id, 'status' => 'active']);
+
+        StudentDiscount::create(['student_id' => $studentSd->id, 'discount_scheme_id' => $schemeSd->id, 'academic_year_id' => $this->year->id, 'effective_from' => '2026-07-01', 'reason' => 'Alasan siswa SD']);
+        StudentDiscount::create(['student_id' => $studentSmp->id, 'discount_scheme_id' => $schemeSmp->id, 'academic_year_id' => $this->year->id, 'effective_from' => '2026-07-01', 'reason' => 'Alasan siswa SMP']);
+
+        $sdRes = $this->actingAs($unitAdmin)->getJson('/api/admin/student-discounts');
+        $names = collect($sdRes->json('student_discounts'))->pluck('student.nama_lengkap');
+        $this->assertTrue($names->contains('Anak SD'));
+        $this->assertFalse($names->contains('Anak SMP'));
+    }
 }
