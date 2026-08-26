@@ -17,8 +17,23 @@ class UserController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $caller = $request->user();
+
         $users = User::query()
             ->with('schoolUnit')
+            // A per-unit admin manages their own unit's staff, and the
+            // parents of their own unit's students - never the whole
+            // foundation's roster. Without this an admin_unit's GET here
+            // returned every staff and parent account system-wide, contact
+            // details included - the exact cross-unit leak this codebase's
+            // role-check-alone-is-not-enough rule (see the admin route group
+            // in routes/api.php) exists to prevent, just never applied here.
+            ->when($caller->isUnitScoped(), function ($q) use ($caller) {
+                $q->where(function ($sq) use ($caller) {
+                    $sq->where('school_unit_id', $caller->school_unit_id)
+                        ->orWhereHas('guardian.students', fn ($gq) => $gq->where('school_unit_id', $caller->school_unit_id));
+                });
+            })
             ->when($request->string('search')->value(), function ($q, $search) {
                 $q->where(function ($sq) use ($search) {
                     $sq->where('name', 'like', "%{$search}%")
@@ -26,7 +41,7 @@ class UserController extends Controller
                 });
             })
             ->when($request->string('role')->value(), fn ($q, $role) => $q->where('role', $role))
-            ->when($request->string('unit')->value(), fn ($q, $unitCode) => $q->whereHas('schoolUnit', fn ($uq) => $uq->where('code', $unitCode)))
+            ->when(! $caller->isUnitScoped() && $request->string('unit')->value(), fn ($q, $unitCode) => $q->whereHas('schoolUnit', fn ($uq) => $uq->where('code', $unitCode)))
             ->when($request->has('is_active') && $request->input('is_active') !== '', fn ($q) => $q->where('is_active', $request->boolean('is_active')))
             ->orderBy('role')
             ->orderBy('name')

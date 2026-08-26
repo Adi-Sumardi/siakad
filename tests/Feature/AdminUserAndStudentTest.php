@@ -92,6 +92,40 @@ class AdminUserAndStudentTest extends TestCase
         ]);
     }
 
+    public function test_a_unit_admin_only_sees_their_own_units_staff_and_parents(): void
+    {
+        $otherUnit = SchoolUnit::create(['code' => 'smp', 'label' => 'SMP Islam Al Azhar 12', 'jenjang_group' => 'smp']);
+
+        $unitAdmin = User::create([
+            'name' => 'Admin SD', 'email' => 'admin.sd@yapinet.id',
+            'role' => 'admin_unit', 'school_unit_id' => $this->unit->id, 'is_active' => true,
+        ]);
+
+        $guruSd = User::create(['name' => 'Guru SD', 'email' => 'guru.sd@yapinet.id', 'role' => 'guru', 'school_unit_id' => $this->unit->id, 'is_active' => true]);
+        $guruSmp = User::create(['name' => 'Guru SMP', 'email' => 'guru.smp@yapinet.id', 'role' => 'guru', 'school_unit_id' => $otherUnit->id, 'is_active' => true]);
+
+        $studentSd = Student::create(['nama_lengkap' => 'Anak SD', 'jenis_kelamin' => 'L', 'school_unit_id' => $this->unit->id, 'status' => 'active']);
+        $studentSmp = Student::create(['nama_lengkap' => 'Anak SMP', 'jenis_kelamin' => 'L', 'school_unit_id' => $otherUnit->id, 'status' => 'active']);
+
+        $waliSdUser = User::create(['name' => 'Wali SD', 'email' => 'wali.sd@example.com', 'role' => 'orangtua', 'is_active' => true]);
+        $waliSd = Guardian::create(['user_id' => $waliSdUser->id, 'nama' => 'Wali SD', 'hubungan' => 'ayah', 'email' => $waliSdUser->email]);
+        $waliSd->students()->attach($studentSd->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+        $waliSmpUser = User::create(['name' => 'Wali SMP', 'email' => 'wali.smp@example.com', 'role' => 'orangtua', 'is_active' => true]);
+        $waliSmp = Guardian::create(['user_id' => $waliSmpUser->id, 'nama' => 'Wali SMP', 'hubungan' => 'ayah', 'email' => $waliSmpUser->email]);
+        $waliSmp->students()->attach($studentSmp->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+        $response = $this->actingAs($unitAdmin)->getJson('/api/admin/users?per_page=100');
+
+        $response->assertOk();
+        $emails = collect($response->json('users.data'))->pluck('email');
+
+        $this->assertTrue($emails->contains('guru.sd@yapinet.id'));
+        $this->assertTrue($emails->contains('wali.sd@example.com'));
+        $this->assertFalse($emails->contains('guru.smp@yapinet.id'));
+        $this->assertFalse($emails->contains('wali.smp@example.com'));
+    }
+
     public function test_can_list_students_with_spp_and_discounts(): void
     {
         $sppType = FeeType::create([
