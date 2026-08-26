@@ -24,17 +24,21 @@ class SendagoPayController extends Controller
         $secret = config('services.sendagopay.webhook_secret');
         $signature = $request->header('X-Sendago-Signature') ?? $request->header('x-sendago-signature');
 
-        // Signature validation: ensures the request was signed by SendagoPay
-        if ($secret) {
-            $computed = hash_hmac('sha256', $request->getContent(), $secret);
-            if (! hash_equals($computed, (string) $signature)) {
-                Log::warning('[SendagoPay] Rejected webhook with invalid signature', [
-                    'ip' => $request->ip(),
-                    'provided_signature' => $signature,
-                ]);
+        // Same posture as the Xendit callback: an unverifiable request is
+        // refused, never accepted "for now" because the secret happens to be
+        // unset. This endpoint settles money on nothing but payment_number,
+        // which isn't a secret - it's shown to the family and printed as the
+        // bank-transfer reference. Skipping verification whenever the secret
+        // is merely absent (the previous behaviour) would let anyone forge a
+        // payment.success for a payment_number they've simply seen.
+        $computed = $secret ? hash_hmac('sha256', $request->getContent(), $secret) : null;
+        if (! $secret || ! $signature || ! hash_equals($computed, (string) $signature)) {
+            Log::warning('[SendagoPay] Rejected webhook with invalid or missing signature', [
+                'ip' => $request->ip(),
+                'secret_configured' => (bool) $secret,
+            ]);
 
-                return response()->json(['message' => 'Invalid signature.'], 401);
-            }
+            return response()->json(['message' => 'Invalid signature.'], 401);
         }
 
         $payload = $request->all();

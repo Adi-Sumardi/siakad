@@ -128,6 +128,30 @@ class SendagoPayWebhookTest extends TestCase
         $this->assertEquals('pending', $this->payment->fresh()->status);
     }
 
+    public function test_rejects_webhook_when_no_secret_is_configured(): void
+    {
+        // payment_number isn't a secret - it's shown to the family and
+        // printed on-screen as the bank-transfer reference. An unset secret
+        // must never mean "skip verification"; that would let anyone forge
+        // a payment.success for a payment_number they've simply seen.
+        config(['services.sendagopay.webhook_secret' => null]);
+
+        $payload = [
+            'event' => 'payment.success',
+            'transaction_id' => 'tx_sendagopay_987654',
+            'order_id' => $this->payment->payment_number,
+            'amount' => 500000,
+            'status' => 'PAID',
+        ];
+
+        $response = $this->postJson('/api/webhooks/sendagopay', $payload, [
+            'X-Sendago-Signature' => 'anything',
+        ]);
+
+        $response->assertStatus(401);
+        $this->assertEquals('pending', $this->payment->fresh()->status);
+    }
+
     public function test_successfully_settles_payment_on_sendagopay_webhook(): void
     {
         $payload = [
