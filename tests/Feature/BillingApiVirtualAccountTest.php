@@ -287,7 +287,7 @@ class BillingApiVirtualAccountTest extends TestCase
         ]);
 
         $payment = Payment::create([
-            'payment_number' => 'SEK-SPP-2026-000600',
+            'payment_number' => 'YAPI-SPP-2026-000600',
             'payer_guardian_id' => $guardian->id,
             'amount' => 700000,
             'method' => 'virtual_account',

@@ -38,10 +38,10 @@ class BillingApiGateway implements PaymentGateway
         // Synchronize payment_number with fee type and student code if not already formatted
         $studentCode = BillingApiClient::formatStudentCode($student);
         $prefixRef = match (true) {
-            str_contains($feeTypeCode, 'ekskul') => 'SEK-EKS',
-            str_contains($feeTypeCode, 'jamiyyah') => 'SEK-JAM',
-            str_contains($feeTypeCode, 'spp') => 'SEK-SPP',
-            default => 'SEK-PAY',
+            str_contains($feeTypeCode, 'ekskul') => 'YAPI-EKS',
+            str_contains($feeTypeCode, 'jamiyyah') => 'YAPI-JAM',
+            str_contains($feeTypeCode, 'spp') => 'YAPI-SPP',
+            default => 'YAPI-PAY',
         };
         $year = date('Y');
         $customPaymentNumber = sprintf('%s-%s-%s', $prefixRef, $year, $studentCode);
