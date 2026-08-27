@@ -35,6 +35,32 @@ export type BillSummary = {
   overdue_count: number;
 };
 
+export type VirtualAccountInfo = {
+  va_number: string;
+  bank_name: string;
+  bank_code: string;
+  amount: number;
+  due_date?: string | null;
+};
+
+export type GatewayResponseInfo = {
+  provider?: string;
+  va_number?: string;
+  bank_name?: string;
+  bank_code?: string;
+  amount?: number;
+  due_date?: string;
+  billing_uuid?: string;
+  customer_name?: string;
+  student_name?: string;
+  fee_type?: string;
+  unit?: string;
+  unique_code?: number;
+  total_with_code?: number;
+  order_id?: string;
+  [key: string]: unknown;
+};
+
 export type Payment = {
   ulid: string;
   payment_number: string;
@@ -43,24 +69,8 @@ export type Payment = {
   channel: string | null;
   status: string;
   invoice_url: string | null;
-  virtual_account?: {
-    va_number: string;
-    bank_name: string;
-    bank_code: string;
-    amount: number;
-    due_date?: string | null;
-  } | null;
-  gateway_response?: {
-    va_number?: string;
-    bank_name?: string;
-    bank_code?: string;
-    amount?: number;
-    due_date?: string;
-    customer_name?: string;
-    fee_type?: string;
-    unit?: string;
-    [key: string]: any;
-  } | null;
+  virtual_account?: VirtualAccountInfo | null;
+  gateway_response?: GatewayResponseInfo | null;
   paid_at: string | null;
   created_at: string;
   bills?: Bill[];
