@@ -41,7 +41,7 @@ class CheckoutService
             throw new RuntimeException('Akun ini tidak terhubung ke data wali murid.');
         }
 
-        $this->assertSingleStudentForVaGateway($bills);
+        $this->assertSingleVaGroupInBasket($bills);
 
         $allocations = [];
         foreach ($bills as $bill) {
@@ -76,6 +76,7 @@ class CheckoutService
             // PaymentAllocator's class docblock), so voiding the old one loses
             // no money that actually moved.
             $this->supersedePendingPaymentsFor($bills);
+            $this->supersedeOtherVaPaymentsForSameGroup($bills);
 
             $payment = Payment::create([
                 'payment_number' => Payment::generateNumber(),
@@ -132,18 +133,20 @@ class CheckoutService
      * A Bank Muamalat VA number is generated once per (student, fee type,
      * academic year) - not once per checkout or per bill - because that is
      * how this school's real VA system works: a family transfers into the
-     * same number every month for that child. See
-     * BillingApiClient::generateVaNumber(). Nothing else about checkout
-     * knows this - the wali basket happily mixes bills from more than one
-     * child on purpose, to settle several months for several kids in one
-     * transaction and one bank fee - and if it did here, the combined
-     * amount would register under only the first child's VA while quietly
-     * covering another child's bill too, with no way to tell whose transfer
-     * a given VA number actually was for.
+     * same number every month for that child's SPP. See
+     * BillingApiClient::generateVaNumber(), which only ever looks at the
+     * *first* bill in the basket to decide both the student and the fee
+     * type. Nothing else about checkout knows this - the wali basket
+     * happily mixes bills across children, and across fee types for one
+     * child (SPP due alongside uang pangkal, say), on purpose, to settle
+     * several months or several kinds of fee in one transaction and one
+     * bank charge. Either kind of mixing here would register the combined
+     * amount under only the first bill's VA while quietly covering a bill
+     * that VA number doesn't actually represent.
      *
      * @param  Collection<int, Bill>  $bills
      */
-    private function assertSingleStudentForVaGateway(Collection $bills): void
+    private function assertSingleVaGroupInBasket(Collection $bills): void
     {
         if (! $this->gateway instanceof BillingApiGateway) {
             return;
@@ -154,6 +157,61 @@ class CheckoutService
                 'Virtual Account Bank Muamalat bersifat khusus per anak. Mohon bayar tagihan tiap anak dalam transaksi terpisah.'
             );
         }
+
+        if ($bills->pluck('fee_type_id')->unique()->count() > 1) {
+            throw new RuntimeException(
+                'Virtual Account Bank Muamalat bersifat khusus per jenis biaya (mis. SPP). Mohon bayar tiap jenis biaya dalam transaksi terpisah.'
+            );
+        }
+    }
+
+    /**
+     * Beyond one basket: nothing stops a family from checking out July's SPP
+     * today, leaving it unpaid, and checking out August plus September
+     * together next week - two entirely separate Payment rows, each
+     * registered against the identical VA number (it depends only on
+     * student, fee type, and academic year - never the specific bill or
+     * checkout). Without this, both stay live, and this gateway has no
+     * per-payment invoice to tell a bank transfer apart by - only the VA
+     * number, which both share - so which one a real transfer actually
+     * settles becomes a guess. Superseding the older one is safe for the
+     * same reason supersedePendingPaymentsFor() is: a pending payment has
+     * reserved nothing, so voiding it loses no money that moved - the bill
+     * it was covering simply goes back to open, for the next checkout (this
+     * one, or another) to pick up.
+     *
+     * @param  Collection<int, Bill>  $bills
+     */
+    private function supersedeOtherVaPaymentsForSameGroup(Collection $bills): void
+    {
+        if (! $this->gateway instanceof BillingApiGateway) {
+            return;
+        }
+
+        $first = $bills->first();
+
+        if (! $first) {
+            return;
+        }
+
+        $siblingBillIds = Bill::query()
+            ->where('student_id', $first->student_id)
+            ->where('fee_type_id', $first->fee_type_id)
+            ->pluck('id');
+
+        $paymentIds = PaymentAllocation::whereIn('bill_id', $siblingBillIds)
+            ->pluck('payment_id')
+            ->unique();
+
+        Payment::whereIn('id', $paymentIds)
+            ->whereIn('status', ['pending', 'processing'])
+            ->where('gateway_response->provider', 'bank_muamalat')
+            ->get()
+            ->each(fn (Payment $stale) => $this->allocator->fail(
+                $stale,
+                'failed',
+                'Digantikan oleh checkout baru untuk anak dan jenis biaya yang sama.',
+            ));
     }
 
     /**

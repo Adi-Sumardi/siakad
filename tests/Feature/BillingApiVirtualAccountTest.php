@@ -324,6 +324,156 @@ class BillingApiVirtualAccountTest extends TestCase
         $this->assertDatabaseCount('payments', 0);
     }
 
+    /**
+     * A family checks out July's SPP alone, doesn't pay it yet, and later
+     * checks out August plus September together - two separate Payment
+     * rows, both landing on the identical VA number (generateVaNumber()
+     * depends only on student, fee type, and academic year, never the
+     * specific bill or checkout). Without superseding the first, both stay
+     * live and this gateway has no per-payment invoice to tell a real
+     * transfer apart by - only the VA number, which both share.
+     */
+    public function test_a_later_checkout_for_the_same_child_and_fee_type_supersedes_the_earlier_one(): void
+    {
+        $user = User::create(['name' => 'Wali Bulanan', 'role' => 'orangtua', 'phone' => '081292702078', 'is_active' => true]);
+        $guardian = Guardian::create(['user_id' => $user->id, 'nama' => 'Wali Bulanan', 'hubungan' => 'ayah']);
+        $student = Student::create(['nama_lengkap' => 'Anak Bulanan', 'jenis_kelamin' => 'L', 'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'nis' => '702']);
+        $student->guardians()->attach($guardian->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+        $sppType = FeeType::create(['code' => 'spp', 'name' => 'SPP', 'recurrence' => 'monthly']);
+        $julyBill = Bill::create([
+            'bill_number' => 'SPP/2026/07/00020', 'dedup_key' => 'spp:2026:07:'.$student->id,
+            'description' => 'SPP Juli 2026', 'student_id' => $student->id,
+            'academic_year_id' => $this->year->id, 'fee_type_id' => $sppType->id,
+            'subtotal' => 650000, 'total_amount' => 650000, 'remaining_amount' => 650000,
+            'status' => 'unpaid', 'due_date' => '2026-07-31', 'issued_at' => now(),
+        ]);
+        $augBill = Bill::create([
+            'bill_number' => 'SPP/2026/08/00021', 'dedup_key' => 'spp:2026:08:'.$student->id,
+            'description' => 'SPP Agustus 2026', 'student_id' => $student->id,
+            'academic_year_id' => $this->year->id, 'fee_type_id' => $sppType->id,
+            'subtotal' => 650000, 'total_amount' => 650000, 'remaining_amount' => 650000,
+            'status' => 'unpaid', 'due_date' => '2026-08-31', 'issued_at' => now(),
+        ]);
+        $sepBill = Bill::create([
+            'bill_number' => 'SPP/2026/09/00022', 'dedup_key' => 'spp:2026:09:'.$student->id,
+            'description' => 'SPP September 2026', 'student_id' => $student->id,
+            'academic_year_id' => $this->year->id, 'fee_type_id' => $sppType->id,
+            'subtotal' => 650000, 'total_amount' => 650000, 'remaining_amount' => 650000,
+            'status' => 'unpaid', 'due_date' => '2026-09-30', 'issued_at' => now(),
+        ]);
+
+        $mockClient = Mockery::mock(BillingApiClient::class);
+        $mockClient->shouldReceive('createBilling')->twice()->andReturn(['uuid' => 'uuid-july'], ['uuid' => 'uuid-aug-sep']);
+        $this->app->instance(BillingApiClient::class, $mockClient);
+
+        $this->actingAs($user);
+
+        $julyResponse = $this->postJson('/api/wali/checkout', [
+            'bill_ulids' => [$julyBill->ulid],
+            'method' => 'virtual_account',
+        ]);
+        $julyResponse->assertStatus(201);
+        $julyPaymentUlid = $julyResponse->json('payment.ulid');
+
+        // Left unpaid - the family checks out August and September together
+        // later, without ever settling July.
+        $combinedResponse = $this->postJson('/api/wali/checkout', [
+            'bill_ulids' => [$augBill->ulid, $sepBill->ulid],
+            'method' => 'virtual_account',
+        ]);
+        $combinedResponse->assertStatus(201);
+
+        $julyPayment = Payment::where('ulid', $julyPaymentUlid)->first();
+        $this->assertSame('failed', $julyPayment->fresh()->status);
+
+        // July's bill goes back to open - it was never actually paid, and
+        // must not be silently forgotten just because its payment died.
+        $this->assertTrue($julyBill->fresh()->isOpen());
+        $this->assertEquals(650000, (float) $julyBill->fresh()->remaining_amount);
+
+        // Only one live Bank Muamalat payment remains for this student+fee type.
+        $liveCount = Payment::where('payer_guardian_id', $guardian->id)
+            ->whereIn('status', ['pending', 'processing'])
+            ->count();
+        $this->assertSame(1, $liveCount);
+    }
+
+    /**
+     * A family paying several months of one child's SPP in a single
+     * checkout - the actual designed-for case ("The whole point is that a
+     * parent settles three months of SPP... in a single transaction", per
+     * this class's own docblock) - is not the same failure mode as two
+     * separate checkouts over time (covered above). Confirms it directly
+     * for 3, 5, and 10 months: one VA number regardless of which bill
+     * happens to be first (the formula never looks at period_month or due
+     * date, only student + fee type + year), one combined amount sent to
+     * e-SPP, and every month's bill correctly paid once that one payment
+     * settles - not just the "first" one.
+     */
+    public function test_paying_several_months_of_spp_at_once_uses_one_consistent_va(): void
+    {
+        foreach ([3, 5, 10] as $monthCount) {
+            $user = User::create(['name' => "Wali {$monthCount} bulan", 'role' => 'orangtua', 'phone' => "08129270{$monthCount}000", 'is_active' => true]);
+            $guardian = Guardian::create(['user_id' => $user->id, 'nama' => "Wali {$monthCount} bulan", 'hubungan' => 'ayah']);
+            $student = Student::create(['nama_lengkap' => "Anak {$monthCount} Bulan", 'jenis_kelamin' => 'L', 'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'nis' => (string) (800 + $monthCount)]);
+            $student->guardians()->attach($guardian->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+            $sppType = FeeType::firstOrCreate(['code' => 'spp'], ['name' => 'SPP', 'recurrence' => 'monthly']);
+            $expectedVa = BillingApiClient::generateVaNumber($student, $sppType);
+
+            $billUlids = [];
+            $totalExpected = 0;
+            for ($m = 1; $m <= $monthCount; $m++) {
+                $bill = Bill::create([
+                    'bill_number' => sprintf('SPP/2026/%02d/%05d', $m, $student->id),
+                    'dedup_key' => "spp:2026:{$m}:{$student->id}",
+                    'description' => "SPP Bulan {$m} 2026",
+                    'student_id' => $student->id,
+                    'academic_year_id' => $this->year->id,
+                    'fee_type_id' => $sppType->id,
+                    'subtotal' => 650000,
+                    'total_amount' => 650000,
+                    'remaining_amount' => 650000,
+                    'status' => 'unpaid',
+                    'due_date' => now()->addDays(10),
+                    'issued_at' => now(),
+                ]);
+                $billUlids[] = $bill->ulid;
+                $totalExpected += 650000;
+            }
+
+            $mockClient = Mockery::mock(BillingApiClient::class);
+            $mockClient->shouldReceive('createBilling')
+                ->once()
+                ->withArgs(fn ($mainForm) => $mainForm['jumlah_tagihan'] === $totalExpected)
+                ->andReturn(['uuid' => "uuid-{$monthCount}-months"]);
+            $this->app->instance(BillingApiClient::class, $mockClient);
+
+            $response = $this->actingAs($user)->postJson('/api/wali/checkout', [
+                'bill_ulids' => $billUlids,
+                'method' => 'virtual_account',
+            ]);
+
+            $response->assertStatus(201);
+            $paymentData = $response->json('payment');
+
+            $this->assertEquals($expectedVa, $paymentData['virtual_account']['va_number'], "VA mismatch for {$monthCount}-month checkout");
+            $this->assertEquals($totalExpected, $paymentData['amount']);
+
+            // Settling the one payment must mark every month's bill paid,
+            // not only the first one the gateway happened to look at.
+            $payment = Payment::where('ulid', $paymentData['ulid'])->first();
+            app(PaymentAllocator::class)->settle($payment);
+
+            foreach ($billUlids as $ulid) {
+                $bill = Bill::where('ulid', $ulid)->first();
+                $this->assertSame('paid', $bill->status, "Bill {$ulid} not paid after settling the {$monthCount}-month payment");
+                $this->assertEquals(0.0, (float) $bill->remaining_amount);
+            }
+        }
+    }
+
     public function test_billing_api_webhook_settles_payment(): void
     {
         $user = User::create(['name' => 'Wali', 'role' => 'orangtua', 'phone' => '081292702075', 'is_active' => true]);
