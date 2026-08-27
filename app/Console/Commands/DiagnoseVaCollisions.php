@@ -8,19 +8,21 @@ use App\Services\Billing\BillingApiClient;
 use Illuminate\Console\Command;
 
 /**
- * Read-only. Checks the two ways a Bank Muamalat VA number can end up
+ * Read-only. Checks the two ways a Bank Muamalat VA number could end up
  * shared by more than one student or payment:
  *
- * 1. formatStudentCode() keeps only the last 6 digits of a student's NIS.
- *    NIS is globally unique in the database, but two different NIS values
- *    can still share the same trailing 6 digits - this reports any pair
- *    that does, without needing to guess at what this school's real NIS
- *    values look like.
+ * 1. formatStudentCode() used to keep only the last 6 digits of a
+ *    student's NIS, which could collide between two different (each
+ *    individually unique) NIS values. It's the student's own database id
+ *    now - guaranteed unique by the table itself - so this check should
+ *    always report none; kept as a standing sanity check on that, and
+ *    to surface anything a VA registered before that fix left behind.
  * 2. generateVaNumber() is a pure function of (fee type, unit, academic
  *    year, student) - not of the specific bill or checkout - so a basket
- *    that mixes bills from more than one child (which nothing in checkout
- *    prevents) registers the combined amount under only the first
- *    student's VA. This reports every payment already created that way.
+ *    that mixed bills from more than one child registered the combined
+ *    amount under only the first student's VA. CheckoutService now
+ *    refuses to build such a basket for this gateway; this reports any
+ *    payment that was already created that way before that guard existed.
  *
  * Nothing here writes to the database or calls e-SPP.
  */

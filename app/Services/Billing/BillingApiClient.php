@@ -112,34 +112,22 @@ class BillingApiClient
     }
 
     /**
-     * Formats the student's identifier into a 6-digit numerical string.
+     * Formats the student's identifier into a 6-digit numerical string for
+     * the VA number.
+     *
+     * Deliberately the database id, not NIS or no_pendaftaran, even though
+     * NIS is unique on its own. Both used to be parsed here - the trailing
+     * six digits of NIS, or digits pulled out of a PMB registration number -
+     * and either could collide: two different (genuinely unique) NIS values
+     * sharing the same last six digits, or two different registration
+     * numbers whose extracted digits happen to match. A collision here isn't
+     * cosmetic - see BillingApiGateway - it means two different families'
+     * transfers become indistinguishable by VA number. id is the one source
+     * this table guarantees is unique and sequential; six digits holds every
+     * student any single foundation will create for centuries.
      */
     public static function formatStudentCode(Student $student): string
     {
-        if (! empty($student->nis)) {
-            $cleanNis = preg_replace('/\D/', '', $student->nis);
-            if (! empty($cleanNis)) {
-                if (strlen($cleanNis) > 6) {
-                    return substr($cleanNis, -6);
-                }
-                return str_pad((string) ((int) $cleanNis), 6, '0', STR_PAD_LEFT);
-            }
-        }
-
-        if (! empty($student->no_pendaftaran)) {
-            if (preg_match('/^PMB(\d{2})\d{2}(\d{4})$/i', $student->no_pendaftaran, $m)) {
-                return $m[1] . $m[2];
-            }
-
-            if (preg_match('/^PMB(\d{6})$/i', $student->no_pendaftaran, $m)) {
-                return $m[1];
-            }
-
-            if (preg_match('/(\d+)$/', $student->no_pendaftaran, $m)) {
-                return str_pad((string) ((int) $m[1]), 6, '0', STR_PAD_LEFT);
-            }
-        }
-
         return str_pad((string) $student->id, 6, '0', STR_PAD_LEFT);
     }
 

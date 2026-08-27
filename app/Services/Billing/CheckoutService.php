@@ -7,6 +7,7 @@ use App\Models\Guardian;
 use App\Models\Payment;
 use App\Models\PaymentAllocation;
 use App\Models\User;
+use App\Services\Payment\BillingApiGateway;
 use App\Services\Payment\PaymentGateway;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -39,6 +40,8 @@ class CheckoutService
         if (! $guardian) {
             throw new RuntimeException('Akun ini tidak terhubung ke data wali murid.');
         }
+
+        $this->assertSingleStudentForVaGateway($bills);
 
         $allocations = [];
         foreach ($bills as $bill) {
@@ -123,6 +126,34 @@ class CheckoutService
         }
 
         return $bills;
+    }
+
+    /**
+     * A Bank Muamalat VA number is generated once per (student, fee type,
+     * academic year) - not once per checkout or per bill - because that is
+     * how this school's real VA system works: a family transfers into the
+     * same number every month for that child. See
+     * BillingApiClient::generateVaNumber(). Nothing else about checkout
+     * knows this - the wali basket happily mixes bills from more than one
+     * child on purpose, to settle several months for several kids in one
+     * transaction and one bank fee - and if it did here, the combined
+     * amount would register under only the first child's VA while quietly
+     * covering another child's bill too, with no way to tell whose transfer
+     * a given VA number actually was for.
+     *
+     * @param  Collection<int, Bill>  $bills
+     */
+    private function assertSingleStudentForVaGateway(Collection $bills): void
+    {
+        if (! $this->gateway instanceof BillingApiGateway) {
+            return;
+        }
+
+        if ($bills->pluck('student_id')->unique()->count() > 1) {
+            throw new RuntimeException(
+                'Virtual Account Bank Muamalat bersifat khusus per anak. Mohon bayar tagihan tiap anak dalam transaksi terpisah.'
+            );
+        }
     }
 
     /**

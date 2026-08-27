@@ -80,7 +80,24 @@ export default function BillsPage() {
 
   const childrenInCart = new Set(selectedBills.map((b) => b.student?.ulid)).size;
 
+  // The active gateway (Bank Muamalat VA, via e-SPP) mints one VA number per
+  // child, stable across every bill they have - not one per checkout. A
+  // basket spanning two children would register the combined amount under
+  // only the first child's VA while quietly covering the other child's bill
+  // too, so checkout itself refuses it. Guarding the selection here means a
+  // family finds that out before building a cart, not after clicking pay.
   function toggle(ulid: string) {
+    const bill = openBills.find((b) => b.ulid === ulid);
+    const alreadySelected = selected.has(ulid);
+
+    if (!alreadySelected && bill && childrenInCart > 0) {
+      const cartStudentUlid = selectedBills[0]?.student?.ulid;
+      if (bill.student?.ulid !== cartStudentUlid) {
+        toast.error("Virtual Account bersifat khusus per anak. Selesaikan pembayaran ananda ini dulu, lalu bayar tagihan anak lain di transaksi terpisah.");
+        return;
+      }
+    }
+
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(ulid)) next.delete(ulid);
@@ -90,11 +107,19 @@ export default function BillsPage() {
   }
 
   function selectAllOpen() {
-    if (selected.size === openBills.length) {
+    if (selected.size > 0) {
       setSelected(new Set());
-    } else {
-      setSelected(new Set(openBills.map((b) => b.ulid)));
+      return;
     }
+
+    const firstStudentUlid = openBills[0]?.student?.ulid;
+    const sameChildBills = openBills.filter((b) => b.student?.ulid === firstStudentUlid);
+
+    if (sameChildBills.length < openBills.length) {
+      toast.info("Virtual Account bersifat khusus per anak - hanya tagihan satu ananda yang dipilih sekaligus.");
+    }
+
+    setSelected(new Set(sameChildBills.map((b) => b.ulid)));
   }
 
   async function checkoutMulti() {
@@ -199,7 +224,7 @@ export default function BillsPage() {
               >
                 <Check className="size-4" />
                 <span>
-                  {selected.size === openBills.length ? "Batalkan Semua" : "Pilih Semua Tagihan"}
+                  {selected.size > 0 ? "Batalkan Semua" : "Pilih Semua Tagihan"}
                 </span>
               </Button>
             )}
@@ -349,9 +374,7 @@ export default function BillsPage() {
                   {selected.size} Tagihan Dipilih · <span className="text-primary text-lg">{rupiah(selectedTotal)}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {childrenInCart > 1
-                    ? `Mencakup ${childrenInCart} anak · Diproses dalam 1x transaksi SendagoPay (hemat biaya admin)`
-                    : "Diproses dalam 1x transaksi SendagoPay"}
+                  Diproses dalam 1x Virtual Account Bank Muamalat (BMI) untuk {selectedBills[0]?.student?.nama_panggilan ?? selectedBills[0]?.student?.nama_lengkap ?? "ananda"}
                 </p>
               </div>
 
