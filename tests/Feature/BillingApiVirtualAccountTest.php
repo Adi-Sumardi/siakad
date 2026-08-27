@@ -324,4 +324,70 @@ class BillingApiVirtualAccountTest extends TestCase
         $this->assertEquals('paid', $bill->fresh()->status);
         $this->assertEquals(0, (float) $bill->fresh()->remaining_amount);
     }
+
+    /**
+     * e-SPP's callback carries no signature to check - this live lookup
+     * against e-SPP's own record of the VA is the only thing standing
+     * between "a POST arrived claiming this paid" and settling money. If
+     * e-SPP can't be reached to confirm it, the payment must be left alone,
+     * not settled on the strength of the claim alone - a genuinely-settled
+     * payment isn't lost either way, since payments:poll-billing-va performs
+     * the same live check independently on a schedule and will catch it.
+     */
+    public function test_billing_api_webhook_does_not_settle_when_esp_cannot_be_reached(): void
+    {
+        $user = User::create(['name' => 'Wali', 'role' => 'orangtua', 'phone' => '081292702076', 'is_active' => true]);
+        $guardian = Guardian::create(['user_id' => $user->id, 'nama' => 'Wali', 'hubungan' => 'ayah']);
+        $student = Student::create(['nama_lengkap' => 'Citra', 'jenis_kelamin' => 'P', 'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'nis' => '601']);
+
+        $sppType = FeeType::create(['code' => 'spp', 'name' => 'SPP', 'recurrence' => 'monthly']);
+        $bill = Bill::create([
+            'bill_number' => 'SPP/2026/08/00004',
+            'dedup_key' => 'spp:2026:08:'.$student->id,
+            'description' => 'SPP Bulan Agustus 2026',
+            'student_id' => $student->id,
+            'academic_year_id' => $this->year->id,
+            'fee_type_id' => $sppType->id,
+            'subtotal' => 700000,
+            'total_amount' => 700000,
+            'remaining_amount' => 700000,
+            'status' => 'unpaid',
+            'due_date' => '2026-08-31',
+            'issued_at' => now(),
+        ]);
+
+        $payment = Payment::create([
+            'payment_number' => 'YAPI-SPP-2026-000601',
+            'payer_guardian_id' => $guardian->id,
+            'amount' => 700000,
+            'method' => 'virtual_account',
+            'status' => 'processing',
+            'external_transaction_id' => 'bill-uuid-601',
+            'invoice_id' => 'bill-uuid-601',
+            'gateway_response' => [
+                'provider' => 'bank_muamalat',
+                'va_number' => '8020012627000601',
+                'billing_uuid' => 'bill-uuid-601',
+            ],
+        ]);
+
+        app(PaymentAllocator::class)->allocate($payment, [$bill->id => 700000]);
+
+        $mockClient = Mockery::mock(BillingApiClient::class);
+        $mockClient->shouldReceive('getByVaNumber')
+            ->with('8020012627000601')
+            ->andThrow(new \App\Services\Billing\BillingApiException('e-SPP unreachable', 500));
+        $this->app->instance(BillingApiClient::class, $mockClient);
+
+        $response = $this->postJson('/api/payment-webhook/trans-uuid-601', [
+            'jumlah_pembayaran' => 700000,
+            'uuid' => 'trans-uuid-601',
+            'billing_uuid' => 'bill-uuid-601',
+            'reference_no' => '8020012627000601',
+        ]);
+
+        $response->assertOk();
+        $this->assertEquals('processing', $payment->fresh()->status);
+        $this->assertEquals('unpaid', $bill->fresh()->status);
+    }
 }

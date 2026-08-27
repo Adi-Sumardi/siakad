@@ -73,7 +73,19 @@ class BillingApiWebhookController extends Controller
             return response()->json(['success' => true, 'message' => 'Payment already settled.'], 200);
         }
 
-        // Verify status directly from e-SPP before settling
+        // e-SPP's "Callback Keluar" carries no signature or shared secret to
+        // check - there is nothing here playing the role Xendit's callback
+        // token or SendagoPay's HMAC secret play elsewhere in this codebase.
+        // This live lookup against e-SPP's own record of the VA is the only
+        // thing standing between "a POST arrived claiming this paid" and
+        // actually settling money, which is why it must fail closed: on any
+        // failure to confirm - can't reach e-SPP, no va_number to check, a
+        // remaining balance still shown - the payment is left exactly as it
+        // was. payments:poll-billing-va runs on a schedule and does this same
+        // live check independently, so a payment that's genuinely settled but
+        // couldn't be verified here isn't lost, only delayed until the next
+        // poll - a real family paying is not blocked by a transient e-SPP
+        // outage; a forged callback with nothing to confirm it is.
         $vaNumber = $payment->gateway_response['va_number'] ?? $referenceNo;
         $verified = false;
 
@@ -91,11 +103,15 @@ class BillingApiWebhookController extends Controller
                     ]);
                 }
             } catch (\Throwable $e) {
-                Log::warning('[BillingApiWebhook] Failed to query e-SPP by VA, trusting signed callback: '.$e->getMessage());
-                $verified = true;
+                Log::warning('[BillingApiWebhook] Could not verify against e-SPP, leaving unsettled for the poller to pick up: '.$e->getMessage(), [
+                    'va_number' => $vaNumber,
+                    'payment' => $payment->payment_number,
+                ]);
             }
         } else {
-            $verified = true;
+            Log::warning('[BillingApiWebhook] Callback carried no va_number to verify against', [
+                'payment' => $payment->payment_number,
+            ]);
         }
 
         if ($verified) {
