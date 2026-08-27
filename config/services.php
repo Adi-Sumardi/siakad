@@ -73,4 +73,28 @@ return [
         'invoice_duration' => env('XENDIT_INVOICE_DURATION', 86400),
     ],
 
+    // Web Service Billing API e-SPP (Bank Muamalat BMI Virtual Account)
+    'billing_api' => [
+        'base_url' => env('BILLING_API_BASE_URL', 'http://43.225.66.150:8061'),
+        'client_id' => env('BILLING_API_CLIENT_ID', ''),
+        'client_secret' => env('BILLING_API_CLIENT_SECRET', ''),
+        'username' => env('BILLING_API_USERNAME', 'admin'),
+        'password' => env('BILLING_API_PASSWORD', 'admin123'),
+        'bank_id' => env('BILLING_API_BANK_ID', 1),
+        'bank_name' => env('BILLING_API_BANK_NAME', 'Bank Muamalat'),
+        'institution_code' => env('BILLING_API_INSTITUTION_CODE', 8020),
+        'va_due_days' => env('BILLING_API_VA_DUE_DAYS', 3),
+        'va_admin_fee' => env('BILLING_API_ADMIN_FEE', 0),
+        'va_prefixes' => [
+            'spp' => env('BILLING_API_PREFIX_SPP', '802001'),
+            'uang_pangkal' => env('BILLING_API_PREFIX_UANG_PANGKAL', '802002'),
+            'jamiyyah' => env('BILLING_API_PREFIX_JAMIYYAH', '802003'),
+            'pendaftaran' => env('BILLING_API_PREFIX_PENDAFTARAN', '802004'),
+            'ekskul_tk' => env('BILLING_API_PREFIX_EKSKUL_TK', '802005'),
+            'ekskul_sd' => env('BILLING_API_PREFIX_EKSKUL_SD', '802006'),
+            'ekskul_smp12' => env('BILLING_API_PREFIX_EKSKUL_SMP12', '802007'),
+            'ekskul_smp55' => env('BILLING_API_PREFIX_EKSKUL_SMP55', '802008'),
+        ],
+    ],
+
 ];

@@ -43,6 +43,24 @@ export type Payment = {
   channel: string | null;
   status: string;
   invoice_url: string | null;
+  virtual_account?: {
+    va_number: string;
+    bank_name: string;
+    bank_code: string;
+    amount: number;
+    due_date?: string | null;
+  } | null;
+  gateway_response?: {
+    va_number?: string;
+    bank_name?: string;
+    bank_code?: string;
+    amount?: number;
+    due_date?: string;
+    customer_name?: string;
+    fee_type?: string;
+    unit?: string;
+    [key: string]: any;
+  } | null;
   paid_at: string | null;
   created_at: string;
   bills?: Bill[];

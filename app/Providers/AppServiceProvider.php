@@ -6,7 +6,9 @@ use App\Services\Notification\MailGateway;
 use App\Services\Notification\SendagoMailGateway;
 use App\Services\Notification\SendagoWhatsAppGateway;
 use App\Services\Notification\WhatsAppGateway;
+use App\Services\Payment\BillingApiGateway;
 use App\Services\Payment\PaymentGateway;
+use App\Services\Payment\SendagoPayGateway;
 use App\Services\Payment\XenditGateway;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
@@ -21,11 +23,12 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(MailGateway::class, SendagoMailGateway::class);
         $this->app->bind(WhatsAppGateway::class, SendagoWhatsAppGateway::class);
         $this->app->bind(PaymentGateway::class, function () {
-            $driver = env('PAYMENT_GATEWAY', 'sendagopay');
+            $driver = env('PAYMENT_GATEWAY', 'billing_api');
 
             return match ($driver) {
-                'xendit' => app(\App\Services\Payment\XenditGateway::class),
-                default => app(\App\Services\Payment\SendagoPayGateway::class),
+                'sendagopay' => app(SendagoPayGateway::class),
+                'xendit' => app(XenditGateway::class),
+                default => app(BillingApiGateway::class),
             };
         });
     }

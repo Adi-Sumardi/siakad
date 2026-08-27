@@ -54,3 +54,11 @@ Schedule::command('units:sync')
     ->name('sync-school-units')
     ->withoutOverlapping()
     ->description('Sinkronkan master unit dari PMB');
+
+// Polling status Virtual Account Bank Muamalat (e-SPP)
+Schedule::command('payments:poll-billing-va')
+    ->everyTwoMinutes()
+    ->name('poll-billing-va-payments')
+    ->withoutOverlapping()
+    ->description('Periksa status pelunasan Virtual Account Bank Muamalat (e-SPP)');
+

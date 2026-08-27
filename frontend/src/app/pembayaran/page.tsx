@@ -118,7 +118,7 @@ function PaymentsContent() {
               Riwayat Pembayaran & Tagihan
             </h1>
             <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-              Histori seluruh transaksi pembayaran SPP melalui SendagoPay, QRIS, maupun verifikasi loket YAPI.
+              Histori seluruh transaksi pembayaran SPP & Tagihan Sekolah melalui Virtual Account Bank Muamalat (BMI) maupun loket administrasi YAPI.
             </p>
           </div>
 
@@ -279,7 +279,7 @@ function PaymentsContent() {
               {/* Status & Amount Banner */}
               <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4 space-y-2">
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-muted-foreground">Nomor Pembayaran:</span>
+                  <span className="text-muted-foreground">Nomor Referensi:</span>
                   <span className="font-mono font-bold text-foreground">{selectedPayment.payment_number}</span>
                 </div>
                 <div className="flex justify-between items-center">
@@ -289,7 +289,7 @@ function PaymentsContent() {
                   </Badge>
                 </div>
                 <div className="flex justify-between items-center border-t border-primary/20 pt-2">
-                  <span className="text-xs font-bold text-foreground">Total Nominal:</span>
+                  <span className="text-xs font-bold text-foreground">Total Tagihan:</span>
                   <div className="text-right">
                     <span className="tabular text-xl font-black text-primary">{rupiah(selectedPayment.amount)}</span>
                     <button
@@ -303,13 +303,79 @@ function PaymentsContent() {
                 </div>
               </div>
 
-              {/* Bank Accounts Options for Transfer */}
-              {selectedPayment.status !== "completed" && (
+              {/* VIRTUAL ACCOUNT BANK MUAMALAT (BMI) SECTION */}
+              {selectedPayment.status !== "completed" && (selectedPayment.virtual_account?.va_number || selectedPayment.gateway_response?.va_number) ? (
+                <div className="space-y-4">
+                  {/* VA Card */}
+                  <div className="p-4 rounded-2xl bg-emerald-500/10 border-2 border-emerald-500/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="font-bold text-xs text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">
+                          Virtual Account Bank Muamalat (BMI)
+                        </span>
+                      </div>
+                      <Badge variant="default" className="text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white">
+                        Kode Bank: 147
+                      </Badge>
+                    </div>
+
+                    <div className="bg-card p-3.5 rounded-xl border border-emerald-500/20 flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-[11px] text-muted-foreground font-medium">Nomor Virtual Account:</p>
+                        <p className="font-mono text-lg sm:text-xl font-black text-foreground tracking-wider mt-0.5">
+                          {selectedPayment.virtual_account?.va_number || selectedPayment.gateway_response?.va_number}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          copyToClipboard(
+                            selectedPayment.virtual_account?.va_number || selectedPayment.gateway_response?.va_number || "",
+                            "Nomor Virtual Account"
+                          )
+                        }
+                        className="h-9 gap-1.5 font-bold shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white"
+                      >
+                        <Copy className="size-3.5" />
+                        <span>Salin VA</span>
+                      </Button>
+                    </div>
+
+                    {(selectedPayment.virtual_account?.due_date || selectedPayment.gateway_response?.due_date) && (
+                      <p className="text-[11px] text-emerald-900 dark:text-emerald-200">
+                        ⏳ Batas Waktu Pembayaran:{" "}
+                        <strong>{tanggal(selectedPayment.virtual_account?.due_date || selectedPayment.gateway_response?.due_date || "")}</strong>
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Payment Instructions Accordion/Guide */}
+                  <div className="p-3.5 rounded-xl bg-muted/50 border border-border text-xs space-y-2">
+                    <p className="font-bold text-foreground flex items-center gap-1.5">
+                      <Info className="size-4 text-primary shrink-0" />
+                      <span>Petunjuk Cara Pembayaran:</span>
+                    </p>
+                    <div className="space-y-1.5 text-[11px] text-muted-foreground leading-relaxed pl-5 list-decimal">
+                      <div>
+                        <strong>1. Aplikasi Muamalat DIN:</strong> Pilih menu <em>Bayar/Beli</em> &rarr; <em>Virtual Account</em> &rarr; Masukkan Nomor VA di atas &rarr; Periksa nama tagihan &rarr; Konfirmasi PIN.
+                      </div>
+                      <div>
+                        <strong>2. ATM Bank Muamalat:</strong> Pilih <em>Transaksi Lainnya</em> &rarr; <em>Pembayaran</em> &rarr; <em>Virtual Account</em> &rarr; Masukkan Nomor VA &rarr; Konfirmasi.
+                      </div>
+                      <div>
+                        <strong>3. Transfer Antar Bank (BCA/Mandiri/BRI/BSI/dll):</strong> Pilih <em>Transfer Antar Bank</em> &rarr; Pilih <strong>Bank Muamalat (Kode: 147)</strong> &rarr; Masukkan Nomor VA sebagai rekening tujuan &rarr; Masukkan nominal tepat ({rupiah(selectedPayment.amount)}) &rarr; Konfirmasi.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : selectedPayment.status !== "completed" ? (
+                /* Fallback Manual Transfer Options */
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
                       <CreditCard className="size-4 text-primary" />
-                      <span>Pilihan Rekening Resmi YAPI (Transfer Manual / VA):</span>
+                      <span>Pilihan Rekening Resmi YAPI (Transfer Manual):</span>
                     </span>
                   </div>
 
@@ -379,7 +445,7 @@ function PaymentsContent() {
                     </div>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* Simulation Mode Action for Test Flow - dev/staging only.
                   The matching endpoint 404s outside local/testing on the

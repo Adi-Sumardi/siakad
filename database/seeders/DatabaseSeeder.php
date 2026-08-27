@@ -79,6 +79,8 @@ class DatabaseSeeder extends Seeder
         // dedup_key are built on, so they are seeded rather than typed in.
         $feeTypes = [
             ['code' => 'spp', 'name' => 'SPP', 'recurrence' => 'monthly'],
+            ['code' => 'jamiyyah', 'name' => 'Uang Jamiyyah', 'recurrence' => 'monthly'],
+            ['code' => 'ekskul', 'name' => 'Ekstrakurikuler', 'recurrence' => 'per_term'],
             ['code' => 'seragam', 'name' => 'Seragam & atribut', 'recurrence' => 'once', 'allow_installment' => true, 'requires_selection' => true],
             ['code' => 'buku', 'name' => 'Buku', 'recurrence' => 'per_term'],
             ['code' => 'kegiatan', 'name' => 'Kegiatan', 'recurrence' => 'per_term'],
