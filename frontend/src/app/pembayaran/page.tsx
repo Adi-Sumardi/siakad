@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   Clock,
   Copy,
-  CreditCard,
   Download,
   ExternalLink,
   Info,
@@ -370,79 +369,23 @@ function PaymentsContent() {
                   </div>
                 </div>
               ) : selectedPayment.status !== "completed" ? (
-                /* Fallback Manual Transfer Options */
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                      <CreditCard className="size-4 text-primary" />
-                      <span>Pilihan Rekening Resmi YAPI (Transfer Manual):</span>
-                    </span>
-                  </div>
-
-                  <div className="space-y-2 text-xs">
-                    {/* BSI */}
-                    <div className="p-3 bg-muted/40 rounded-xl border border-border flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-foreground">Bank Syariah Indonesia (BSI)</p>
-                        <p className="font-mono text-sm font-black text-primary mt-0.5">7001234567</p>
-                        <p className="text-[10px] text-muted-foreground">a.n. Yayasan Asrama Pelajar Islam</p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => copyToClipboard("7001234567", "No. Rekening BSI")}
-                        className="h-8 gap-1 text-[11px] font-semibold"
-                      >
-                        <Copy className="size-3" />
-                        <span>Salin</span>
-                      </Button>
-                    </div>
-
-                    {/* Mandiri */}
-                    <div className="p-3 bg-muted/40 rounded-xl border border-border flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-foreground">Bank Mandiri</p>
-                        <p className="font-mono text-sm font-black text-primary mt-0.5">1230009876543</p>
-                        <p className="text-[10px] text-muted-foreground">a.n. Yayasan Asrama Pelajar Islam</p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => copyToClipboard("1230009876543", "No. Rekening Mandiri")}
-                        className="h-8 gap-1 text-[11px] font-semibold"
-                      >
-                        <Copy className="size-3" />
-                        <span>Salin</span>
-                      </Button>
-                    </div>
-
-                    {/* BCA */}
-                    <div className="p-3 bg-muted/40 rounded-xl border border-border flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-foreground">BCA</p>
-                        <p className="font-mono text-sm font-black text-primary mt-0.5">0089123456</p>
-                        <p className="text-[10px] text-muted-foreground">a.n. Yayasan Asrama Pelajar Islam</p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => copyToClipboard("0089123456", "No. Rekening BCA")}
-                        className="h-8 gap-1 text-[11px] font-semibold"
-                      >
-                        <Copy className="size-3" />
-                        <span>Salin</span>
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs flex gap-2">
-                    <Info className="size-4 shrink-0 mt-0.5 text-amber-600" />
-                    <div>
-                      <p className="font-semibold">Petunjuk Transfer Bank:</p>
-                      <p className="text-[11px] text-amber-800 dark:text-amber-300 mt-0.5">
-                        Mohon sertakan Nomor Pembayaran <strong>{selectedPayment.payment_number}</strong> pada berita transfer.
-                      </p>
-                    </div>
+                /* No VA registered for this payment (e.g. a transaction from
+                   before the switch to Bank Muamalat VA). This used to show
+                   three hardcoded "official" bank accounts as a manual-
+                   transfer fallback - unverified placeholder numbers that
+                   were never confirmed as YAPI's real accounts, carried
+                   unchanged across three gateway migrations. Bank Muamalat
+                   VA is the only payment method in use for now, so rather
+                   than risk a family transferring to an account nobody
+                   confirmed is real, this points them to the school instead. */
+                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs flex gap-2.5">
+                  <AlertCircle className="size-4 shrink-0 mt-0.5 text-amber-600" />
+                  <div className="space-y-1">
+                    <p className="font-semibold">Nomor Virtual Account belum tersedia untuk pembayaran ini.</p>
+                    <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                      Silakan hubungi admin/tata usaha sekolah dengan menyebutkan Nomor Pembayaran{" "}
+                      <strong>{selectedPayment.payment_number}</strong> untuk bantuan penyelesaian.
+                    </p>
                   </div>
                 </div>
               ) : null}
