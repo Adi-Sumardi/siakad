@@ -97,7 +97,18 @@ menyimpan pilihan keluarga sebelum `BillGenerator` menagih — subtotal
 dihitung dari komponen yang dipilih (bukan tarif flat), pilihan terkunci
 begitu tagihan terbit. Admin mengisi katalog komponen + daftar ukuran lewat
 `admin/tarif`, wali memilih lewat `tagihan/pilihan`.
-- Mata pelajaran, penugasan mengajar, nilai, rapor
+**Mata pelajaran, penugasan mengajar, nilai, rapor — selesai.**
+`teaching_assignments` sengaja tidak dibangun sebagai tabel terpisah —
+`class_schedules` (dari fitur presensi) sudah menjawab siapa mengajar apa di
+kelas mana. `report_cards` juga tidak jadi tabel tersimpan — rapor
+diagregasi dari `grades` + ringkasan presensi/poin yang sudah ada, di-render
+PDF sesuai permintaan lewat `RaporPdfService` (pola sama `BillPdfService`).
+Input nilai dibatasi hanya guru yang ditugaskan lewat `class_schedules`
+(beda dari poin/presensi yang boleh guru mana pun di unit) — keputusan
+sadar, dikonfirmasi user. Nilai akhir pakai bobot standar Tugas 20%/UTS
+30%/UAS 50% (asumsi, belum dikonfirmasi kebijakan sekolah, mudah diubah).
+Guru isi lewat `guru/nilai`, wali lihat + unduh rapor di `anak/[ulid]`,
+admin oversight + unduh rapor arsip di `admin/nilai`.
 - Ekstrakurikuler
 - Kenaikan kelas massal antar tahun ajaran
 - Ekspor Dapodik

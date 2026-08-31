@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Award, FileDown, Plus, Sparkles, UserCheck, X } from "lucide-react";
+import { ArrowLeft, Award, ClipboardList, Download, FileDown, Plus, Sparkles, UserCheck, X } from "lucide-react";
 import { toast } from "sonner";
 import { WaliShell } from "@/components/layout/wali-shell";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,7 @@ import {
   type Achievement,
   type AttendanceOverview,
   type PointSummary,
+  type SubjectGradeSummary,
 } from "@/lib/types/kesiswaan";
 
 const STATUS_LABEL: Record<Achievement["status"], { label: string; variant: "good" | "warn" | "bad" }> = {
@@ -253,6 +254,8 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
   const [points, setPoints] = useState<PointSummary | null>(null);
   const [attendance, setAttendance] = useState<AttendanceOverview | null>(null);
   const [achievements, setAchievements] = useState<Achievement[] | null>(null);
+  const [grades, setGrades] = useState<{ term: string | null; subjects: SubjectGradeSummary[] } | null>(null);
+  const [downloadingRapor, setDownloadingRapor] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function loadAchievements() {
@@ -273,8 +276,34 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
       .get<AttendanceOverview>(`/api/wali/students/${ulid}/attendance`)
       .then(setAttendance)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+    api
+      .get<{ term: string | null; subjects: SubjectGradeSummary[] }>(`/api/wali/students/${ulid}/grades`)
+      .then(setGrades)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
     loadAchievements();
   }, [ulid, user]);
+
+  async function downloadRapor() {
+    setDownloadingRapor(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/wali/students/${ulid}/rapor`, { credentials: "include" });
+      if (!res.ok) throw new Error("Gagal mengunduh rapor.");
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Rapor-${points?.student.nama_lengkap ?? "siswa"}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Gagal mengunduh rapor - mungkin belum ada semester aktif.");
+    } finally {
+      setDownloadingRapor(false);
+    }
+  }
 
   if (loading || !user || user.role !== "orangtua") {
     return (
@@ -378,6 +407,64 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
             )}
           </Card>
         </div>
+
+        {/* SECTION 1C: NILAI AKADEMIK */}
+        <section className="space-y-3 pt-4 border-t border-border">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <ClipboardList className="size-5 text-primary" />
+                <span>Nilai Akademik</span>
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                {grades?.term ? `Semester ${grades.term}` : "Rekap nilai per mata pelajaran."}
+              </p>
+            </div>
+            <Button size="sm" variant="outline" disabled={downloadingRapor} onClick={downloadRapor} className="gap-2 text-xs font-semibold">
+              <Download className="size-4" />
+              <span>{downloadingRapor ? "Mengunduh…" : "Unduh Rapor (PDF)"}</span>
+            </Button>
+          </div>
+
+          {grades === null ? (
+            <Skeleton className="h-24 w-full" />
+          ) : grades.subjects.length === 0 ? (
+            <Card className="p-6 text-center text-sm text-muted-foreground">
+              Belum ada mata pelajaran terjadwal untuk kelas ananda.
+            </Card>
+          ) : (
+            <Card className="overflow-hidden border-border/80">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-border bg-muted/30 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-5 py-3">Mata Pelajaran</th>
+                    <th className="px-3 py-3 text-right">Tugas</th>
+                    <th className="px-3 py-3 text-right">UTS</th>
+                    <th className="px-3 py-3 text-right">UAS</th>
+                    <th className="px-5 py-3 text-right">Nilai Akhir</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {grades.subjects.map((row) => (
+                    <tr key={row.subject.ulid}>
+                      <td className="px-5 py-3 font-semibold">{row.subject.name}</td>
+                      <td className="px-3 py-3 text-right tabular">{row.tugas ?? "—"}</td>
+                      <td className="px-3 py-3 text-right tabular">{row.uts ?? "—"}</td>
+                      <td className="px-3 py-3 text-right tabular">{row.uas ?? "—"}</td>
+                      <td className="px-5 py-3 text-right">
+                        {row.final !== null ? (
+                          <span className="tabular font-bold text-primary">{row.final}</span>
+                        ) : (
+                          <Badge variant="warn">Belum lengkap</Badge>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+        </section>
 
         {/* SECTION 2: PRESTASI */}
         <section className="space-y-4 pt-4 border-t border-border">

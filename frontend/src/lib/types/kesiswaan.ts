@@ -120,6 +120,36 @@ export type AttendanceRosterEntry = {
   checked_in_at: string | null;
 };
 
+export type GradeCategory = "tugas" | "uts" | "uas";
+
+export const GRADE_CATEGORY_LABEL: Record<GradeCategory, string> = {
+  tugas: "Tugas",
+  uts: "UTS",
+  uas: "UAS",
+};
+
+export type TeachingAssignment = {
+  classroom: { ulid: string; name: string };
+  subject: { ulid: string; name: string };
+};
+
+export type GradeRosterEntry = {
+  ulid: string;
+  nama_lengkap: string;
+  nis: string | null;
+  tugas: number | null;
+  uts: number | null;
+  uas: number | null;
+};
+
+export type SubjectGradeSummary = {
+  subject: { ulid: string; name: string };
+  tugas: number | null;
+  uts: number | null;
+  uas: number | null;
+  final: number | null;
+};
+
 export type AchievementStatus = "pending" | "verified" | "rejected";
 
 export type Achievement = {

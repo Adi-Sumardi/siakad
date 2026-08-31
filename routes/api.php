@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\FileController;
 use App\Http\Controllers\Api\Guru\AchievementController as GuruAchievementController;
 use App\Http\Controllers\Api\Guru\AttendanceSessionController as GuruAttendanceSessionController;
 use App\Http\Controllers\Api\Guru\ClassroomController as GuruClassroomController;
+use App\Http\Controllers\Api\Guru\GradeController as GuruGradeController;
 use App\Http\Controllers\Api\Guru\PointController as GuruPointController;
 use App\Http\Controllers\Api\Public\AttendancePresensiController;
 use App\Http\Controllers\Api\Wali\AchievementController as WaliAchievementController;
@@ -25,6 +26,7 @@ use App\Http\Controllers\Api\Wali\AttendanceController as WaliAttendanceControll
 use App\Http\Controllers\Api\Wali\BillController as WaliBillController;
 use App\Http\Controllers\Api\Wali\DashboardController as WaliDashboardController;
 use App\Http\Controllers\Api\Wali\FeeSelectionController as WaliFeeSelectionController;
+use App\Http\Controllers\Api\Wali\GradeController as WaliGradeController;
 use App\Http\Controllers\Api\Wali\PointController as WaliPointController;
 use App\Http\Controllers\Api\Webhooks\PmbHandoffController;
 use App\Http\Controllers\Api\Webhooks\SendagoPayController;
@@ -102,6 +104,9 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
     Route::get('/students/{ulid}/fee-selections', [WaliFeeSelectionController::class, 'index']);
     Route::post('/students/{ulid}/fee-selections', [WaliFeeSelectionController::class, 'store']);
 
+    Route::get('/students/{ulid}/grades', [WaliGradeController::class, 'index']);
+    Route::get('/students/{ulid}/rapor', [WaliGradeController::class, 'rapor']);
+
     Route::get('/announcements', [WaliAnnouncementController::class, 'index']);
 });
 
@@ -131,6 +136,10 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     Route::get('/attendance-sessions/{ulid}/roster', [GuruAttendanceSessionController::class, 'roster']);
     Route::patch('/attendance-sessions/{ulid}/records/{recordUlid}/revoke', [GuruAttendanceSessionController::class, 'revoke']);
     Route::post('/attendance-sessions/{ulid}/complete', [GuruAttendanceSessionController::class, 'complete']);
+
+    Route::get('/my-subjects', [GuruGradeController::class, 'myAssignments']);
+    Route::get('/classrooms/{classroomUlid}/subjects/{subjectUlid}/grades', [GuruGradeController::class, 'roster']);
+    Route::post('/classrooms/{classroomUlid}/subjects/{subjectUlid}/grades', [GuruGradeController::class, 'store']);
 });
 
 /*
@@ -225,6 +234,9 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/school-units', [ReferenceController::class, 'schoolUnits']);
     Route::get('/academic-years', [ReferenceController::class, 'academicYears']);
     Route::get('/classrooms', [ReferenceController::class, 'classrooms']);
+
+    Route::get('/grades', [\App\Http\Controllers\Api\Admin\GradeController::class, 'index']);
+    Route::get('/students/{ulid}/rapor', [\App\Http\Controllers\Api\Admin\GradeController::class, 'rapor']);
 });
 
 /*
