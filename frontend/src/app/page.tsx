@@ -99,7 +99,7 @@ const UNIT_FOOTER_LIST = UNITS.join(" · ");
 
 export default function LandingPage() {
   return (
-    <div className="min-h-svh bg-white relative overflow-x-hidden">
+    <div className="min-h-svh relative overflow-x-hidden">
       {/* Decorative background - visibly blue, not a near-white tint */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden -z-10">
         <div className="absolute inset-0 bg-linear-to-b from-[#DCE6FB] via-[#F0F5FE] to-white" />
