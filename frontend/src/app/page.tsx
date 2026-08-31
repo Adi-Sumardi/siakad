@@ -2,9 +2,19 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Award, Megaphone, Receipt, ArrowRight } from "lucide-react";
+import {
+  Award,
+  Megaphone,
+  Receipt,
+  ArrowRight,
+  Mail,
+  MessageCircle,
+  ShieldCheck,
+  CheckCircle2,
+} from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 const UNITS = [
@@ -53,7 +63,7 @@ const FEATURES = [
   {
     icon: Receipt,
     title: "Tagihan & pembayaran",
-    desc: "SPP bulanan, riwayat pembayaran, dan kuitansi - untuk semua anak dalam satu keluarga sekaligus.",
+    desc: "SPP bulanan lewat Virtual Account Bank Muamalat (khusus per anak), lengkap dengan riwayat pembayaran dan kuitansi.",
   },
   {
     icon: Award,
@@ -66,6 +76,26 @@ const FEATURES = [
     desc: "Pengumuman dari sekolah, unit, sampai kelas anak Anda - tanpa harus mencari-cari di grup chat.",
   },
 ];
+
+const LOGIN_STEPS = [
+  {
+    icons: [Mail, MessageCircle],
+    title: "Masukkan email atau WhatsApp",
+    desc: "Alamat email atau nomor WhatsApp yang sudah terdaftar di sekolah.",
+  },
+  {
+    icons: [ShieldCheck],
+    title: "Terima kode OTP",
+    desc: "Kode 6 digit sekali pakai otomatis terkirim ke kanal yang Anda pilih.",
+  },
+  {
+    icons: [CheckCircle2],
+    title: "Masuk ke akun",
+    desc: "Masukkan kodenya, dan Anda langsung masuk - tidak ada kata sandi untuk dibuat atau diingat.",
+  },
+];
+
+const UNIT_FOOTER_LIST = UNITS.join(" · ");
 
 export default function LandingPage() {
   return (
@@ -126,10 +156,58 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <footer className="border-t bg-card/60 py-8 flex flex-col items-center gap-3 text-center text-xs text-muted-foreground">
-        <p>Powered By Yayasan Asrama Pelajar Islam - Al Azhar</p>
+      {/* Cara Masuk - passwordless is unfamiliar to many parents, so it gets its own explainer */}
+      <section className="border-y bg-canvas/70">
+        <div className="max-w-5xl mx-auto px-5 sm:px-8 py-14 sm:py-20">
+          <div className="flex flex-col items-center text-center gap-2 mb-11">
+            <Badge variant="primary">
+              <ShieldCheck className="size-3.5" />
+              Tanpa kata sandi
+            </Badge>
+            <h2 className="text-xl sm:text-2xl font-semibold" style={{ fontFamily: "var(--font-heading)" }}>
+              Cara masuk
+            </h2>
+            <p className="max-w-md text-sm text-muted-foreground">
+              Tidak ada kata sandi untuk diingat - wali murid, guru, maupun admin masuk dengan cara yang sama.
+            </p>
+          </div>
+
+          <div className="grid sm:grid-cols-3 gap-8 sm:gap-6">
+            {LOGIN_STEPS.map((step, i) => (
+              <div key={step.title} className="flex sm:flex-col items-start sm:items-center gap-4 sm:text-center">
+                <span
+                  className={cn(
+                    "flex size-9 shrink-0 items-center justify-center rounded-full border font-semibold text-sm",
+                    i === LOGIN_STEPS.length - 1
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-background text-primary border-border",
+                  )}
+                  style={{ fontFamily: "var(--font-heading)" }}
+                >
+                  {i + 1}
+                </span>
+                <div className="flex flex-col sm:items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 text-muted-foreground sm:justify-center">
+                    {step.icons.map((Icon, iconIdx) => (
+                      <Icon key={iconIdx} className="size-4" />
+                    ))}
+                  </div>
+                  <h3 className="text-sm font-semibold" style={{ fontFamily: "var(--font-heading)" }}>
+                    {step.title}
+                  </h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed sm:max-w-56">{step.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <footer className="bg-card/60 py-8 flex flex-col items-center gap-3 text-center text-xs text-muted-foreground">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/images/logo-yapi.png" alt="Yayasan Asrama Pelajar Islam - Al Azhar" className="h-8 w-auto opacity-80" />
+        <p>Powered By Yayasan Asrama Pelajar Islam - Al Azhar</p>
+        <p className="max-w-lg px-5">{UNIT_FOOTER_LIST}</p>
       </footer>
     </div>
   );
