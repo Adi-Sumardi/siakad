@@ -230,10 +230,10 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
                 <div key={i} className="flex items-center justify-between p-4 px-6 text-sm hover:bg-muted/20 transition-colors">
                   <div>
                     <p className="font-bold text-foreground">{line.name}</p>
-                    {line.qty > 1 && (
+                    {(line.qty > 1 || line.size_option) && (
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {line.qty} × {rupiah(line.unit_price)}
-                        {line.size_option && ` · Ukuran: ${line.size_option}`}
+                        {line.qty > 1 && `${line.qty} × ${rupiah(line.unit_price)}`}
+                        {line.size_option && `${line.qty > 1 ? " · " : ""}Ukuran: ${line.size_option}`}
                       </p>
                     )}
                   </div>

@@ -229,7 +229,7 @@ class BillingTest extends TestCase
         $this->assertSame('Tarif belum ada', $preview['skipped'][0]['reason']);
     }
 
-    public function test_a_fee_type_needing_item_selection_is_skipped_not_guessed_at(): void
+    public function test_a_fee_type_needing_item_selection_is_skipped_until_a_family_submits_one(): void
     {
         $seragam = FeeType::create([
             'code' => 'seragam', 'name' => 'Seragam & atribut', 'recurrence' => 'once',
@@ -243,12 +243,12 @@ class BillingTest extends TestCase
 
         $preview = $this->generator()->preview($seragam, $this->year, $this->unit);
 
-        // A rate exists, but nothing anywhere lets a family choose which
-        // items or sizes apply to them - billing the full bundle to everyone
-        // would be a guess, not a bill.
+        // A rate exists, but no family has submitted a StudentFeeSelection
+        // yet - billing the full bundle to everyone would be a guess, not a
+        // bill. See FeeSelectionTest for the path once one is submitted.
         $this->assertSame(0, $preview['eligible']);
         $this->assertCount(1, $preview['skipped']);
-        $this->assertSame('Perlu pemilihan item', $preview['skipped'][0]['reason']);
+        $this->assertSame('Menunggu pemilihan orang tua', $preview['skipped'][0]['reason']);
         $this->assertDatabaseCount('bills', 0);
     }
 

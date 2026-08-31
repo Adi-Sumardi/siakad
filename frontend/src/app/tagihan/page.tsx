@@ -13,6 +13,7 @@ import {
   Download,
   ExternalLink,
   Receipt,
+  ShoppingBag,
   Sparkles,
   Wallet,
 } from "lucide-react";
@@ -27,7 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
 import { dueLabel, rupiah } from "@/lib/format";
-import { isOpen, type Bill, type BillSummary, type Payment } from "@/lib/types/billing";
+import { isOpen, type Bill, type BillSummary, type FeeSelectionEntry, type Payment } from "@/lib/types/billing";
 import { cn } from "@/lib/utils";
 
 function statusBadge(bill: Bill) {
@@ -47,6 +48,7 @@ export default function BillsPage() {
 
   const [bills, setBills] = useState<Bill[] | null>(null);
   const [summary, setSummary] = useState<BillSummary | null>(null);
+  const [pendingSelections, setPendingSelections] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [paying, setPaying] = useState(false);
 
@@ -68,6 +70,23 @@ export default function BillsPage() {
   useEffect(() => {
     if (user?.role === "orangtua") load();
   }, [user, load]);
+
+  useEffect(() => {
+    if (user?.role !== "orangtua") return;
+
+    (async () => {
+      try {
+        const { students } = await api.get<{ students: { ulid: string }[] }>("/api/wali/students");
+        const perStudent = await Promise.all(
+          students.map((s) => api.get<{ fee_selections: FeeSelectionEntry[] }>(`/api/wali/students/${s.ulid}/fee-selections`)),
+        );
+        const pending = perStudent.flatMap((d) => d.fee_selections).filter((e) => !e.selection?.submitted_at).length;
+        setPendingSelections(pending);
+      } catch {
+        // Non-critical - the banner just stays hidden if this fails.
+      }
+    })();
+  }, [user]);
 
   const openBills = useMemo(() => bills?.filter(isOpen) ?? [], [bills]);
   const paidBills = useMemo(() => bills?.filter((b) => !isOpen(b)) ?? [], [bills]);
@@ -236,6 +255,20 @@ export default function BillsPage() {
             </Link>
           </div>
         </div>
+
+        {pendingSelections > 0 && (
+          <Link href="/tagihan/pilihan">
+            <Card className="flex items-center justify-between gap-3 border-warn/30 bg-warn-soft p-4 hover:border-warn/60 transition-colors">
+              <div className="flex items-center gap-3">
+                <ShoppingBag className="size-5 text-warn shrink-0" />
+                <p className="text-sm font-semibold text-warn">
+                  Ada {pendingSelections} pilihan item/ukuran yang perlu diisi sebelum tagihannya bisa terbit.
+                </p>
+              </div>
+              <ChevronRight className="size-4 text-warn shrink-0" />
+            </Card>
+          </Link>
+        )}
 
         {/* SECTION 1: TAGIHAN BELUM LUNAS */}
         <section className="space-y-4">

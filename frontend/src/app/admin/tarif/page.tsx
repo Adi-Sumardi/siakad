@@ -33,8 +33,19 @@ type FeeType = {
   name: string;
   recurrence: string;
   allow_installment: boolean;
+  requires_selection: boolean;
   is_active: boolean;
   rate_count: number;
+};
+
+type Component = {
+  ulid?: string;
+  name: string;
+  amount: number | string;
+  default_qty: number;
+  is_optional: boolean;
+  has_size_option: boolean;
+  size_options: string | null;
 };
 
 type Rate = {
@@ -47,6 +58,7 @@ type Rate = {
   due_day: number | null;
   late_fee_amount: number;
   is_active: boolean;
+  components: Component[];
 };
 
 type Option = { ulid: string; code?: string; label?: string; year?: string; is_active?: boolean; starts_on?: string; ends_on?: string };
@@ -96,7 +108,13 @@ export default function FeeRatesPage() {
     name: "",
     recurrence: "monthly" as "monthly" | "per_term" | "once",
     allow_installment: false,
+    requires_selection: false,
   });
+
+  const emptyComponent = (): Component => ({
+    name: "", amount: "", default_qty: 1, is_optional: false, has_size_option: false, size_options: "",
+  });
+  const [rateComponents, setRateComponents] = useState<Component[]>([]);
 
   const [newYearName, setNewYearName] = useState("2027/2028");
   const [newYearStarts, setNewYearStarts] = useState("2027-07-01");
@@ -152,15 +170,26 @@ export default function FeeRatesPage() {
         school_unit_ulid: rateForm.school_unit_ulid,
         academic_year_ulid: rateForm.academic_year_ulid,
         tingkat: rateForm.tingkat ? parseInt(rateForm.tingkat) : null,
-        amount: parseFloat(rateForm.amount),
+        amount: parseFloat(rateForm.amount || "0"),
         due_day: rateForm.due_day ? parseInt(rateForm.due_day) : null,
         late_fee_amount: parseFloat(rateForm.late_fee_amount || "0"),
         notes: rateForm.notes || null,
+        components: rateComponents
+          .filter((c) => c.name.trim())
+          .map((c) => ({
+            name: c.name,
+            amount: parseFloat(String(c.amount) || "0"),
+            default_qty: c.default_qty,
+            is_optional: c.is_optional,
+            has_size_option: c.has_size_option,
+            size_options: c.has_size_option ? c.size_options : null,
+          })),
       });
 
       toast.success("Tarif biaya berhasil disimpan.");
       setShowRateModal(false);
       setRateForm((f) => ({ ...f, amount: "", tingkat: "", notes: "" }));
+      setRateComponents([]);
       loadData();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menyimpan tarif.");
@@ -179,11 +208,12 @@ export default function FeeRatesPage() {
         name: typeForm.name,
         recurrence: typeForm.recurrence,
         allow_installment: typeForm.allow_installment,
+        requires_selection: typeForm.requires_selection,
       });
 
       toast.success("Jenis biaya baru berhasil ditambahkan.");
       setShowTypeModal(false);
-      setTypeForm({ code: "", name: "", recurrence: "monthly", allow_installment: false });
+      setTypeForm({ code: "", name: "", recurrence: "monthly", allow_installment: false, requires_selection: false });
       loadData();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menambahkan jenis biaya.");
@@ -508,7 +538,12 @@ export default function FeeRatesPage() {
                         {t.allow_installment ? "Ya (Cicilan / Custom)" : "Penuh Sekaligus"}
                       </Badge>
                     </td>
-                    <td className="px-5 py-4 font-semibold">{t.rate_count} tarif unit</td>
+                    <td className="px-5 py-4 font-semibold">
+                      {t.rate_count} tarif unit
+                      {t.requires_selection && (
+                        <Badge variant="warn" className="ml-2">Butuh pemilihan ukuran</Badge>
+                      )}
+                    </td>
                     <td className="px-5 py-4">
                       <Badge variant={t.is_active ? "good" : "default"}>
                         {t.is_active ? "Aktif" : "Non-aktif"}
@@ -730,6 +765,91 @@ export default function FeeRatesPage() {
                 </div>
               </div>
 
+              <div className="border-t border-border pt-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-bold">
+                    Komponen (opsional - kosongkan untuk tarif satu harga)
+                  </Label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px]"
+                    onClick={() => setRateComponents((c) => [...c, emptyComponent()])}
+                  >
+                    + Komponen
+                  </Button>
+                </div>
+                {feeTypes?.find((t) => t.ulid === rateForm.fee_type_ulid)?.requires_selection && rateComponents.length === 0 && (
+                  <p className="mt-1.5 rounded-lg bg-warn-soft p-2 text-[11px] text-warn">
+                    Jenis biaya ini butuh pemilihan - tanpa komponen di sini, tagihan tidak akan pernah bisa
+                    diterbitkan (orang tua tidak punya apa pun untuk dipilih).
+                  </p>
+                )}
+                <div className="mt-2 flex flex-col gap-2">
+                  {rateComponents.map((c, i) => (
+                    <div key={i} className="rounded-lg border border-border p-2.5">
+                      <div className="flex flex-wrap items-end gap-2">
+                        <Input
+                          placeholder="Nama (mis. Kemeja Putih)"
+                          value={c.name}
+                          onChange={(e) => setRateComponents((cs) => cs.map((x, xi) => xi === i ? { ...x, name: e.target.value } : x))}
+                          className="h-8 w-40 text-xs"
+                        />
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="Harga"
+                          value={c.amount}
+                          onChange={(e) => setRateComponents((cs) => cs.map((x, xi) => xi === i ? { ...x, amount: e.target.value } : x))}
+                          className="h-8 w-28 text-xs"
+                        />
+                        <Input
+                          type="number"
+                          min="1"
+                          value={c.default_qty}
+                          onChange={(e) => setRateComponents((cs) => cs.map((x, xi) => xi === i ? { ...x, default_qty: parseInt(e.target.value) || 1 } : x))}
+                          className="h-8 w-16 text-xs"
+                        />
+                        <label className="flex items-center gap-1 text-[11px]">
+                          <input
+                            type="checkbox"
+                            checked={c.is_optional}
+                            onChange={(e) => setRateComponents((cs) => cs.map((x, xi) => xi === i ? { ...x, is_optional: e.target.checked } : x))}
+                          />
+                          Opsional
+                        </label>
+                        <label className="flex items-center gap-1 text-[11px]">
+                          <input
+                            type="checkbox"
+                            checked={c.has_size_option}
+                            onChange={(e) => setRateComponents((cs) => cs.map((x, xi) => xi === i ? { ...x, has_size_option: e.target.checked } : x))}
+                          />
+                          Butuh ukuran
+                        </label>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 text-[11px] text-destructive"
+                          onClick={() => setRateComponents((cs) => cs.filter((_, xi) => xi !== i))}
+                        >
+                          Hapus
+                        </Button>
+                      </div>
+                      {c.has_size_option && (
+                        <Input
+                          placeholder="Daftar ukuran, pisahkan koma (mis. S,M,L,XL)"
+                          value={c.size_options ?? ""}
+                          onChange={(e) => setRateComponents((cs) => cs.map((x, xi) => xi === i ? { ...x, size_options: e.target.value } : x))}
+                          className="mt-2 h-8 text-xs"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex justify-end gap-2.5 pt-3 border-t border-border">
                 <Button type="button" variant="ghost" onClick={() => setShowRateModal(false)}>
                   Batal
@@ -803,6 +923,25 @@ export default function FeeRatesPage() {
                   Izinkan Pembayaran Sebagian / Cicilan
                 </Label>
               </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="type_requires_selection"
+                  checked={typeForm.requires_selection}
+                  onChange={(e) => setTypeForm({ ...typeForm, requires_selection: e.target.checked })}
+                  className="rounded border-input text-primary size-4"
+                />
+                <Label htmlFor="type_requires_selection" className="text-xs font-semibold cursor-pointer">
+                  Butuh Pemilihan Item/Ukuran (seperti Seragam)
+                </Label>
+              </div>
+              {typeForm.requires_selection && (
+                <p className="rounded-lg bg-muted/40 p-2.5 text-[11px] text-muted-foreground">
+                  Tagihan untuk jenis biaya ini tidak akan terbit sampai orang tua memilih ukuran/item lewat
+                  portal wali. Tambahkan komponennya saat membuat tarif.
+                </p>
+              )}
 
               <div className="flex justify-end gap-2.5 pt-3 border-t border-border">
                 <Button type="button" variant="ghost" onClick={() => setShowTypeModal(false)}>

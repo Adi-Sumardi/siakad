@@ -114,6 +114,7 @@ class FeeSettingController extends Controller
                     'default_qty' => $c->default_qty,
                     'is_optional' => $c->is_optional,
                     'has_size_option' => $c->has_size_option,
+                    'size_options' => $c->size_options,
                 ]),
             ]),
         ]);
@@ -138,6 +139,7 @@ class FeeSettingController extends Controller
             'components.*.default_qty' => 'integer|min:1',
             'components.*.is_optional' => 'boolean',
             'components.*.has_size_option' => 'boolean',
+            'components.*.size_options' => 'nullable|string|max:255',
         ]);
 
         $type = FeeType::where('ulid', $validated['fee_type_ulid'])->firstOrFail();

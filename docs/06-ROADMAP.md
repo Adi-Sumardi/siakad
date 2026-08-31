@@ -90,12 +90,13 @@ Butuh model jadwal pelajaran baru (`subjects`, `class_schedules`,
 commit untuk detail desain (ledger + revoke, endpoint publik token-gated
 untuk siswa yang tidak punya akun di aplikasi ini sama sekali).
 
-- Pemilihan item/ukuran per siswa untuk fee type `requires_selection` (mis.
-  seragam). Kolomnya (`requires_selection`, `has_size_option`) sudah ada sejak
-  Fase 2 tapi tidak pernah dibaca di mana pun; `BillGenerator` sekarang
-  melewati fee type ini dengan alasan eksplisit alih-alih menagih bundel penuh
-  ke setiap siswa tanpa pilihan apa pun (ditemukan lewat debugging menyeluruh,
-  2026-08-18)
+**Pemilihan item/ukuran (seragam) — selesai.** `requires_selection`/
+`has_size_option` sudah ada sejak Fase 2 tapi tidak pernah dibaca; tabel yang
+hilang (`student_fee_selections`/`student_fee_selection_items`) sekarang
+menyimpan pilihan keluarga sebelum `BillGenerator` menagih — subtotal
+dihitung dari komponen yang dipilih (bukan tarif flat), pilihan terkunci
+begitu tagihan terbit. Admin mengisi katalog komponen + daftar ukuran lewat
+`admin/tarif`, wali memilih lewat `tagihan/pilihan`.
 - Mata pelajaran, penugasan mengajar, nilai, rapor
 - Ekstrakurikuler
 - Kenaikan kelas massal antar tahun ajaran

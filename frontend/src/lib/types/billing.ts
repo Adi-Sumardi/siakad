@@ -76,6 +76,26 @@ export type Payment = {
   bills?: Bill[];
 };
 
+export type FeeComponentOption = {
+  ulid: string;
+  name: string;
+  amount: number;
+  default_qty: number;
+  is_optional: boolean;
+  has_size_option: boolean;
+  size_options: string[];
+};
+
+export type FeeSelectionEntry = {
+  fee_type: { ulid: string; name: string };
+  fee_rate: { ulid: string; components: FeeComponentOption[] };
+  selection: {
+    submitted_at: string | null;
+    locked_at: string | null;
+    items: { fee_component_ulid: string; included: boolean; size_option: string | null }[];
+  } | null;
+};
+
 /** Open statuses in one place, so no screen invents its own idea of "owing". */
 export const OPEN_STATUSES: BillStatus[] = ["unpaid", "partial", "overdue"];
 

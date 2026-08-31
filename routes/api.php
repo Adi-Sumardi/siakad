@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\Wali\AnnouncementController as WaliAnnouncementCont
 use App\Http\Controllers\Api\Wali\AttendanceController as WaliAttendanceController;
 use App\Http\Controllers\Api\Wali\BillController as WaliBillController;
 use App\Http\Controllers\Api\Wali\DashboardController as WaliDashboardController;
+use App\Http\Controllers\Api\Wali\FeeSelectionController as WaliFeeSelectionController;
 use App\Http\Controllers\Api\Wali\PointController as WaliPointController;
 use App\Http\Controllers\Api\Webhooks\PmbHandoffController;
 use App\Http\Controllers\Api\Webhooks\SendagoPayController;
@@ -97,6 +98,9 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
     // A guardian's own account of a win - it waits for staff to confirm it,
     // and never carries points on its own.
     Route::post('/students/{ulid}/achievements', [WaliAchievementController::class, 'store']);
+
+    Route::get('/students/{ulid}/fee-selections', [WaliFeeSelectionController::class, 'index']);
+    Route::post('/students/{ulid}/fee-selections', [WaliFeeSelectionController::class, 'store']);
 
     Route::get('/announcements', [WaliAnnouncementController::class, 'index']);
 });

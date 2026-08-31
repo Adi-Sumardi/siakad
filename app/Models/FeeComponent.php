@@ -12,7 +12,7 @@ class FeeComponent extends Model
 
     protected $fillable = [
         'fee_rate_id', 'name', 'amount', 'default_qty',
-        'is_optional', 'has_size_option', 'sort_order',
+        'is_optional', 'has_size_option', 'size_options', 'sort_order',
     ];
 
     protected $casts = [
@@ -25,5 +25,15 @@ class FeeComponent extends Model
     public function feeRate(): BelongsTo
     {
         return $this->belongsTo(FeeRate::class);
+    }
+
+    /** Admin-defined dropdown values, e.g. "S,M,L,XL" -> ["S","M","L","XL"]. */
+    public function sizeOptionList(): array
+    {
+        if (! $this->size_options) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map('trim', explode(',', $this->size_options))));
     }
 }
