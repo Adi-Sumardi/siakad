@@ -195,4 +195,37 @@ class BillPdfTest extends TestCase
 
         $this->assertStringContainsString('Tagihan', $response->headers->get('Content-Disposition'));
     }
+
+    /**
+     * Regression test: the invoice used to print three hardcoded bank
+     * accounts and a "Virtual Account SendagoPay" line, neither ever
+     * confirmed as real and both stale since the gateway moved to Bank
+     * Muamalat VA. Asserted against the raw Blade output, not the PDF
+     * binary - dompdf's output isn't reliably string-searchable, but this
+     * is the exact same template with the exact same variables the PDF uses.
+     */
+    public function test_the_invoice_view_shows_a_real_virtual_account_number_not_the_old_unverified_bank_list(): void
+    {
+        $student = $this->billedStudent();
+        $bill = Bill::first()->load(['student.schoolUnit', 'lines', 'academicYear', 'feeType']);
+
+        $expectedVa = \App\Services\Billing\BillingApiClient::generateVaNumber($bill->student, $bill);
+
+        $html = view('pdf.bill', [
+            'bill' => $bill,
+            'isPaid' => false,
+            'payments' => collect(),
+            'kelas' => null,
+            'schoolName' => config('app.name'),
+            'logoBase64' => '',
+            'vaNumber' => $expectedVa,
+            'money' => fn (float $amount) => 'Rp '.number_format($amount, 0, ',', '.'),
+        ])->render();
+
+        $this->assertStringContainsString($expectedVa, $html);
+        $this->assertStringNotContainsString('7001234567', $html);
+        $this->assertStringNotContainsString('1230009876543', $html);
+        $this->assertStringNotContainsString('0089123456', $html);
+        $this->assertStringNotContainsString('SendagoPay', $html);
+    }
 }

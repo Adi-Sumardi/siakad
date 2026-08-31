@@ -17,7 +17,7 @@ class BillPdfService
 {
     public function render(Bill $bill): \Barryvdh\DomPDF\PDF
     {
-        $bill->loadMissing(['student.schoolUnit', 'lines', 'academicYear', 'allocations.payment']);
+        $bill->loadMissing(['student.schoolUnit', 'lines', 'academicYear', 'feeType', 'allocations.payment']);
 
         $payments = $bill->allocations
             ->pluck('payment')
@@ -38,6 +38,11 @@ class BillPdfService
             'kelas' => $bill->student->currentEnrollment()?->classroom?->name,
             'schoolName' => config('app.name'),
             'logoBase64' => $logoBase64,
+            // A deterministic, real VA number - not one of the three
+            // unverified bank accounts this used to print (never confirmed
+            // as YAPI's real accounts, and stale since the gateway moved to
+            // Bank Muamalat VA). Pure local formatting, no gateway call.
+            'vaNumber' => $bill->status === 'paid' ? null : BillingApiClient::generateVaNumber($bill->student, $bill),
             'money' => fn (float $amount) => 'Rp '.number_format($amount, 0, ',', '.'),
         ])->setPaper('a4');
     }

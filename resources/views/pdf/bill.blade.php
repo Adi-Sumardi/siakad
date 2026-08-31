@@ -199,15 +199,27 @@
 @else
     {{-- Informasi Pembayaran Resmi --}}
     <div class="pay-info-box">
-        <h4>Petunjuk & Rekening Resmi Pembayaran YAPI Jakarta:</h4>
-        <div class="bank-item">1. <strong>Pembayaran Online (QRIS Dinamis & Virtual Account SendagoPay)</strong>: Buka portal <a href="https://siakad.yapinet.id/tagihan" style="color: #14532D; text-decoration: underline;">https://siakad.yapinet.id/tagihan</a> lalu klik tombol <strong>Bayar</strong>.</div>
-        <div class="bank-item">2. <strong>Transfer Bank Resmi YAPI</strong> (Cantumkan No. Tagihan & Nama Siswa di berita transfer):</div>
-        <div style="padding-left: 14px; margin-top: 2px;">
-            • <strong>Bank Syariah Indonesia (BSI)</strong>: No. Rek. <strong>7001234567</strong> a.n. Yayasan Asrama Pelajar Islam<br>
-            • <strong>Bank Mandiri</strong>: No. Rek. <strong>1230009876543</strong> a.n. Yayasan Asrama Pelajar Islam<br>
-            • <strong>Bank Central Asia (BCA)</strong>: No. Rek. <strong>0089123456</strong> a.n. Yayasan Asrama Pelajar Islam
-        </div>
-        <div style="margin-top: 4px; font-size: 7.5pt; color: #14532D;">
+        <h4>Cara Pembayaran:</h4>
+        @if ($vaNumber)
+            <div class="bank-item">
+                <strong>Virtual Account Bank Muamalat (BMI)</strong> — khusus untuk {{ $bill->student->nama_lengkap }},
+                berlaku untuk semua tagihan {{ $bill->feeType?->name ?? 'jenis biaya ini' }} tahun ajaran
+                {{ $bill->academicYear?->year }}:
+            </div>
+            <div style="margin-top: 6px; padding: 8px 10px; background-color: #FFFFFF; border: 1.5px solid #166534; border-radius: 4px;">
+                <span style="font-size: 13pt; font-weight: bold; letter-spacing: 0.06em; color: #14532D;">{{ $vaNumber }}</span>
+            </div>
+            <div class="bank-item" style="margin-top: 8px;">
+                Transfer dari bank/e-wallet mana pun ke nomor Virtual Account di atas. Nomor ini tetap sama untuk
+                pembayaran berikutnya jenis biaya yang sama.
+            </div>
+        @else
+            <div class="bank-item">
+                Buka portal <a href="https://siakad.yapinet.id/tagihan" style="color: #14532D; text-decoration: underline;">https://siakad.yapinet.id/tagihan</a>
+                untuk melihat nomor Virtual Account pembayaran Anda.
+            </div>
+        @endif
+        <div style="margin-top: 8px; font-size: 7.5pt; color: #14532D;">
             *Konfirmasi / Bantuan Layanan Keuangan WhatsApp: <strong>0812-9270-2075</strong> | Email: <strong>keuangan@yapinet.id</strong>
         </div>
     </div>
