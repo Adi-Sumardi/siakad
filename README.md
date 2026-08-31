@@ -10,8 +10,10 @@ keuangan rutin — SPP, seragam, buku, kegiatan, dan tagihan lainnya.
 
 ## Status
 
-**Tahap rancangan.** Belum ada kode. Dokumen di `docs/` adalah desain yang harus
-disetujui dulu sebelum scaffolding Laravel + Next.js dijalankan.
+**Live di produksi** — siakad.yapinet.id. Fase 1–3 selesai (lihat
+[docs/06-ROADMAP.md](docs/06-ROADMAP.md)): akun & handoff dari PMB, keuangan
+(SPP, diskon, laporan), dan kesiswaan (poin, prestasi, pengumuman), lengkap
+dengan frontend admin & guru. Sedang mulai Fase 4 (akademik & penyempurnaan).
 
 ## Stack
 
@@ -20,13 +22,13 @@ belajar dua hal berbeda:
 
 | Lapis | Pilihan |
 |---|---|
-| Backend | Laravel 12, PHP 8.3, API JSON |
+| Backend | Laravel 13, PHP 8.3+, API JSON |
 | Auth | Sanctum SPA (cookie/session), bukan bearer token |
 | Database | PostgreSQL 17 |
 | Frontend | Next.js 16 (App Router) + shadcn/ui + Tailwind v4 |
-| Pembayaran | Xendit (invoice + webhook) |
+| Pembayaran | Virtual Account Bank Muamalat (e-SPP billing API) — khusus per anak per jenis biaya |
 | Notifikasi | Sendago (email + WhatsApp) |
-| Deploy | Docker Compose di VPS, di belakang Cloudflare Tunnel |
+| Deploy | Docker Compose di VPS (103.94.239.109, berbagi box dengan Odoo 18), `update.sh` untuk update rutin |
 
 ## Dokumen
 

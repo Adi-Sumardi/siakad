@@ -11,7 +11,10 @@ import type { NextRequest } from "next/server";
  * certainly not signed in. Real enforcement is every API call: a 401 makes the
  * client clear the user and route to /login.
  */
-const PUBLIC_PATHS = ["/login", "/aktivasi"];
+// /presensi is the student self-check-in page - reached by scanning a QR or
+// tapping a card, with zero cookies of any kind (students have no account
+// in this app at all), so it must never be gated behind "has a session".
+const PUBLIC_PATHS = ["/login", "/aktivasi", "/presensi"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

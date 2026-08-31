@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Award,
   BadgePercent,
+  CalendarClock,
   GraduationCap,
   LayoutDashboard,
   Megaphone,
@@ -29,6 +30,7 @@ const NAV: StaffNavItem[] = [
   { href: "/admin/diskon", label: "Kelola Diskon & Beasiswa", icon: BadgePercent },
   { href: "/admin/laporan", label: "Laporan Keuangan", icon: ScrollText },
   { href: "/admin/users", label: "Manajemen Pengguna", icon: Users, centralOnly: true },
+  { href: "/admin/jadwal", label: "Jadwal Pelajaran", icon: CalendarClock },
   { href: "/admin/poin", label: "Poin & Tata Tertib", icon: Sparkles },
   { href: "/admin/prestasi", label: "Prestasi Siswa", icon: Award },
   { href: "/admin/informasi", label: "Pengumuman", icon: Megaphone },

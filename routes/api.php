@@ -15,10 +15,13 @@ use App\Http\Controllers\Api\Auth\InvitationController;
 use App\Http\Controllers\Api\Auth\OtpController;
 use App\Http\Controllers\Api\FileController;
 use App\Http\Controllers\Api\Guru\AchievementController as GuruAchievementController;
+use App\Http\Controllers\Api\Guru\AttendanceSessionController as GuruAttendanceSessionController;
 use App\Http\Controllers\Api\Guru\ClassroomController as GuruClassroomController;
 use App\Http\Controllers\Api\Guru\PointController as GuruPointController;
+use App\Http\Controllers\Api\Public\AttendancePresensiController;
 use App\Http\Controllers\Api\Wali\AchievementController as WaliAchievementController;
 use App\Http\Controllers\Api\Wali\AnnouncementController as WaliAnnouncementController;
+use App\Http\Controllers\Api\Wali\AttendanceController as WaliAttendanceController;
 use App\Http\Controllers\Api\Wali\BillController as WaliBillController;
 use App\Http\Controllers\Api\Wali\DashboardController as WaliDashboardController;
 use App\Http\Controllers\Api\Wali\PointController as WaliPointController;
@@ -69,6 +72,16 @@ Route::prefix('invitations')->middleware('throttle:20,1')->group(function () {
     Route::post('/{token}/activate', [InvitationController::class, 'activate']);
 });
 
+// Student self-check-in for a lesson period. Unauthenticated by definition -
+// students have no account in this app - the session's token is the
+// credential, same shape as `invitations` above. Never exposes a classroom
+// roster: every lookup is one NIS in, one name out.
+Route::prefix('presensi')->middleware('throttle:60,1')->group(function () {
+    Route::get('/{token}', [AttendancePresensiController::class, 'show']);
+    Route::post('/{token}/lookup', [AttendancePresensiController::class, 'lookup']);
+    Route::post('/{token}/check-in', [AttendancePresensiController::class, 'checkIn']);
+});
+
 Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(function () {
     Route::get('/students', [WaliDashboardController::class, 'index']);
 
@@ -79,6 +92,7 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
     Route::get('/payments', [WaliBillController::class, 'payments']);
 
     Route::get('/students/{ulid}/points', [WaliPointController::class, 'index']);
+    Route::get('/students/{ulid}/attendance', [WaliAttendanceController::class, 'index']);
     Route::get('/students/{ulid}/achievements', [WaliAchievementController::class, 'index']);
     // A guardian's own account of a win - it waits for staff to confirm it,
     // and never carries points on its own.
@@ -107,6 +121,12 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
 
     // Trusted immediately, unlike a guardian's own submission of the same thing.
     Route::post('/achievements', [GuruAchievementController::class, 'store']);
+
+    Route::get('/classrooms/{ulid}/schedules/today', [GuruClassroomController::class, 'schedulesToday']);
+    Route::post('/schedules/{ulid}/attendance-sessions', [GuruAttendanceSessionController::class, 'open']);
+    Route::get('/attendance-sessions/{ulid}/roster', [GuruAttendanceSessionController::class, 'roster']);
+    Route::patch('/attendance-sessions/{ulid}/records/{recordUlid}/revoke', [GuruAttendanceSessionController::class, 'revoke']);
+    Route::post('/attendance-sessions/{ulid}/complete', [GuruAttendanceSessionController::class, 'complete']);
 });
 
 /*
@@ -150,6 +170,15 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 
     Route::get('/reports/receivables', [ReportController::class, 'receivables']);
     Route::get('/reports/collections', [ReportController::class, 'collections']);
+    Route::get('/reports/attendance', [\App\Http\Controllers\Api\Admin\AttendanceReportController::class, 'summary']);
+
+    Route::get('/subjects', [\App\Http\Controllers\Api\Admin\SubjectController::class, 'index']);
+    Route::post('/subjects', [\App\Http\Controllers\Api\Admin\SubjectController::class, 'store']);
+
+    Route::get('/classrooms/{classroomUlid}/schedules', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'index']);
+    Route::post('/classrooms/{classroomUlid}/schedules', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'store']);
+    Route::patch('/classrooms/{classroomUlid}/schedules/{ulid}', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'update']);
+    Route::delete('/classrooms/{classroomUlid}/schedules/{ulid}', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'destroy']);
 
     // A per-unit admin manages their own unit's rules/thresholds and never a
     // school-wide one - PointRuleController and PointThresholdController

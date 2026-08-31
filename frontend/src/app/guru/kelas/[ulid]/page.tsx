@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, ChevronDown, ChevronUp, Sparkles, UserCheck, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,58 @@ import type { PointRecord } from "@/lib/types/kesiswaan";
 
 type StudentRow = { ulid: string; nama_lengkap: string; nis: string | null; point_balance: number | null };
 type Rule = { ulid: string; code: string; name: string; type: "violation" | "merit"; category: string; points: number; requires_evidence: boolean };
+type TodaySchedule = { ulid: string; subject: string; teacher: string | null; start_time: string; end_time: string };
+
+function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
+  const router = useRouter();
+  const [schedules, setSchedules] = useState<TodaySchedule[] | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .get<{ schedules: TodaySchedule[] }>(`/api/guru/classrooms/${classroomUlid}/schedules/today`)
+      .then((d) => setSchedules(d.schedules))
+      .catch(() => setSchedules([]));
+  }, [classroomUlid]);
+
+  async function openAttendance(scheduleUlid: string) {
+    setOpening(scheduleUlid);
+    try {
+      const { session } = await api.post<{ session: { ulid: string } }>(`/api/guru/schedules/${scheduleUlid}/attendance-sessions`);
+      router.push(`/guru/presensi/${session.ulid}`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal membuka presensi.");
+      setOpening(null);
+    }
+  }
+
+  if (schedules === null) return <Skeleton className="h-14 w-full rounded-xl" />;
+  if (schedules.length === 0) return null;
+
+  return (
+    <Card className="p-4">
+      <h2 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-foreground">
+        <UserCheck className="size-4" />
+        Jadwal Hari Ini
+      </h2>
+      <div className="flex flex-col gap-2">
+        {schedules.map((s) => (
+          <div key={s.ulid} className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 p-2.5">
+            <div>
+              <p className="text-sm font-semibold">{s.subject}</p>
+              <p className="text-xs text-muted-foreground">
+                {s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)}{s.teacher ? ` · ${s.teacher}` : ""}
+              </p>
+            </div>
+            <Button size="sm" onClick={() => openAttendance(s.ulid)} disabled={opening === s.ulid} className="text-xs">
+              {opening === s.ulid ? "Membuka…" : "Buka Presensi"}
+            </Button>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
 
 function RuleSelect({ rules, value, onChange }: { rules: Rule[]; value: string; onChange: (v: string) => void }) {
   return (
@@ -289,6 +342,8 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
           )}
         </div>
       </div>
+
+      <TodaySchedulePanel classroomUlid={ulid} />
 
       {students === null && (
         <div className="space-y-3">

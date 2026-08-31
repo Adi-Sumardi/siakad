@@ -62,7 +62,7 @@ ambang yang sama, hanya sekali. 115 tes lulus, dan alur guru→poin,
 prestasi→poin, serta idempotensi notifikasi ambang diverifikasi langsung di
 luar test suite.
 
-Frontend admin & guru (10 halaman admin, 3 halaman guru) menyusul setelahnya,
+Frontend admin & guru (11 halaman admin, 3 halaman guru) menyusul setelahnya,
 menutup celah `tunggakan` di portal wali (dulu placeholder `null`) sekaligus:
 akses baca `fee-types`/`fee-rates` dibuka untuk admin_unit (dulu pusat saja),
 endpoint referensi (`school-units`, `academic-years`, `classrooms`) dan ledger
@@ -80,8 +80,16 @@ Fase 4, sebagai item pertama.
 
 ## Fase 4 — Akademik & penyempurnaan
 
-- Presensi harian (`attendances`) + rekap ke `enrollments.absent_count` dkk. —
-  dipindah dari Fase 3, lihat catatan di atas
+**Presensi per mata pelajaran — selesai.** Bukan presensi harian per kelas
+seperti rencana awal di atas, melainkan per jadwal pelajaran: guru membuka
+sesi (QR + tap kartu pelajar via NIS), siswa check-in mandiri, guru melihat
+roster secara live dan bisa membatalkan entri yang dicurigai "titip absen".
+`enrollments.absent_count`/`sick_count`/`permit_count` ter-rekap otomatis.
+Butuh model jadwal pelajaran baru (`subjects`, `class_schedules`,
+`attendance_sessions`) yang tidak ada di rencana awal manapun — lihat riwayat
+commit untuk detail desain (ledger + revoke, endpoint publik token-gated
+untuk siswa yang tidak punya akun di aplikasi ini sama sekali).
+
 - Pemilihan item/ukuran per siswa untuk fee type `requires_selection` (mis.
   seragam). Kolomnya (`requires_selection`, `has_size_option`) sudah ada sejak
   Fase 2 tapi tidak pernah dibaca di mana pun; `BillGenerator` sekarang
@@ -95,17 +103,20 @@ Fase 4, sebagai item pertama.
 - SSO PMB ↔ Sekolah (bila aplikasi ketiga muncul)
 - Aplikasi mobile / PWA notifikasi
 
-## Yang harus dibereskan sebelum produksi
+## Status produksi
 
-Dua hal terbawa dari PMB dan berlaku di sini juga:
+Aplikasi sudah live di siakad.yapinet.id. Pembayaran sejak awal produksi memakai
+**Virtual Account Bank Muamalat** (`billing_api`, lewat e-SPP) — bukan Xendit
+seperti rencana awal di atas; Xendit tidak pernah dipakai untuk tagihan nyata.
+VA bersifat deterministik per (siswa, jenis biaya, tahun ajaran), jadi beberapa
+bug "VA tertukar" (tabrakan kode siswa dari NIS, satu keranjang lintas anak/jenis
+biaya, dua checkout berurutan untuk kombinasi yang sama) sudah ditemukan dan
+ditutup — lihat `diagnose:va-collisions` untuk mengecek data produksi kapan saja.
 
-1. **Xendit masih memakai key sandbox.** Harus diganti ke key produksi sebelum
-   tagihan SPP asli terbit — kalau tidak, semua pembayaran hanya simulasi.
-2. **`public/` adalah Docker volume**, jadi rebuild image tidak memperbarui aset di
+Dua hal lain yang tetap berlaku terus, bukan cuma sebelum go-live pertama:
+
+1. **`public/` adalah Docker volume**, jadi rebuild image tidak memperbarui aset di
    dalamnya; aset baru harus `docker cp` masuk.
-
-Ditambah satu yang khas aplikasi ini:
-
-3. **Uang riil, berulang, banyak keluarga.** Sebelum billing run pertama menyentuh
+2. **Uang riil, berulang, banyak keluarga.** Sebelum billing run apa pun menyentuh
    produksi, jalankan `--preview` pada seluruh siswa dan cocokkan totalnya dengan
    rekap bendahara secara manual. Salah tarif × 400 siswa adalah 400 percakapan.

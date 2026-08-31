@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Award, FileDown, Plus, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Award, FileDown, Plus, Sparkles, UserCheck, X } from "lucide-react";
 import { toast } from "sonner";
 import { WaliShell } from "@/components/layout/wali-shell";
 import { Badge } from "@/components/ui/badge";
@@ -12,14 +12,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PointMeter } from "@/components/point-meter";
+import { AttendanceMeter } from "@/components/attendance-meter";
 import { API_BASE, api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
 import { tanggal } from "@/lib/format";
 import {
+  ATTENDANCE_STATUS_LABEL,
   JUARA_OPTIONS,
   KATEGORI_OPTIONS,
   TINGKAT_OPTIONS,
   type Achievement,
+  type AttendanceOverview,
   type PointSummary,
 } from "@/lib/types/kesiswaan";
 
@@ -58,6 +61,34 @@ function PointHistory({ points }: { points: PointSummary }) {
           <span className={`tabular shrink-0 text-sm font-bold ${record.points > 0 ? "text-good" : "text-bad"}`}>
             {record.points > 0 ? `+${record.points}` : record.points}
           </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AttendanceHistory({ attendance }: { attendance: AttendanceOverview }) {
+  if (attendance.records.length === 0) {
+    return <p className="p-5 text-sm text-muted-foreground text-center">Belum ada catatan presensi semester ini.</p>;
+  }
+
+  return (
+    <div className="flex flex-col divide-y divide-border">
+      {attendance.records.map((record) => (
+        <div key={record.ulid} className="flex items-start justify-between gap-4 px-5 py-3.5">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-foreground">{tanggal(record.occurred_on)}</p>
+            {record.description && <p className="text-xs text-muted-foreground mt-0.5">{record.description}</p>}
+          </div>
+          <Badge
+            variant={
+              record.attendance_status === "hadir" ? "good" :
+              record.attendance_status === "alpa" ? "bad" :
+              record.attendance_status === "sakit" ? "warn" : "default"
+            }
+          >
+            {ATTENDANCE_STATUS_LABEL[record.attendance_status]}
+          </Badge>
         </div>
       ))}
     </div>
@@ -220,6 +251,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
   const { user, loading } = useRequireRole("orangtua");
 
   const [points, setPoints] = useState<PointSummary | null>(null);
+  const [attendance, setAttendance] = useState<AttendanceOverview | null>(null);
   const [achievements, setAchievements] = useState<Achievement[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -236,6 +268,10 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
     api
       .get<PointSummary>(`/api/wali/students/${ulid}/points`)
       .then(setPoints)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+    api
+      .get<AttendanceOverview>(`/api/wali/students/${ulid}/attendance`)
+      .then(setAttendance)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
     loadAchievements();
   }, [ulid, user]);
@@ -317,6 +353,28 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
               <div className="p-5"><Skeleton className="h-24 w-full" /></div>
             ) : (
               <PointHistory points={points} />
+            )}
+          </Card>
+        </div>
+
+        {/* SECTION 1B: PRESENSI */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <Card className="p-6 border-border/80 lg:col-span-1">
+            <h2 className="text-base font-bold text-foreground flex items-center gap-2 mb-4">
+              <UserCheck className="size-5 text-emerald-500" />
+              <span>Presensi Kehadiran</span>
+            </h2>
+            {attendance === null ? <Skeleton className="h-20 w-full" /> : <AttendanceMeter summary={attendance.summary} />}
+          </Card>
+
+          <Card className="overflow-hidden border-border/80 lg:col-span-2">
+            <div className="border-b border-border bg-muted/30 px-5 py-3.5">
+              <h2 className="text-sm font-bold text-foreground">Riwayat Presensi Semester Ini</h2>
+            </div>
+            {attendance === null ? (
+              <div className="p-5"><Skeleton className="h-24 w-full" /></div>
+            ) : (
+              <AttendanceHistory attendance={attendance} />
             )}
           </Card>
         </div>

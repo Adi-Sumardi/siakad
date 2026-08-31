@@ -96,6 +96,11 @@ class Student extends Model
         return $this->hasMany(PointRecord::class);
     }
 
+    public function attendanceRecords(): HasMany
+    {
+        return $this->hasMany(AttendanceRecord::class);
+    }
+
     public function bills(): HasMany
     {
         return $this->hasMany(Bill::class);

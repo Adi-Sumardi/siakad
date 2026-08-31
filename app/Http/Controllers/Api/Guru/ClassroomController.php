@@ -8,6 +8,7 @@ use App\Models\Term;
 use App\Services\Points\PointLedger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 class ClassroomController extends Controller
 {
@@ -65,6 +66,31 @@ class ClassroomController extends Controller
                 'nama_lengkap' => $student->nama_lengkap,
                 'nis' => $student->nis,
                 'point_balance' => $term ? $ledger->balance($student, $term) : null,
+            ]),
+        ]);
+    }
+
+    /** Today's lesson periods for one classroom, so a teacher can pick which one to open attendance for. */
+    public function schedulesToday(Request $request, string $ulid): JsonResponse
+    {
+        $classroom = Classroom::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+
+        $today = Carbon::now()->dayOfWeekIso; // 1 = Senin ... 7 = Minggu
+
+        $schedules = $classroom->classSchedules()
+            ->where('day_of_week', $today)
+            ->with('subject', 'teacher')
+            ->orderBy('start_time')
+            ->get();
+
+        return response()->json([
+            'classroom' => ['ulid' => $classroom->ulid, 'name' => $classroom->name],
+            'schedules' => $schedules->map(fn ($s) => [
+                'ulid' => $s->ulid,
+                'subject' => $s->subject->name,
+                'teacher' => $s->teacher?->name,
+                'start_time' => $s->start_time,
+                'end_time' => $s->end_time,
             ]),
         ]);
     }
