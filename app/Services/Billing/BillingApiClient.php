@@ -2,22 +2,23 @@
 
 namespace App\Services\Billing;
 
+use App\Models\AcademicYear;
 use App\Models\Bill;
 use App\Models\FeeType;
 use App\Models\SchoolUnit;
 use App\Models\Student;
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\Response;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * HTTP client for the e-SPP Billing API (Bank Muamalat BMI & Bank Syariah Indonesia BSI Virtual Account webservice).
+ * Client for interacting with the e-SPP Billing API (Webservice).
+ * Base URL: http://43.225.66.150:8061
  */
 class BillingApiClient
 {
-    // Bank Muamalat (8020) Prefixes
+    // Default Virtual Account 6-digit Prefixes for Bank Muamalat (BMI - Kode Bank 147)
     public const PREFIX_SPP = '802001';
     public const PREFIX_UANG_PANGKAL = '802002';
     public const PREFIX_JAMIYYAH = '802003';
@@ -27,7 +28,7 @@ class BillingApiClient
     public const PREFIX_EKSKUL_SMP12 = '802007';
     public const PREFIX_EKSKUL_SMP55 = '802008';
 
-    // Bank Syariah Indonesia / BSI (3656) Prefixes
+    // Default Virtual Account 6-digit Prefixes for Bank Syariah Indonesia (BSI - Kode Bank 451)
     public const PREFIX_BSI_SPP = '365601';
     public const PREFIX_BSI_UANG_PANGKAL = '365602';
     public const PREFIX_BSI_JAMIYYAH = '365603';
@@ -37,31 +38,30 @@ class BillingApiClient
     public const PREFIX_BSI_EKSKUL_SMP12 = '365607';
     public const PREFIX_BSI_EKSKUL_SMP55 = '365608';
 
+    private const TOKEN_CACHE_KEY = 'billing_api:access_token';
+    private const TOKEN_EXPIRY_BUFFER_SECONDS = 300;
+
     /**
-     * Resolves the 6-digit prefix based on fee type, school unit, and bank.
+     * Resolves the 6-digit VA prefix based on fee type code, school unit, and bank.
      */
     public static function resolvePrefix(string $feeTypeCode, ?SchoolUnit $unit = null, string $bank = 'muamalat'): string
     {
+        $normalizedFee = strtolower($feeTypeCode);
         $bankKey = strtolower($bank) === 'bsi' ? 'bsi' : 'muamalat';
-        $normalizedFee = mb_strtolower(trim($feeTypeCode));
 
-        if (str_contains($normalizedFee, 'ekskul') || str_contains($normalizedFee, 'ekstrakurikuler')) {
-            $unitCode = mb_strtoupper($unit?->code ?? '');
-            $jenjang = mb_strtolower($unit?->jenjang_group ?? '');
+        if (str_contains($normalizedFee, 'ekskul')) {
+            $unitCode = strtoupper((string) ($unit?->code ?? ''));
 
-            if ($unitCode === 'SMP-12') {
-                return (string) config("services.banks.{$bankKey}.prefixes.ekskul_smp12", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP12 : self::PREFIX_EKSKUL_SMP12);
-            }
-            if ($unitCode === 'SMP-55' || str_contains($unitCode, 'SMP')) {
-                return (string) config("services.banks.{$bankKey}.prefixes.ekskul_smp55", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP55 : self::PREFIX_EKSKUL_SMP55);
-            }
-            if ($jenjang === 'sd' || str_contains($unitCode, 'SD')) {
-                return (string) config("services.banks.{$bankKey}.prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD);
-            }
-            return (string) config("services.banks.{$bankKey}.prefixes.ekskul_tk", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_TK : self::PREFIX_EKSKUL_TK);
+            return match (true) {
+                str_contains($unitCode, 'TK') => (string) config("services.banks.{$bankKey}.prefixes.ekskul_tk", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_TK : self::PREFIX_EKSKUL_TK),
+                str_contains($unitCode, 'SD') => (string) config("services.banks.{$bankKey}.prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD),
+                str_contains($unitCode, 'SMP-12') || str_contains($unitCode, 'SMP12') => (string) config("services.banks.{$bankKey}.prefixes.ekskul_smp12", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP12 : self::PREFIX_EKSKUL_SMP12),
+                str_contains($unitCode, 'SMP-55') || str_contains($unitCode, 'SMP55') => (string) config("services.banks.{$bankKey}.prefixes.ekskul_smp55", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP55 : self::PREFIX_EKSKUL_SMP55),
+                default => (string) config("services.banks.{$bankKey}.prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD),
+            };
         }
 
-        if (str_contains($normalizedFee, 'jamiyyah')) {
+        if (str_contains($normalizedFee, 'jamiyyah') || str_contains($normalizedFee, 'jam')) {
             return (string) config("services.banks.{$bankKey}.prefixes.jamiyyah", $bankKey === 'bsi' ? self::PREFIX_BSI_JAMIYYAH : self::PREFIX_JAMIYYAH);
         }
 
@@ -118,9 +118,16 @@ class BillingApiClient
             return $academicYear;
         }
 
-        $currentYear = (int) date('y');
+        try {
+            $activeYear = AcademicYear::where('is_active', true)->value('year');
+            if ($activeYear && preg_match('/(\d{4})\/(\d{4})/', $activeYear, $m)) {
+                return substr($m[1], 2, 2) . substr($m[2], 2, 2);
+            }
+        } catch (\Throwable) {
+            // Ignore if DB not queryable
+        }
 
-        return sprintf('%02d%02d', $currentYear, $currentYear + 1);
+        return '2728';
     }
 
     /**
@@ -152,183 +159,118 @@ class BillingApiClient
         return $clean ?: 'Siswa YAPI';
     }
 
-    /**
-     * Creates a VA bill on e-SPP (5.2.5).
-     *
-     * @param array<string, mixed> $mainForm
-     * @param array<string, mixed> $bmi
-     * @param array<string, mixed> $bsm
-     * @return array<string, mixed>
-     */
-    public function createBilling(array $mainForm, array $bmi, array $bsm = []): array
+    public function getAccessToken(): string
     {
-        $mainForm += ['bank_id' => (string) config('services.billing_api.bank_id', 1)];
-
-        return $this->request('post', '/api/billing', [
-            'main_form' => $mainForm,
-            'bmi' => $bmi,
-            'bsm' => $bsm,
-        ]);
+        return Cache::remember(self::TOKEN_CACHE_KEY, now()->addSeconds(3600 - self::TOKEN_EXPIRY_BUFFER_SECONDS), function () {
+            return $this->requestNewAccessToken();
+        });
     }
 
-    /**
-     * Updates an existing VA bill on e-SPP (5.2.6).
-     *
-     * @param array<string, mixed> $mainForm
-     * @param array<string, mixed> $bmi
-     * @param array<string, mixed> $bsm
-     * @return array<string, mixed>
-     */
-    public function updateBilling(string $uuid, array $mainForm, array $bmi = [], array $bsm = []): array
+    private function requestNewAccessToken(): string
     {
-        $mainForm += ['bank_id' => (string) config('services.billing_api.bank_id', 1)];
+        $baseUrl = rtrim((string) config('services.billing_api.base_url', 'http://43.225.66.150:8061'), '/');
+        $clientId = config('services.billing_api.client_id');
+        $clientSecret = config('services.billing_api.client_secret');
+        $username = config('services.billing_api.username');
+        $password = config('services.billing_api.password');
 
-        return $this->request('put', '/api/billing/'.urlencode($uuid), [
-            'main_form' => $mainForm,
-            'bmi' => $bmi,
-            'bsm' => $bsm,
-        ]);
-    }
-
-    /**
-     * Looks up a bill's status by its Virtual Account number (5.2.3).
-     *
-     * @return array<string, mixed>
-     */
-    public function getByVaNumber(string $nomorVa): array
-    {
-        return $this->request('get', '/api/billing/va/'.urlencode($nomorVa));
-    }
-
-    /**
-     * Detail billing berdasarkan UUID (5.2.2).
-     *
-     * @return array<string, mixed>
-     */
-    public function getBillingByUuid(string $uuid): array
-    {
-        return $this->request('get', '/api/billing/'.urlencode($uuid));
-    }
-
-    /**
-     * Mengambil seluruh data billing milik user login (5.2.4).
-     *
-     * @return array<string, mixed>
-     */
-    public function getAllBillings(int $page = 1, int $perPage = 50): array
-    {
-        return $this->request('get', "/api/billing/all-data?page={$page}&per_page={$perPage}");
-    }
-
-    /**
-     * Obtains a valid Bearer access token, caching until close to expiration.
-     */
-    public function token(): string
-    {
-        $cached = Cache::get($this->tokenCacheKey());
-        if (is_string($cached) && $cached !== '') {
-            return $cached;
+        if (! $clientId || ! $clientSecret || ! $username || ! $password) {
+            throw new BillingApiException('Billing API credentials are not fully configured in services.billing_api.');
         }
 
-        $response = Http::baseUrl($this->baseUrl())
-            ->timeout(10)
-            ->asForm()
-            ->post('/api/login', [
+        $response = Http::asForm()
+            ->timeout(15)
+            ->post("{$baseUrl}/oauth/token", [
                 'grant_type' => 'password',
-                'client_id' => (string) config('services.billing_api.client_id'),
-                'client_secret' => (string) config('services.billing_api.client_secret'),
-                'username' => (string) config('services.billing_api.username'),
-                'password' => (string) config('services.billing_api.password'),
+                'client_id' => $clientId,
+                'client_secret' => $clientSecret,
+                'username' => $username,
+                'password' => $password,
             ]);
 
-        if (! $response->successful()) {
-            Log::error('Billing API login failed', [
+        if ($response->failed()) {
+            Log::error('[BillingApiClient] OAuth token request failed', [
                 'status' => $response->status(),
                 'body' => $response->body(),
             ]);
 
             throw new BillingApiException(
-                'Otentikasi Billing API gagal (HTTP '.$response->status().'). Periksa konfigurasi akun.',
+                'Failed to authenticate with e-SPP Billing API: ' . $response->body(),
                 $response->status()
             );
         }
 
-        $body = $response->json();
-        $token = $body['access_token'] ?? null;
-        $expiresIn = (int) ($body['expires_in'] ?? 3600);
+        $data = $response->json();
+        $token = $data['access_token'] ?? null;
 
-        if (! is_string($token) || $token === '') {
-            throw new BillingApiException('Respons login Billing API tidak mengandung access_token valid.', 500);
+        if (! $token) {
+            throw new BillingApiException('Access token missing from OAuth response.');
         }
-
-        $ttl = max(60, $expiresIn - 300);
-        Cache::put($this->tokenCacheKey(), $token, now()->addSeconds($ttl));
 
         return $token;
     }
 
-    private function request(string $method, string $path, array $data = []): array
+    private function client(): PendingRequest
     {
-        $token = $this->token();
+        $baseUrl = rtrim((string) config('services.billing_api.base_url', 'http://43.225.66.150:8061'), '/');
+        $token = $this->getAccessToken();
 
-        try {
-            $http = Http::baseUrl($this->baseUrl())
-                ->withToken($token)
-                ->acceptJson()
-                ->timeout(15);
+        return Http::baseUrl($baseUrl)
+            ->withToken($token)
+            ->acceptJson()
+            ->timeout(20);
+    }
 
-            /** @var Response $response */
-            $response = match (strtolower($method)) {
-                'get' => $http->get($path, $data),
-                'post' => $http->post($path, $data),
-                'put' => $http->put($path, $data),
-                'delete' => $http->delete($path, $data),
-                default => throw new BillingApiException("HTTP method {$method} tidak didukung.", 400),
-            };
-        } catch (ConnectionException $e) {
-            Log::error('Billing API connection failed', ['path' => $path, 'error' => $e->getMessage()]);
-            throw new BillingApiException('Tidak dapat terhubung ke server Billing API: '.$e->getMessage(), 503);
-        }
+    /**
+     * Creates a new billing record on e-SPP with multi-channel support (Muamalat & BSI).
+     */
+    public function createBilling(array $mainForm, array $bmi, array $bsm): array
+    {
+        $payload = array_merge($mainForm, [
+            'bmi' => $bmi,
+            'bsm' => $bsm,
+        ]);
 
-        // On 401 Unauthorized, evict token and retry once
-        if ($response->status() === 401) {
-            Cache::forget($this->tokenCacheKey());
-            $token = $this->token();
+        $response = $this->client()->post('/api/billing/create', $payload);
 
-            $response = Http::baseUrl($this->baseUrl())
-                ->withToken($token)
-                ->acceptJson()
-                ->timeout(15)
-                ->{$method}($path, $data);
-        }
+        if ($response->failed()) {
+            if ($response->status() === 401) {
+                Cache::forget(self::TOKEN_CACHE_KEY);
+            }
 
-        if (! $response->successful()) {
-            $body = $response->json() ?? [];
-            $message = $body['message'] ?? 'Permintaan Billing API gagal';
-            $errors = is_array($body['errors'] ?? null) ? $body['errors'] : [];
-
-            Log::error('Billing API request error', [
-                'path' => $path,
+            Log::error('[BillingApiClient] createBilling failed', [
                 'status' => $response->status(),
-                'message' => $message,
-                'errors' => $errors,
+                'body' => $response->body(),
+                'payload' => $payload,
             ]);
 
-            throw new BillingApiException($message, $response->status(), $errors);
+            throw new BillingApiException(
+                'e-SPP createBilling failed: ' . $response->body(),
+                $response->status()
+            );
         }
 
-        $json = $response->json();
-
-        return $json['data'] ?? $json;
+        return $response->json() ?? [];
     }
 
-    private function baseUrl(): string
+    /**
+     * Looks up an existing billing by its Bank Muamalat Virtual Account Number.
+     */
+    public function getByVaNumber(string $vaNumber): array
     {
-        return rtrim((string) config('services.billing_api.base_url', 'http://43.225.66.150:8061'), '/');
-    }
+        $response = $this->client()->get("/api/billing/va/{$vaNumber}");
 
-    private function tokenCacheKey(): string
-    {
-        return 'billing_api:access_token:'.md5((string) config('services.billing_api.username'));
+        if ($response->failed()) {
+            if ($response->status() === 401) {
+                Cache::forget(self::TOKEN_CACHE_KEY);
+            }
+
+            throw new BillingApiException(
+                "e-SPP getByVaNumber failed for VA {$vaNumber}: " . $response->body(),
+                $response->status()
+            );
+        }
+
+        return $response->json() ?? [];
     }
 }
