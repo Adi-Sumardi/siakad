@@ -89,7 +89,7 @@ class BillingApiGateway implements PaymentGateway
                     'kelas' => $student->currentEnrollment()?->classroom?->name ?? '',
                 ],
                 ['va_number' => $vaMuamalat, 'ref_number' => $payment->payment_number],
-                ['nomor_pembayaran' => $vaBsi, 'id_tagihan' => $vaBsi]
+                ['nomor_pembayaran' => $payment->payment_number, 'id_tagihan' => $payment->payment_number]
             );
 
             $rawUuid = $response['uuid'] ?? ($response['data']['uuid'] ?? null);

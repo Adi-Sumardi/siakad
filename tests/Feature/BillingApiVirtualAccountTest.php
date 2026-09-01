@@ -689,4 +689,84 @@ class BillingApiVirtualAccountTest extends TestCase
         $this->assertEquals('processing', $payment->fresh()->status);
         $this->assertEquals('unpaid', $bill->fresh()->status);
     }
+
+    /**
+     * Regression: the BSI ('bsm') block sent to e-SPP was passing the VA
+     * number itself as both `nomor_pembayaran` and `id_tagihan`, instead of
+     * the payment's own reference number - the same shape the 'bmi' block
+     * correctly uses (`ref_number` => payment_number). A VA number is stable
+     * across every bill for the same (student, fee type, year); using it as
+     * the bill identifier means e-SPP can't tell two different bills paid
+     * through the same VA apart, and - per the family's real report - the
+     * VA the app displayed came back "not found" when checked in m-banking.
+     */
+    public function test_the_bsi_billing_payload_sends_the_payment_number_not_the_va_number_as_the_bill_reference(): void
+    {
+        $user = User::create([
+            'name' => 'Wali BSI Regression',
+            'role' => 'orangtua',
+            'phone' => '081292702099',
+            'email' => 'walibsiregression@example.com',
+            'is_active' => true,
+        ]);
+        $guardian = Guardian::create([
+            'user_id' => $user->id,
+            'nama' => 'Wali BSI Regression',
+            'hubungan' => 'ayah',
+            'no_hp' => '081292702099',
+        ]);
+
+        $student = Student::create([
+            'nama_lengkap' => 'Regression BSI',
+            'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->sdUnit->id,
+            'entry_year_id' => $this->year->id,
+            'nis' => '556',
+        ]);
+        $student->guardians()->attach($guardian->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+        $sppType = FeeType::create(['code' => 'spp', 'name' => 'SPP', 'recurrence' => 'monthly']);
+        $bill = Bill::create([
+            'bill_number' => 'SPP/2026/08/00006',
+            'dedup_key' => 'spp:2026:08:'.$student->id,
+            'description' => 'SPP Bulan Agustus 2026',
+            'student_id' => $student->id,
+            'academic_year_id' => $this->year->id,
+            'fee_type_id' => $sppType->id,
+            'subtotal' => 650000,
+            'total_amount' => 650000,
+            'remaining_amount' => 650000,
+            'status' => 'unpaid',
+            'due_date' => now()->addDays(7)->toDateString(),
+            'issued_at' => now(),
+        ]);
+
+        $studentCode = str_pad((string) $student->id, 6, '0', STR_PAD_LEFT);
+        $vaBsi = '3656012627'.$studentCode;
+
+        $mockClient = Mockery::mock(BillingApiClient::class);
+        $mockClient->shouldReceive('createBilling')
+            ->once()
+            ->withArgs(function (array $mainForm, array $bmi, array $bsm) use ($vaBsi) {
+                // The bill reference must be a payment_number-shaped string
+                // (starts with the YAPI- prefix CheckoutService assigns),
+                // never equal to the VA number itself.
+                return $bsm['nomor_pembayaran'] !== $vaBsi
+                    && $bsm['id_tagihan'] !== $vaBsi
+                    && $bsm['nomor_pembayaran'] === $bsm['id_tagihan']
+                    && str_starts_with((string) $bsm['nomor_pembayaran'], 'YAPI-');
+            })
+            ->andReturn(['uuid' => 'bill-uuid-bsi-regression', 'status' => 'success']);
+
+        $this->app->instance(BillingApiClient::class, $mockClient);
+
+        $this->actingAs($user);
+        $response = $this->postJson('/api/wali/checkout', [
+            'bill_ulids' => [$bill->ulid],
+            'method' => 'virtual_account',
+            'bank' => 'bsi',
+        ]);
+
+        $response->assertStatus(201);
+    }
 }
