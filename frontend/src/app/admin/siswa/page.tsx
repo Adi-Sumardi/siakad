@@ -230,6 +230,13 @@ export default function AdminStudentsPage() {
             <span>Import Siswa (CSV/Excel)</span>
           </Button>
 
+          <a href="/api/admin/students/dapodik-export" download title="Unduh CSV Formulir Peserta Didik (Dapodik) - untuk mempercepat entry manual, bukan impor otomatis ke Dapodik.">
+            <Button variant="outline" size="sm" className="gap-1.5 font-semibold text-xs h-9">
+              <FileSpreadsheet className="size-4 text-primary" />
+              <span>Ekspor Dapodik</span>
+            </Button>
+          </a>
+
           <Link href="/admin/diskon">
             <Button variant="outline" size="sm" className="gap-1.5 font-semibold text-xs h-9">
               <BadgePercent className="size-4" />

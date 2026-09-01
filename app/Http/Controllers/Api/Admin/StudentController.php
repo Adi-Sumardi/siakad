@@ -9,8 +9,10 @@ use App\Models\FeeType;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\StudentDiscount;
+use App\Services\Export\DapodikExportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class StudentController extends Controller
 {
@@ -157,6 +159,41 @@ class StudentController extends Controller
                     'selected_academic_year_ulid' => $selectedYear?->ulid,
                 ],
             ],
+        ]);
+    }
+
+    /**
+     * A CSV laid out in Formulir Peserta Didik (F-PD) column order - the
+     * official Dapodik data-collection form - not an import into Dapodik
+     * itself, which has no public write API. Speeds up an operator's manual
+     * re-entry rather than automating it away.
+     */
+    public function exportDapodik(Request $request, DapodikExportService $service): StreamedResponse
+    {
+        $unitCode = $request->string('unit')->value();
+
+        $students = Student::query()
+            ->visibleTo($request->user())
+            ->active()
+            ->when($unitCode, fn ($q) => $q->whereHas('schoolUnit', fn ($uq) => $uq->where('code', $unitCode)))
+            ->with(['guardians', 'entryYear', 'enrollments', 'schoolUnit'])
+            ->orderBy('nama_lengkap')
+            ->get();
+
+        $filename = 'dapodik_export_'.($unitCode ?: 'semua').'_'.now()->format('Y-m-d').'.csv';
+
+        return response()->stream(function () use ($service, $students) {
+            $handle = fopen('php://output', 'w');
+            fputcsv($handle, $service->headers());
+
+            foreach ($service->rows($students) as $row) {
+                fputcsv($handle, $row);
+            }
+
+            fclose($handle);
+        }, 200, [
+            'Content-Type' => 'text/csv',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
         ]);
     }
 }

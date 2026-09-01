@@ -173,6 +173,7 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/dashboard/billing-chart', [\App\Http\Controllers\Api\Admin\DashboardChartController::class, 'billingChart']);
     Route::get('/dashboard/achievements-chart', [\App\Http\Controllers\Api\Admin\DashboardChartController::class, 'achievementsChart']);
     Route::get('/students', [\App\Http\Controllers\Api\Admin\StudentController::class, 'index']);
+    Route::get('/students/dapodik-export', [\App\Http\Controllers\Api\Admin\StudentController::class, 'exportDapodik']);
     Route::get('/bills', [AdminBillController::class, 'index']);
     Route::get('/bills/{ulid}/pdf', [AdminBillController::class, 'pdf']);
     Route::post('/bills/{ulid}/waive', [AdminBillController::class, 'waive']);
