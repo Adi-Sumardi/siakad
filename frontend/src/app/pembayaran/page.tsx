@@ -377,16 +377,13 @@ function PaymentsContent() {
                     {isBsi ? (
                       <div className="space-y-1.5 text-[11px] text-muted-foreground leading-relaxed pl-5 list-decimal">
                         <div>
-                          <strong>1. BSI Mobile (Institusi / Akademik):</strong> Menu <em>Bayar</em> &rarr; <em>Institusi / Akademik</em> &rarr; Kode Institusi <strong>3656</strong> (YAPI) &rarr; Masukkan No. VA <strong>{activeVaNumber}</strong> &rarr; Periksa nama tagihan &rarr; Masukkan PIN.
+                          <strong>1. BSI Mobile (Virtual Account):</strong> Menu <em>Bayar</em> &rarr; <em>Virtual Account</em> &rarr; Masukkan No. VA <strong>{activeVaNumber}</strong> &rarr; Konfirmasi PIN.
                         </div>
                         <div>
-                          <strong>2. BSI Mobile (Virtual Account):</strong> Menu <em>Bayar</em> &rarr; <em>Virtual Account</em> &rarr; Masukkan No. VA <strong>{activeVaNumber}</strong> &rarr; Konfirmasi PIN.
+                          <strong>2. ATM BSI:</strong> Pilih <em>Pembayaran / Pembelian</em> &rarr; <em>Akademik / Virtual Account</em> &rarr; Masukkan No. VA <strong>{activeVaNumber}</strong> &rarr; Konfirmasi.
                         </div>
                         <div>
-                          <strong>3. ATM BSI:</strong> Pilih <em>Pembayaran / Pembelian</em> &rarr; <em>Akademik / Virtual Account</em> &rarr; Masukkan No. VA <strong>{activeVaNumber}</strong> &rarr; Konfirmasi.
-                        </div>
-                        <div>
-                          <strong>4. Transfer Antar Bank (BCA/Mandiri/BRI/Muamalat/dll):</strong> Pilih <em>Transfer Antar Bank</em> &rarr; Pilih <strong>Bank BSI (Kode: 451)</strong> &rarr; Masukkan No. VA sebagai rekening tujuan &rarr; Masukkan nominal ({rupiah(selectedPayment.amount)}) &rarr; Konfirmasi.
+                          <strong>3. Transfer Antar Bank (BCA/Mandiri/BRI/Muamalat/dll):</strong> Pilih <em>Transfer Antar Bank</em> &rarr; Pilih <strong>Bank BSI (Kode: 451)</strong> &rarr; Masukkan No. VA sebagai rekening tujuan &rarr; Masukkan nominal ({rupiah(selectedPayment.amount)}) &rarr; Konfirmasi.
                         </div>
                       </div>
                     ) : (
