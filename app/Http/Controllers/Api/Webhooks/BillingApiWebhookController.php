@@ -50,8 +50,6 @@ class BillingApiWebhookController extends Controller
             $payment = Payment::where('payment_number', $referenceNo)
                 ->orWhere('external_transaction_id', $referenceNo)
                 ->orWhere('gateway_response->va_number', $referenceNo)
-                ->orWhere('gateway_response->all_va->muamalat', $referenceNo)
-                ->orWhere('gateway_response->all_va->bsi', $referenceNo)
                 ->first();
         }
 
@@ -75,10 +73,13 @@ class BillingApiWebhookController extends Controller
             return response()->json(['success' => true, 'message' => 'Payment already settled.'], 200);
         }
 
-        // Live lookup against e-SPP's own record of the VA
-        $vaLookup = $payment->gateway_response['all_va']['muamalat']
-            ?? $payment->gateway_response['va_number']
-            ?? $referenceNo;
+        // Live lookup against e-SPP's own record of the VA. gateway_response.va_number
+        // is already the chosen bank's VA (BillingApiGateway generates only one
+        // bank's VA per payment) - this used to prefer all_va.muamalat first
+        // regardless of which bank the parent actually selected, so a BSI
+        // payment's callback verified against a Muamalat VA that was never
+        // registered as this bill.
+        $vaLookup = $payment->gateway_response['va_number'] ?? $referenceNo;
         $verified = false;
 
         if ($vaLookup) {

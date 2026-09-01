@@ -40,9 +40,12 @@ class PollBillingVaPayments extends Command
         $settledCount = 0;
 
         foreach ($payments as $payment) {
-            $vaLookup = $payment->gateway_response['all_va']['muamalat']
-                ?? $payment->gateway_response['va_number']
-                ?? null;
+            // gateway_response.va_number is already the chosen bank's VA
+            // (BillingApiGateway generates only one bank's VA per payment) -
+            // this used to prefer all_va.muamalat first regardless of which
+            // bank the parent actually selected, so a BSI payment's poll
+            // checked a Muamalat VA that was never registered as this bill.
+            $vaLookup = $payment->gateway_response['va_number'] ?? null;
 
             if (! $vaLookup) {
                 continue;

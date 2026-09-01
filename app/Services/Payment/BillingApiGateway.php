@@ -36,14 +36,21 @@ class BillingApiGateway implements PaymentGateway
             $selectedBank = 'muamalat';
         }
 
-        $vaMuamalat = BillingApiClient::generateVaNumber($student, $primaryBill, 'muamalat');
-        $vaBsi = BillingApiClient::generateVaNumber($student, $primaryBill, 'bsi');
-        $primaryVa = $selectedBank === 'bsi' ? $vaBsi : $vaMuamalat;
+        // One bill belongs to exactly one bank_id at e-SPP (main_form.bank_id
+        // is singular) - generate only the chosen bank's VA. Generating both
+        // and stuffing the unchosen bank's VA into bsm was the root cause of
+        // "VA tidak dikenal" at m-banking: bsm is payment info for THIS SAME
+        // bill (docs section 5.3), not a second bank's registration, so the
+        // bank that wasn't chosen was never actually registered under it.
+        $primaryVa = BillingApiClient::generateVaNumber($student, $primaryBill, $selectedBank);
 
-        $bankConfig = config("services.banks.{$selectedBank}") ?? [
-            'name' => $selectedBank === 'bsi' ? 'Bank Syariah Indonesia (BSI)' : 'Bank Muamalat',
-            'code' => $selectedBank === 'bsi' ? '451' : '147',
+        $bankConfig = config("services.billing_api.banks.{$selectedBank}") ?? [
+            'bank_name' => $selectedBank === 'bsi' ? 'Bank Syariah Indonesia (BSI)' : 'Bank Muamalat',
+            'bank_code' => $selectedBank === 'bsi' ? '451' : '147',
         ];
+        // Unconfirmed with e-SPP as of 2026-09 - both banks default to '1'
+        // until real values are given. See services.billing_api.banks.*.bank_id.
+        $bankId = (string) ($bankConfig['bank_id'] ?? '1');
 
         $dueDays = (int) config('services.billing_api.va_due_days', 3);
         $dueDate = now()->addDays($dueDays);
@@ -87,9 +94,13 @@ class BillingApiGateway implements PaymentGateway
                     'pay_type' => 'full',
                     'sekolah' => $student->schoolUnit?->label ?? '',
                     'kelas' => $student->currentEnrollment()?->classroom?->name ?? '',
+                    'bank_id' => $bankId,
                 ],
-                ['va_number' => $vaMuamalat, 'ref_number' => $payment->payment_number],
-                ['nomor_pembayaran' => $payment->payment_number, 'id_tagihan' => $payment->payment_number]
+                ['va_number' => $primaryVa, 'ref_number' => $payment->payment_number],
+                // bsm is payment info for THIS SAME bill (docs section 5.3), not
+                // a second bank - reuses the chosen bank's own VA plus the
+                // payment's own reference, never the unchosen bank's VA.
+                ['nomor_pembayaran' => $primaryVa, 'id_tagihan' => $payment->payment_number]
             );
 
             $rawUuid = $response['uuid'] ?? ($response['data']['uuid'] ?? null);
@@ -98,13 +109,10 @@ class BillingApiGateway implements PaymentGateway
             $gatewayResponse = [
                 'provider' => 'bank_' . $selectedBank,
                 'bank_key' => $selectedBank,
+                'bank_id' => $bankId,
                 'va_number' => $primaryVa,
-                'bank_name' => (string) ($bankConfig['name'] ?? ($selectedBank === 'bsi' ? 'Bank Syariah Indonesia (BSI)' : 'Bank Muamalat')),
-                'bank_code' => (string) ($bankConfig['code'] ?? ($selectedBank === 'bsi' ? '451' : '147')),
-                'all_va' => [
-                    'muamalat' => $vaMuamalat,
-                    'bsi' => $vaBsi,
-                ],
+                'bank_name' => (string) ($bankConfig['bank_name'] ?? ($selectedBank === 'bsi' ? 'Bank Syariah Indonesia (BSI)' : 'Bank Muamalat')),
+                'bank_code' => (string) ($bankConfig['bank_code'] ?? ($selectedBank === 'bsi' ? '451' : '147')),
                 'amount' => (float) $payment->amount,
                 'due_date' => $dueDate->toDateString(),
                 'billing_uuid' => $billingUuid,
@@ -138,13 +146,10 @@ class BillingApiGateway implements PaymentGateway
                 $gatewayResponse = [
                     'provider' => 'bank_' . $selectedBank,
                     'bank_key' => $selectedBank,
+                    'bank_id' => $bankId,
                     'va_number' => $primaryVa,
-                    'bank_name' => (string) ($bankConfig['name'] ?? ($selectedBank === 'bsi' ? 'Bank Syariah Indonesia (BSI)' : 'Bank Muamalat')),
-                    'bank_code' => (string) ($bankConfig['code'] ?? ($selectedBank === 'bsi' ? '451' : '147')),
-                    'all_va' => [
-                        'muamalat' => $vaMuamalat,
-                        'bsi' => $vaBsi,
-                    ],
+                    'bank_name' => (string) ($bankConfig['bank_name'] ?? ($selectedBank === 'bsi' ? 'Bank Syariah Indonesia (BSI)' : 'Bank Muamalat')),
+                    'bank_code' => (string) ($bankConfig['bank_code'] ?? ($selectedBank === 'bsi' ? '451' : '147')),
                     'amount' => (float) $payment->amount,
                     'due_date' => $dueDate->toDateString(),
                     'billing_uuid' => 'sim_'.uniqid(),

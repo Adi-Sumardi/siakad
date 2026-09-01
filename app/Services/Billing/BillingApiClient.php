@@ -53,27 +53,27 @@ class BillingApiClient
             $unitCode = strtoupper((string) ($unit?->code ?? ''));
 
             return match (true) {
-                str_contains($unitCode, 'TK') => (string) config("services.banks.{$bankKey}.prefixes.ekskul_tk", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_TK : self::PREFIX_EKSKUL_TK),
-                str_contains($unitCode, 'SD') => (string) config("services.banks.{$bankKey}.prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD),
-                str_contains($unitCode, 'SMP-12') || str_contains($unitCode, 'SMP12') => (string) config("services.banks.{$bankKey}.prefixes.ekskul_smp12", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP12 : self::PREFIX_EKSKUL_SMP12),
-                str_contains($unitCode, 'SMP-55') || str_contains($unitCode, 'SMP55') => (string) config("services.banks.{$bankKey}.prefixes.ekskul_smp55", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP55 : self::PREFIX_EKSKUL_SMP55),
-                default => (string) config("services.banks.{$bankKey}.prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD),
+                str_contains($unitCode, 'TK') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_tk", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_TK : self::PREFIX_EKSKUL_TK),
+                str_contains($unitCode, 'SD') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD),
+                str_contains($unitCode, 'SMP-12') || str_contains($unitCode, 'SMP12') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_smp12", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP12 : self::PREFIX_EKSKUL_SMP12),
+                str_contains($unitCode, 'SMP-55') || str_contains($unitCode, 'SMP55') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_smp55", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP55 : self::PREFIX_EKSKUL_SMP55),
+                default => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD),
             };
         }
 
         if (str_contains($normalizedFee, 'jamiyyah') || str_contains($normalizedFee, 'jam')) {
-            return (string) config("services.banks.{$bankKey}.prefixes.jamiyyah", $bankKey === 'bsi' ? self::PREFIX_BSI_JAMIYYAH : self::PREFIX_JAMIYYAH);
+            return (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.jamiyyah", $bankKey === 'bsi' ? self::PREFIX_BSI_JAMIYYAH : self::PREFIX_JAMIYYAH);
         }
 
         if (str_contains($normalizedFee, 'pangkal')) {
-            return (string) config("services.banks.{$bankKey}.prefixes.uang_pangkal", $bankKey === 'bsi' ? self::PREFIX_BSI_UANG_PANGKAL : self::PREFIX_UANG_PANGKAL);
+            return (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.uang_pangkal", $bankKey === 'bsi' ? self::PREFIX_BSI_UANG_PANGKAL : self::PREFIX_UANG_PANGKAL);
         }
 
         if (str_contains($normalizedFee, 'pendaftaran') || str_contains($normalizedFee, 'formulir')) {
-            return (string) config("services.banks.{$bankKey}.prefixes.pendaftaran", $bankKey === 'bsi' ? self::PREFIX_BSI_PENDAFTARAN : self::PREFIX_PENDAFTARAN);
+            return (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.pendaftaran", $bankKey === 'bsi' ? self::PREFIX_BSI_PENDAFTARAN : self::PREFIX_PENDAFTARAN);
         }
 
-        return (string) config("services.banks.{$bankKey}.prefixes.spp", $bankKey === 'bsi' ? self::PREFIX_BSI_SPP : self::PREFIX_SPP);
+        return (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.spp", $bankKey === 'bsi' ? self::PREFIX_BSI_SPP : self::PREFIX_SPP);
     }
 
     /**
@@ -161,11 +161,16 @@ class BillingApiClient
 
     public function getAccessToken(): string
     {
-        return Cache::remember(self::TOKEN_CACHE_KEY, now()->addSeconds(3600 - self::TOKEN_EXPIRY_BUFFER_SECONDS), function () {
-            return $this->requestNewAccessToken();
-        });
+        $cached = Cache::get(self::TOKEN_CACHE_KEY);
+
+        return $cached ?: $this->requestNewAccessToken();
     }
 
+    // Endpoint is /api/login with a plain JSON body (client_id/client_secret/
+    // username/password, no grant_type) - NOT /oauth/token with form-encoded
+    // password-grant fields. A prior rewrite swapped to the OAuth shape
+    // without confirming it against e-SPP's actual docs; PMB verified /api/login
+    // against the real API documentation (section 5.1) and this mirrors that.
     private function requestNewAccessToken(): string
     {
         $baseUrl = rtrim((string) config('services.billing_api.base_url', 'http://43.225.66.150:8061'), '/');
@@ -178,10 +183,9 @@ class BillingApiClient
             throw new BillingApiException('Billing API credentials are not fully configured in services.billing_api.');
         }
 
-        $response = Http::asForm()
+        $response = Http::acceptJson()
             ->timeout(15)
-            ->post("{$baseUrl}/oauth/token", [
-                'grant_type' => 'password',
+            ->post("{$baseUrl}/api/login", [
                 'client_id' => $clientId,
                 'client_secret' => $clientSecret,
                 'username' => $username,
@@ -189,7 +193,7 @@ class BillingApiClient
             ]);
 
         if ($response->failed()) {
-            Log::error('[BillingApiClient] OAuth token request failed', [
+            Log::error('[BillingApiClient] Login request failed', [
                 'status' => $response->status(),
                 'body' => $response->body(),
             ]);
@@ -200,12 +204,14 @@ class BillingApiClient
             );
         }
 
-        $data = $response->json();
-        $token = $data['access_token'] ?? null;
+        $token = $response->json('access_token');
+        $expiresIn = (int) $response->json('expires_in', 0);
 
         if (! $token) {
-            throw new BillingApiException('Access token missing from OAuth response.');
+            throw new BillingApiException('Access token missing from login response.');
         }
+
+        Cache::put(self::TOKEN_CACHE_KEY, $token, max($expiresIn - self::TOKEN_EXPIRY_BUFFER_SECONDS, 60));
 
         return $token;
     }
@@ -222,22 +228,35 @@ class BillingApiClient
     }
 
     /**
-     * Creates a new billing record on e-SPP with multi-channel support (Muamalat & BSI).
+     * Creates a new billing record on e-SPP. One bill belongs to exactly one
+     * bank_id (main_form.bank_id is singular) - bmi/bsm are NOT "one bank's
+     * VA in each": both are payment-info blocks for this SAME bill (docs
+     * section 5.3). Endpoint is /api/billing wrapped in a main_form key, not
+     * the flattened /api/billing/create a prior rewrite introduced without
+     * confirming against e-SPP's docs.
+     *
+     * @param array<string, mixed> $mainForm customer_name, va_desc, va_desc1, jumlah_tagihan, date_start, date_end, priority, pay_type, sekolah, kelas. bank_id falls back to config('services.billing_api.bank_id') when omitted.
+     * @param array<string, mixed> $bmi va_number, ref_number
+     * @param array<string, mixed> $bsm nomor_pembayaran, id_tagihan
      */
     public function createBilling(array $mainForm, array $bmi, array $bsm): array
     {
-        $payload = array_merge($mainForm, [
+        $mainForm += ['bank_id' => (string) config('services.billing_api.bank_id', '1')];
+
+        $payload = [
+            'main_form' => $mainForm,
             'bmi' => $bmi,
             'bsm' => $bsm,
-        ]);
+        ];
 
-        $response = $this->client()->post('/api/billing/create', $payload);
+        $response = $this->client()->post('/api/billing', $payload);
+
+        if ($response->status() === 401) {
+            Cache::forget(self::TOKEN_CACHE_KEY);
+            $response = $this->client()->post('/api/billing', $payload);
+        }
 
         if ($response->failed()) {
-            if ($response->status() === 401) {
-                Cache::forget(self::TOKEN_CACHE_KEY);
-            }
-
             Log::error('[BillingApiClient] createBilling failed', [
                 'status' => $response->status(),
                 'body' => $response->body(),
@@ -260,11 +279,12 @@ class BillingApiClient
     {
         $response = $this->client()->get("/api/billing/va/{$vaNumber}");
 
-        if ($response->failed()) {
-            if ($response->status() === 401) {
-                Cache::forget(self::TOKEN_CACHE_KEY);
-            }
+        if ($response->status() === 401) {
+            Cache::forget(self::TOKEN_CACHE_KEY);
+            $response = $this->client()->get("/api/billing/va/{$vaNumber}");
+        }
 
+        if ($response->failed()) {
             throw new BillingApiException(
                 "e-SPP getByVaNumber failed for VA {$vaNumber}: " . $response->body(),
                 $response->status()

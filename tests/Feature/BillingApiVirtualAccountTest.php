@@ -535,10 +535,6 @@ class BillingApiVirtualAccountTest extends TestCase
             'gateway_response' => [
                 'provider' => 'bank_muamalat',
                 'va_number' => '8020012627000600',
-                'all_va' => [
-                    'muamalat' => '8020012627000600',
-                    'bsi' => '3656012627000600',
-                ],
                 'billing_uuid' => 'bill-uuid-600',
             ],
         ]);
@@ -601,19 +597,18 @@ class BillingApiVirtualAccountTest extends TestCase
                 'provider' => 'bank_bsi',
                 'bank_key' => 'bsi',
                 'va_number' => '3656012627000602',
-                'all_va' => [
-                    'muamalat' => '8020012627000602',
-                    'bsi' => '3656012627000602',
-                ],
                 'billing_uuid' => 'bill-uuid-602',
             ],
         ]);
 
         app(PaymentAllocator::class)->allocate($payment, [$bill->id => 700000]);
 
+        // The webhook must verify against the BSI VA that was actually
+        // registered for this payment - not a Muamalat VA, which is what a
+        // prior bug always checked regardless of which bank was chosen.
         $mockClient = Mockery::mock(BillingApiClient::class);
         $mockClient->shouldReceive('getByVaNumber')
-            ->with('8020012627000602')
+            ->with('3656012627000602')
             ->andReturn(['sisa' => 0]);
         $this->app->instance(BillingApiClient::class, $mockClient);
 
@@ -691,16 +686,19 @@ class BillingApiVirtualAccountTest extends TestCase
     }
 
     /**
-     * Regression: the BSI ('bsm') block sent to e-SPP was passing the VA
-     * number itself as both `nomor_pembayaran` and `id_tagihan`, instead of
-     * the payment's own reference number - the same shape the 'bmi' block
-     * correctly uses (`ref_number` => payment_number). A VA number is stable
-     * across every bill for the same (student, fee type, year); using it as
-     * the bill identifier means e-SPP can't tell two different bills paid
-     * through the same VA apart, and - per the family's real report - the
-     * VA the app displayed came back "not found" when checked in m-banking.
+     * Regression: per e-SPP's docs (section 5.3), 'bmi' and 'bsm' are BOTH
+     * payment-info blocks for the SAME single bill being created - not "one
+     * bank's VA in bmi, the other bank's VA in bsm". For a BSI-selected
+     * payment, 'bsm.nomor_pembayaran' must be the chosen bank's own VA
+     * number (mirroring 'bmi.va_number's role), while 'bsm.id_tagihan'
+     * carries the bill's own unique reference (payment_number) - not the VA
+     * number, which is stable across every bill for the same (student, fee
+     * type, year) and so can't identify one bill among them. An earlier
+     * version of this fix set id_tagihan to payment_number but ALSO
+     * incorrectly overwrote nomor_pembayaran with payment_number instead of
+     * leaving it as the VA - this test locks in the corrected shape.
      */
-    public function test_the_bsi_billing_payload_sends_the_payment_number_not_the_va_number_as_the_bill_reference(): void
+    public function test_the_bsi_billing_payload_sends_the_va_as_nomor_pembayaran_and_payment_number_as_id_tagihan(): void
     {
         $user = User::create([
             'name' => 'Wali BSI Regression',
@@ -748,13 +746,15 @@ class BillingApiVirtualAccountTest extends TestCase
         $mockClient->shouldReceive('createBilling')
             ->once()
             ->withArgs(function (array $mainForm, array $bmi, array $bsm) use ($vaBsi) {
-                // The bill reference must be a payment_number-shaped string
-                // (starts with the YAPI- prefix CheckoutService assigns),
-                // never equal to the VA number itself.
-                return $bsm['nomor_pembayaran'] !== $vaBsi
+                // nomor_pembayaran is the chosen bank's own VA (same role as
+                // bmi.va_number); id_tagihan is the bill's own unique
+                // reference (payment_number, starting with the YAPI- prefix
+                // CheckoutService assigns) - the two must never be equal.
+                return $bsm['nomor_pembayaran'] === $vaBsi
                     && $bsm['id_tagihan'] !== $vaBsi
-                    && $bsm['nomor_pembayaran'] === $bsm['id_tagihan']
-                    && str_starts_with((string) $bsm['nomor_pembayaran'], 'YAPI-');
+                    && str_starts_with((string) $bsm['id_tagihan'], 'YAPI-')
+                    && $bmi['va_number'] === $vaBsi
+                    && $mainForm['bank_id'] === (string) config('services.billing_api.banks.bsi.bank_id', '1');
             })
             ->andReturn(['uuid' => 'bill-uuid-bsi-regression', 'status' => 'success']);
 
