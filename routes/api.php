@@ -193,6 +193,18 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::patch('/classrooms/{classroomUlid}/schedules/{ulid}', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'update']);
     Route::delete('/classrooms/{classroomUlid}/schedules/{ulid}', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'destroy']);
 
+    // Classroom management - the one prerequisite kenaikan kelas massal
+    // needed and never had (read stays on ReferenceController::classrooms()
+    // below, this only writes).
+    Route::post('/classrooms', [\App\Http\Controllers\Api\Admin\ClassroomController::class, 'store']);
+    Route::patch('/classrooms/{ulid}', [\App\Http\Controllers\Api\Admin\ClassroomController::class, 'update']);
+
+    // Kenaikan kelas massal: roster of one classroom -> candidate classrooms
+    // in the next academic year -> execute the batch.
+    Route::get('/classrooms/{classroomUlid}/promotion-roster', [\App\Http\Controllers\Api\Admin\PromotionController::class, 'roster']);
+    Route::get('/classrooms/{classroomUlid}/promotion-targets', [\App\Http\Controllers\Api\Admin\PromotionController::class, 'targets']);
+    Route::post('/classrooms/{classroomUlid}/promote', [\App\Http\Controllers\Api\Admin\PromotionController::class, 'store']);
+
     // A per-unit admin manages their own unit's rules/thresholds and never a
     // school-wide one - PointRuleController and PointThresholdController
     // enforce this internally, the same way BillingRunController forces a

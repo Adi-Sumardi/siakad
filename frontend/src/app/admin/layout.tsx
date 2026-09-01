@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ArrowUpCircle,
   Award,
   BadgePercent,
   CalendarClock,
@@ -12,6 +13,7 @@ import {
   Megaphone,
   Percent,
   Receipt,
+  School,
   ScrollText,
   SlidersHorizontal,
   Sparkles,
@@ -33,6 +35,8 @@ const NAV: StaffNavItem[] = [
   { href: "/admin/users", label: "Manajemen Pengguna", icon: Users, centralOnly: true },
   { href: "/admin/jadwal", label: "Jadwal Pelajaran", icon: CalendarClock },
   { href: "/admin/nilai", label: "Nilai & Rapor", icon: ClipboardList },
+  { href: "/admin/kelas", label: "Data Kelas", icon: School },
+  { href: "/admin/kenaikan-kelas", label: "Kenaikan Kelas", icon: ArrowUpCircle },
   { href: "/admin/poin", label: "Poin & Tata Tertib", icon: Sparkles },
   { href: "/admin/prestasi", label: "Prestasi Siswa", icon: Award },
   { href: "/admin/informasi", label: "Pengumuman", icon: Megaphone },

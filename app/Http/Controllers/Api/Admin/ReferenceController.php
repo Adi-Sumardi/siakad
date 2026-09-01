@@ -81,13 +81,25 @@ class ReferenceController extends Controller
         ]);
     }
 
-    /** Scoped through the same visibleTo() as everywhere else a classroom appears. */
+    /**
+     * Scoped through the same visibleTo() as everywhere else a classroom
+     * appears. Optional `academic_year_ulid` narrows to one year - without it
+     * this still returns classrooms across every year that exists, which is
+     * fine for the lightweight pickers (jadwal, nilai) that only ever have
+     * one year's worth of classrooms to choose from in practice, but the
+     * classroom-management screen needs to tell years apart.
+     */
     public function classrooms(Request $request): JsonResponse
     {
+        $academicYear = $request->string('academic_year_ulid')->value()
+            ? AcademicYear::where('ulid', $request->string('academic_year_ulid')->value())->first()
+            : null;
+
         $classrooms = Classroom::query()
             ->visibleTo($request->user())
             ->where('is_active', true)
-            ->with('schoolUnit')
+            ->when($academicYear, fn ($q) => $q->where('academic_year_id', $academicYear->id))
+            ->with(['schoolUnit', 'academicYear', 'homeroomTeacher'])
             ->orderBy('tingkat')->orderBy('name')
             ->get();
 
@@ -95,6 +107,10 @@ class ReferenceController extends Controller
             'classrooms' => $classrooms->map(fn (Classroom $c) => [
                 'ulid' => $c->ulid, 'name' => $c->name, 'tingkat' => $c->tingkat,
                 'school_unit' => ['code' => $c->schoolUnit->code, 'label' => $c->schoolUnit->label],
+                'academic_year' => $c->academicYear?->year,
+                'capacity' => $c->capacity,
+                'homeroom_teacher' => $c->homeroomTeacher?->name,
+                'is_active' => $c->is_active,
             ]),
         ]);
     }
