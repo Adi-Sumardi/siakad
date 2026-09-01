@@ -254,7 +254,8 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
   const [points, setPoints] = useState<PointSummary | null>(null);
   const [attendance, setAttendance] = useState<AttendanceOverview | null>(null);
   const [achievements, setAchievements] = useState<Achievement[] | null>(null);
-  const [grades, setGrades] = useState<{ term: string | null; subjects: SubjectGradeSummary[] } | null>(null);
+  const [grades, setGrades] = useState<{ term: string | null; term_ulid?: string; terms?: { ulid: string; label: string; is_active: boolean }[]; subjects: SubjectGradeSummary[] } | null>(null);
+  const [selectedTermUlid, setSelectedTermUlid] = useState<string>("");
   const [extracurriculars, setExtracurriculars] = useState<{ ulid: string; name: string; pembina: string | null; school_unit: string | null }[] | null>(null);
   const [downloadingRapor, setDownloadingRapor] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -278,20 +279,34 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
       .then(setAttendance)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
     api
-      .get<{ term: string | null; subjects: SubjectGradeSummary[] }>(`/api/wali/students/${ulid}/grades`)
-      .then(setGrades)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
-    api
       .get<{ extracurriculars: { ulid: string; name: string; pembina: string | null; school_unit: string | null }[] }>(`/api/wali/students/${ulid}/extracurriculars`)
       .then((d) => setExtracurriculars(d.extracurriculars))
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
     loadAchievements();
   }, [ulid, user]);
 
+  function loadGrades(termUlid?: string) {
+    const query = termUlid ? `?term_ulid=${termUlid}` : "";
+    api
+      .get<{ term: string | null; term_ulid?: string; terms?: { ulid: string; label: string; is_active: boolean }[]; subjects: SubjectGradeSummary[] }>(`/api/wali/students/${ulid}/grades${query}`)
+      .then((d) => {
+        setGrades(d);
+        if (!termUlid && d.term_ulid) setSelectedTermUlid(d.term_ulid);
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+  }
+
+  useEffect(() => {
+    if (user?.role !== "orangtua") return;
+    loadGrades();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ulid, user]);
+
   async function downloadRapor() {
     setDownloadingRapor(true);
     try {
-      const res = await fetch(`${API_BASE}/api/wali/students/${ulid}/rapor`, { credentials: "include" });
+      const query = selectedTermUlid ? `?term_ulid=${selectedTermUlid}` : "";
+      const res = await fetch(`${API_BASE}/api/wali/students/${ulid}/rapor${query}`, { credentials: "include" });
       if (!res.ok) throw new Error("Gagal mengunduh rapor.");
 
       const blob = await res.blob();
@@ -425,10 +440,26 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
                 {grades?.term ? `Semester ${grades.term}` : "Rekap nilai per mata pelajaran."}
               </p>
             </div>
-            <Button size="sm" variant="outline" disabled={downloadingRapor} onClick={downloadRapor} className="gap-2 text-xs font-semibold">
-              <Download className="size-4" />
-              <span>{downloadingRapor ? "Mengunduh…" : "Unduh Rapor (PDF)"}</span>
-            </Button>
+            <div className="flex items-center gap-2">
+              {grades?.terms && grades.terms.length > 1 && (
+                <select
+                  value={selectedTermUlid}
+                  onChange={(e) => {
+                    setSelectedTermUlid(e.target.value);
+                    loadGrades(e.target.value);
+                  }}
+                  className="h-9 rounded-lg border border-input bg-card px-2 text-xs"
+                >
+                  {grades.terms.map((t) => (
+                    <option key={t.ulid} value={t.ulid}>{t.label}{t.is_active ? " (aktif)" : ""}</option>
+                  ))}
+                </select>
+              )}
+              <Button size="sm" variant="outline" disabled={downloadingRapor} onClick={downloadRapor} className="gap-2 text-xs font-semibold">
+                <Download className="size-4" />
+                <span>{downloadingRapor ? "Mengunduh…" : "Unduh Rapor (PDF)"}</span>
+              </Button>
+            </div>
           </div>
 
           {grades === null ? (

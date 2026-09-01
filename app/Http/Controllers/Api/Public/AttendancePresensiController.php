@@ -9,6 +9,7 @@ use App\Models\Student;
 use App\Services\Attendance\AttendanceLedger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use RuntimeException;
 
 /**
  * Reached without a Sanctum session - students have no account in this app.
@@ -77,11 +78,16 @@ class AttendancePresensiController extends Controller
             return response()->json(['message' => 'NIS tidak ditemukan di kelas ini.'], 404);
         }
 
-        if ($ledger->hasCheckedIn($session, $student)) {
-            return response()->json(['message' => 'Sudah tercatat hadir sebelumnya.'], 409);
-        }
+        // checkIn() re-checks under a row lock and throws if another request
+        // for this student won the race in between - the pre-check here is
+        // just a fast path for the common case, not the real guard.
+        try {
+            $ledger->checkIn($session, $student);
+        } catch (RuntimeException $e) {
+            $status = str_contains($e->getMessage(), 'semester aktif') ? 503 : 409;
 
-        $ledger->checkIn($session, $student);
+            return response()->json(['message' => $e->getMessage()], $status);
+        }
 
         return response()->json(['status' => 'ok', 'student' => ['nama_panggilan' => $student->nama_panggilan]]);
     }

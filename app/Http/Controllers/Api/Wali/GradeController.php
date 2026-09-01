@@ -16,14 +16,16 @@ class GradeController extends Controller
     public function index(Request $request, string $studentUlid, GradeService $service): JsonResponse
     {
         $student = Student::visibleTo($request->user())->where('ulid', $studentUlid)->firstOrFail();
-        $term = Term::current();
+        $term = $this->resolveTerm($request);
 
         if (! $term) {
-            return response()->json(['term' => null, 'subjects' => []]);
+            return response()->json(['term' => null, 'terms' => $this->availableTerms(), 'subjects' => []]);
         }
 
         return response()->json([
             'term' => $term->label(),
+            'term_ulid' => $term->ulid,
+            'terms' => $this->availableTerms(),
             'subjects' => $service->summaryForRapor($student, $term),
         ]);
     }
@@ -31,10 +33,29 @@ class GradeController extends Controller
     public function rapor(Request $request, string $studentUlid, RaporPdfService $pdf, GradeService $service): Response
     {
         $student = Student::visibleTo($request->user())->where('ulid', $studentUlid)->firstOrFail();
-        $term = Term::current();
+        $term = $this->resolveTerm($request);
 
-        abort_if(! $term, 422, 'Belum ada semester aktif.');
+        abort_if(! $term, 422, 'Belum ada semester yang bisa dipilih.');
 
         return $pdf->render($student, $term, $service)->stream($pdf->filename($student, $term));
+    }
+
+    /** Defaults to the active term when none is picked - past semesters stay reachable by ulid instead of vanishing the moment a new one activates. */
+    private function resolveTerm(Request $request): ?Term
+    {
+        $termUlid = $request->string('term_ulid')->value();
+
+        if ($termUlid) {
+            return Term::where('ulid', $termUlid)->first();
+        }
+
+        return Term::current();
+    }
+
+    private function availableTerms(): array
+    {
+        return Term::orderByDesc('starts_on')->get()->map(fn (Term $t) => [
+            'ulid' => $t->ulid, 'label' => $t->label(), 'is_active' => $t->is_active,
+        ])->all();
     }
 }

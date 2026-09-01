@@ -4,6 +4,7 @@ namespace App\Services\Academic;
 
 use App\Models\Classroom;
 use App\Models\ClassSchedule;
+use App\Models\Enrollment;
 use App\Models\Grade;
 use App\Models\Student;
 use App\Models\Subject;
@@ -89,6 +90,12 @@ class GradeService
             ->where('term_id', $term->id)
             ->pluck('score', 'category');
 
+        return $this->weightedFinal($scores);
+    }
+
+    /** Shared by finalScore() and summaryForRapor() so a rapor with N subjects doesn't run the same grade query twice per subject. */
+    private function weightedFinal(Collection $scores): ?float
+    {
         if (array_diff(array_keys(self::WEIGHTS), $scores->keys()->all())) {
             return null;
         }
@@ -101,10 +108,19 @@ class GradeService
         return round($total, 2);
     }
 
-    /** Every subject scheduled for the student's current classroom, with its three category scores and computed final. */
+    /**
+     * Every subject scheduled for the classroom the student was actually in
+     * during $term's academic year - not their CURRENT classroom, which
+     * would be wrong the moment this is asked for a term other than the
+     * active one (a promoted/repeated/graduated student's enrollment for a
+     * past year is no longer 'active', so it's looked up by academic year
+     * alone, not status).
+     */
     public function summaryForRapor(Student $student, Term $term): Collection
     {
-        $classroom = $student->currentEnrollment()?->classroom;
+        $classroom = Enrollment::where('student_id', $student->id)
+            ->where('academic_year_id', $term->academic_year_id)
+            ->first()?->classroom;
 
         if (! $classroom) {
             return collect();
@@ -129,7 +145,7 @@ class GradeService
                 'tugas' => isset($scores['tugas']) ? (float) $scores['tugas'] : null,
                 'uts' => isset($scores['uts']) ? (float) $scores['uts'] : null,
                 'uas' => isset($scores['uas']) ? (float) $scores['uas'] : null,
-                'final' => $this->finalScore($student, $subject, $term),
+                'final' => $this->weightedFinal($scores),
             ];
         });
     }

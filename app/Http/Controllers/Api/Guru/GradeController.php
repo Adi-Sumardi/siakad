@@ -97,10 +97,19 @@ class GradeController extends Controller
         ]);
 
         $ulids = collect($validated['entries'])->pluck('student_ulid');
-        $students = Student::visibleTo($request->user())->whereIn('ulid', $ulids)->get()->keyBy('ulid');
+
+        // Being authorized for (this classroom, this subject) does not mean
+        // every student in the unit is fair game - Student::visibleTo() is
+        // unit-wide, and grades.upsertBulk() has no classroom-aware unique
+        // key. Without this, a teacher assigned to classroom A could
+        // silently overwrite a student's grade in classroom B for a subject
+        // taught in both.
+        $students = Student::whereIn('ulid', $ulids)
+            ->whereHas('enrollments', fn ($q) => $q->where('classroom_id', $classroom->id)->where('status', 'active'))
+            ->get()->keyBy('ulid');
 
         if ($students->count() !== $ulids->unique()->count()) {
-            return response()->json(['message' => 'Sebagian siswa tidak ditemukan atau bukan wewenang Anda.'], 422);
+            return response()->json(['message' => 'Sebagian siswa tidak ditemukan atau bukan bagian dari kelas ini.'], 422);
         }
 
         $entries = collect($validated['entries'])->map(fn ($e) => [

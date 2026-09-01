@@ -19,7 +19,14 @@ class AttendanceSessionController extends Controller
     /** Opens (or reuses) today's roll-call window for one lesson period, and hands back the QR check-in link. */
     public function open(Request $request, string $scheduleUlid, AttendanceSessionService $sessions): JsonResponse
     {
-        $schedule = ClassSchedule::visibleTo($request->user())->where('ulid', $scheduleUlid)->firstOrFail();
+        // Unit-visibility isn't enough here - ClassSchedule::visibleTo() lets
+        // any teacher in the unit see every schedule, but only the teacher
+        // actually assigned to this (classroom, subject) pair may open roll
+        // call for it, matching how grading is already restricted.
+        $schedule = ClassSchedule::visibleTo($request->user())
+            ->where('teacher_id', $request->user()->id)
+            ->where('ulid', $scheduleUlid)
+            ->firstOrFail();
 
         $session = $sessions->open($schedule, Carbon::today(), $request->user());
 
@@ -40,8 +47,7 @@ class AttendanceSessionController extends Controller
     /** Live roster for the session's own panel - who has checked in, when, and how. */
     public function roster(Request $request, string $sessionUlid, AttendanceSessionService $sessions): JsonResponse
     {
-        $session = AttendanceSession::whereHas('classSchedule', fn ($q) => $q->visibleTo($request->user()))
-            ->where('ulid', $sessionUlid)->firstOrFail();
+        $session = $this->ownSession($request, $sessionUlid);
 
         return response()->json([
             'session' => [
@@ -64,8 +70,7 @@ class AttendanceSessionController extends Controller
     {
         $validated = $request->validate(['reason' => 'required|string|max:500']);
 
-        $session = AttendanceSession::whereHas('classSchedule', fn ($q) => $q->visibleTo($request->user()))
-            ->where('ulid', $sessionUlid)->firstOrFail();
+        $session = $this->ownSession($request, $sessionUlid);
 
         $record = AttendanceRecord::where('attendance_session_id', $session->id)
             ->where('ulid', $recordUlid)->firstOrFail();
@@ -91,17 +96,24 @@ class AttendanceSessionController extends Controller
             'records.*.description' => 'nullable|string|max:500',
         ]);
 
-        $session = AttendanceSession::whereHas('classSchedule', fn ($q) => $q->visibleTo($request->user()))
-            ->where('ulid', $sessionUlid)->firstOrFail();
+        $session = $this->ownSession($request, $sessionUlid);
 
         $entries = collect($validated['records'] ?? []);
 
         if ($entries->isNotEmpty()) {
             $ulids = $entries->pluck('student_ulid');
-            $students = \App\Models\Student::visibleTo($request->user())->whereIn('ulid', $ulids)->get()->keyBy('ulid');
+
+            // Unit-visibility isn't the right scope for who can be marked in
+            // THIS session - it must be the classroom this schedule actually
+            // teaches, or a teacher could mark any student in the unit
+            // present/absent for a lesson period they were never part of.
+            $classroomId = $session->classSchedule->classroom_id;
+            $students = \App\Models\Student::whereIn('ulid', $ulids)
+                ->whereHas('enrollments', fn ($q) => $q->where('classroom_id', $classroomId)->where('status', 'active'))
+                ->get()->keyBy('ulid');
 
             if ($students->count() !== $ulids->unique()->count()) {
-                return response()->json(['message' => 'Sebagian siswa tidak ditemukan atau bukan wewenang Anda.'], 422);
+                return response()->json(['message' => 'Sebagian siswa tidak ditemukan atau bukan bagian dari kelas ini.'], 422);
             }
 
             $mapped = $entries->map(fn ($r) => [
@@ -110,7 +122,11 @@ class AttendanceSessionController extends Controller
                 'description' => $r['description'] ?? null,
             ]);
 
-            $ledger->recordBulk($mapped, $session, $request->user());
+            try {
+                $ledger->recordBulk($mapped, $session, $request->user());
+            } catch (RuntimeException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
         }
 
         $sessions->close($session, $ledger);
@@ -120,5 +136,18 @@ class AttendanceSessionController extends Controller
         ]);
 
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Unit-visibility on the classroom isn't enough - only the teacher
+     * actually assigned to this schedule may act on its sessions, matching
+     * how grading is already restricted (GuruGradeController::canGrade()).
+     */
+    private function ownSession(Request $request, string $sessionUlid): AttendanceSession
+    {
+        return AttendanceSession::whereHas(
+            'classSchedule',
+            fn ($q) => $q->visibleTo($request->user())->where('teacher_id', $request->user()->id)
+        )->where('ulid', $sessionUlid)->firstOrFail();
     }
 }

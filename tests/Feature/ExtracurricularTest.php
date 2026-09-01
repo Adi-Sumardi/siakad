@@ -212,4 +212,33 @@ class ExtracurricularTest extends TestCase
 
         $this->assertSame(1, $result['eligible']);
     }
+
+    // --- Regression: bugs found and closed in the debugging pass -----------
+
+    /**
+     * A central admin could previously assign a student from one unit into
+     * an ekskul scoped to a different unit with no check at all - neither
+     * the controller nor the service compared the two.
+     */
+    public function test_a_student_cannot_be_assigned_to_a_unit_scoped_ekskul_in_a_different_unit(): void
+    {
+        $ekskul = $this->ekskul($this->smp); // scoped to SMP
+        $sdStudent = $this->studentIn($this->sd);
+
+        $this->expectException(\RuntimeException::class);
+        $this->service()->assignStudent($ekskul, $sdStudent, $this->staff('admin'));
+    }
+
+    public function test_a_school_wide_ekskul_accepts_students_from_any_unit(): void
+    {
+        $schoolWide = Extracurricular::create([
+            'school_unit_id' => null, 'academic_year_id' => $this->year->id,
+            'name' => 'Paduan Suara', 'is_active' => true,
+        ]);
+        $smpStudent = $this->studentIn($this->smp);
+
+        $member = $this->service()->assignStudent($schoolWide, $smpStudent, $this->staff('admin'));
+
+        $this->assertSame('active', $member->status);
+    }
 }

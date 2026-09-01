@@ -25,13 +25,17 @@ type GradeRow = {
 type ClassroomOption = { ulid: string; name: string; school_unit: { label: string } };
 type SubjectOption = { ulid: string; name: string };
 type StudentOption = { ulid: string; nama_lengkap: string; nis: string | null };
+type TermOption = { ulid: string; label: string; is_active: boolean };
 
 export default function AdminNilaiPage() {
   const [grades, setGrades] = useState<GradeRow[] | null>(null);
   const [classrooms, setClassrooms] = useState<ClassroomOption[]>([]);
   const [subjects, setSubjects] = useState<SubjectOption[]>([]);
+  const [terms, setTerms] = useState<TermOption[]>([]);
   const [filterClassroom, setFilterClassroom] = useState("");
   const [filterSubject, setFilterSubject] = useState("");
+  const [filterTerm, setFilterTerm] = useState("");
+  const [raporTerm, setRaporTerm] = useState("");
 
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<StudentOption[] | null>(null);
@@ -40,18 +44,23 @@ export default function AdminNilaiPage() {
   useEffect(() => {
     api.get<{ classrooms: ClassroomOption[] }>("/api/admin/classrooms").then((d) => setClassrooms(d.classrooms));
     api.get<{ subjects: SubjectOption[] }>("/api/admin/subjects").then((d) => setSubjects(d.subjects));
+    api.get<{ terms: TermOption[] }>("/api/admin/terms").then((d) => {
+      setTerms(d.terms);
+      setRaporTerm(d.terms.find((t) => t.is_active)?.ulid ?? "");
+    });
   }, []);
 
   useEffect(() => {
     const params = new URLSearchParams();
     if (filterClassroom) params.set("classroom", filterClassroom);
     if (filterSubject) params.set("subject", filterSubject);
+    if (filterTerm) params.set("term", filterTerm);
 
     api
       .get<{ grades: GradeRow[] }>(`/api/admin/grades?${params.toString()}`)
       .then((d) => setGrades(d.grades))
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data nilai."));
-  }, [filterClassroom, filterSubject]);
+  }, [filterClassroom, filterSubject, filterTerm]);
 
   async function searchStudents(e: React.FormEvent) {
     e.preventDefault();
@@ -70,7 +79,8 @@ export default function AdminNilaiPage() {
   async function downloadRapor(student: StudentOption) {
     setDownloading(student.ulid);
     try {
-      const res = await fetch(`${API_BASE}/api/admin/students/${student.ulid}/rapor`, { credentials: "include" });
+      const query = raporTerm ? `?term_ulid=${raporTerm}` : "";
+      const res = await fetch(`${API_BASE}/api/admin/students/${student.ulid}/rapor${query}`, { credentials: "include" });
       if (!res.ok) throw new Error("Gagal mengunduh rapor.");
 
       const blob = await res.blob();
@@ -100,18 +110,26 @@ export default function AdminNilaiPage() {
 
       <Card className="p-5">
         <h2 className="mb-3 text-sm font-semibold">Unduh rapor siswa</h2>
-        <form onSubmit={searchStudents} className="flex gap-2">
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari nama atau NIS siswa..."
-            className="max-w-sm"
-          />
-          <Button type="submit" size="sm" variant="outline" className="gap-1.5">
-            <Search className="size-3.5" />
-            Cari
-          </Button>
-        </form>
+        <div className="flex flex-wrap items-end gap-2">
+          <form onSubmit={searchStudents} className="flex gap-2">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Cari nama atau NIS siswa..."
+              className="max-w-sm"
+            />
+            <Button type="submit" size="sm" variant="outline" className="gap-1.5">
+              <Search className="size-3.5" />
+              Cari
+            </Button>
+          </form>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground">Semester rapor</label>
+            <select value={raporTerm} onChange={(e) => setRaporTerm(e.target.value)} className="mt-1 block h-9 rounded-lg border border-input bg-card px-3 text-sm">
+              {terms.map((t) => <option key={t.ulid} value={t.ulid}>{t.label}{t.is_active ? " (aktif)" : ""}</option>)}
+            </select>
+          </div>
+        </div>
         {searchResults && (
           <div className="mt-3 flex flex-col gap-1.5">
             {searchResults.length === 0 && <p className="text-xs text-muted-foreground">Tidak ada siswa ditemukan.</p>}
@@ -142,6 +160,13 @@ export default function AdminNilaiPage() {
             <select value={filterSubject} onChange={(e) => setFilterSubject(e.target.value)} className="mt-1 block h-9 rounded-lg border border-input bg-card px-3 text-sm">
               <option value="">Semua mapel</option>
               {subjects.map((s) => <option key={s.ulid} value={s.ulid}>{s.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground">Semester</label>
+            <select value={filterTerm} onChange={(e) => setFilterTerm(e.target.value)} className="mt-1 block h-9 rounded-lg border border-input bg-card px-3 text-sm">
+              <option value="">Semua semester</option>
+              {terms.map((t) => <option key={t.ulid} value={t.ulid}>{t.label}{t.is_active ? " (aktif)" : ""}</option>)}
             </select>
           </div>
         </div>

@@ -36,28 +36,41 @@ class AttendanceLedger
     }
 
     /**
-     * Self-service check-in. Callers must have already verified via
-     * hasCheckedIn() that this student has no live mark in this session yet -
-     * this method does not re-check, so a caller skipping that guard would
-     * write a duplicate row (the controller is where the 409 belongs, not
-     * here).
+     * Self-service check-in. Locks the session row for the duration of the
+     * check-then-insert so two near-simultaneous scans for the same student
+     * (a flaky retry, a double-tap) can't both pass hasCheckedIn() before
+     * either has written - the second waits for the lock and then sees the
+     * first's row. Throws if there's no active term rather than writing a
+     * term_id the schema does not allow to be null.
      */
     public function checkIn(AttendanceSession $session, Student $student): AttendanceRecord
     {
-        $schedule = $session->classSchedule;
-        $term = Term::current();
+        return DB::transaction(function () use ($session, $student) {
+            AttendanceSession::whereKey($session->id)->lockForUpdate()->first();
 
-        return AttendanceRecord::create([
-            'student_id' => $student->id,
-            'attendance_session_id' => $session->id,
-            'classroom_id' => $schedule->classroom_id,
-            'term_id' => $term?->id,
-            'attendance_status' => 'hadir',
-            'occurred_on' => $session->occurred_on,
-            'source' => 'self',
-            'recorded_by' => null,
-            'record_status' => 'recorded',
-        ]);
+            if ($this->hasCheckedIn($session, $student)) {
+                throw new RuntimeException('Sudah tercatat hadir sebelumnya.');
+            }
+
+            $schedule = $session->classSchedule;
+            $term = Term::current();
+
+            if (! $term) {
+                throw new RuntimeException('Tidak ada semester aktif - presensi tidak bisa dicatat saat ini.');
+            }
+
+            return AttendanceRecord::create([
+                'student_id' => $student->id,
+                'attendance_session_id' => $session->id,
+                'classroom_id' => $schedule->classroom_id,
+                'term_id' => $term->id,
+                'attendance_status' => 'hadir',
+                'occurred_on' => $session->occurred_on,
+                'source' => 'self',
+                'recorded_by' => null,
+                'record_status' => 'recorded',
+            ]);
+        });
     }
 
     /**
@@ -75,6 +88,10 @@ class AttendanceLedger
     {
         $schedule = $session->classSchedule;
         $term = Term::current();
+
+        if ($entries->isNotEmpty() && ! $term) {
+            throw new RuntimeException('Tidak ada semester aktif - presensi tidak bisa dicatat saat ini.');
+        }
 
         return DB::transaction(function () use ($entries, $session, $schedule, $term, $recordedBy) {
             return $entries->map(function (array $entry) use ($session, $schedule, $term, $recordedBy) {

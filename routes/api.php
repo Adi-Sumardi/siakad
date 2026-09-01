@@ -79,7 +79,10 @@ Route::prefix('invitations')->middleware('throttle:20,1')->group(function () {
 // students have no account in this app - the session's token is the
 // credential, same shape as `invitations` above. Never exposes a classroom
 // roster: every lookup is one NIS in, one name out.
-Route::prefix('presensi')->middleware('throttle:60,1')->group(function () {
+// 300/min, not the usual 60 - this bucket is shared per-IP, and a whole
+// classroom scanning in on the same school WiFi egress IP within the same
+// minute (lookup + check-in per student) can easily clear 60.
+Route::prefix('presensi')->middleware('throttle:300,1')->group(function () {
     Route::get('/{token}', [AttendancePresensiController::class, 'show']);
     Route::post('/{token}/lookup', [AttendancePresensiController::class, 'lookup']);
     Route::post('/{token}/check-in', [AttendancePresensiController::class, 'checkIn']);
@@ -261,6 +264,7 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     // shape for both admin kinds.
     Route::get('/school-units', [ReferenceController::class, 'schoolUnits']);
     Route::get('/academic-years', [ReferenceController::class, 'academicYears']);
+    Route::get('/terms', [ReferenceController::class, 'terms']);
     Route::get('/classrooms', [ReferenceController::class, 'classrooms']);
 
     Route::get('/grades', [\App\Http\Controllers\Api\Admin\GradeController::class, 'index']);

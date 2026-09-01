@@ -23,20 +23,25 @@ class PromotionService
 {
     /**
      * Candidate destination classrooms for one outcome, in the new academic
-     * year. `promoted` steps the grade level up by exactly one; `repeated`
-     * stays on the same level. Grouped same-unit-first so the common case
-     * (a classroom's own unit runs the next grade too) doesn't get buried
-     * among every other unit's classrooms at the same level.
+     * year. `promoted` steps the grade level up by exactly one AND must be
+     * either the source's own unit or one of its next-jenjang units
+     * (SchoolUnit::nextUnits()) - a matching tingkat number alone isn't
+     * enough, since this school runs multiple independent tingkat-numbering
+     * conventions across parallel units (two SMP campuses, two SMA
+     * campuses). `repeated` never crosses a unit boundary at all - you can
+     * only repeat where you already were.
      *
      * @return array{same_unit: Collection<int, Classroom>, other: Collection<int, Classroom>}
      */
     public function eligibleTargetClassrooms(Classroom $source, AcademicYear $newYear, string $outcome): array
     {
         $targetTingkat = $outcome === 'repeated' ? $source->tingkat : $source->tingkat + 1;
+        $validUnitIds = $this->validTargetUnitIds($source, $outcome);
 
         $candidates = Classroom::where('academic_year_id', $newYear->id)
             ->where('tingkat', $targetTingkat)
             ->where('is_active', true)
+            ->whereIn('school_unit_id', $validUnitIds)
             ->with('schoolUnit')
             ->orderBy('name')
             ->get();
@@ -45,6 +50,16 @@ class PromotionService
             'same_unit' => $candidates->where('school_unit_id', $source->school_unit_id)->values(),
             'other' => $candidates->where('school_unit_id', '!=', $source->school_unit_id)->values(),
         ];
+    }
+
+    /** @return Collection<int, int> */
+    private function validTargetUnitIds(Classroom $source, string $outcome): Collection
+    {
+        if ($outcome === 'repeated') {
+            return collect([$source->school_unit_id]);
+        }
+
+        return $source->schoolUnit->nextUnits()->pluck('id')->push($source->school_unit_id);
     }
 
     /**
@@ -104,10 +119,21 @@ class PromotionService
         });
     }
 
+    /**
+     * The real gate - eligibleTargetClassrooms() is only advisory (it builds
+     * the picker's option list), so every one of its constraints is
+     * re-checked here independently rather than trusted from the request.
+     * A caller could otherwise submit any target_classroom_ulid it can name,
+     * regardless of what the picker ever offered.
+     */
     private function assertValidTarget(Student $student, Classroom $source, AcademicYear $newYear, string $outcome, ?Classroom $target): void
     {
         if (! $target) {
             throw new RuntimeException("Kelas tujuan wajib diisi untuk {$student->nama_lengkap}.");
+        }
+
+        if (! $target->is_active) {
+            throw new RuntimeException("Kelas tujuan untuk {$student->nama_lengkap} sudah tidak aktif.");
         }
 
         if ((int) $target->academic_year_id !== (int) $newYear->id) {
@@ -118,6 +144,10 @@ class PromotionService
 
         if ((int) $target->tingkat !== $expectedTingkat) {
             throw new RuntimeException("Kelas tujuan untuk {$student->nama_lengkap} bertingkat {$target->tingkat}, seharusnya {$expectedTingkat}.");
+        }
+
+        if (! $this->validTargetUnitIds($source, $outcome)->contains($target->school_unit_id)) {
+            throw new RuntimeException("Kelas tujuan untuk {$student->nama_lengkap} bukan unit yang bisa dituju dari {$source->schoolUnit->label}.");
         }
 
         $alreadyEnrolled = Enrollment::where('student_id', $student->id)

@@ -282,4 +282,90 @@ class PromotionTest extends TestCase
         $this->assertTrue($sma->nextUnits()->isEmpty());
         $this->assertNull($sma->nextJenjangGroup());
     }
+
+    // --- Regression: bugs found and closed in the debugging pass -----------
+
+    /**
+     * A classroom with a matching tingkat number in a unit that ISN'T the
+     * source's own unit or a next-jenjang unit used to be offered/accepted
+     * as a valid promotion target - eligibleTargetClassrooms() only matched
+     * on tingkat, ignoring jenjang entirely. Two SD units and an unrelated
+     * SMA sharing the same tingkat-7 numbering by coincidence would have
+     * let a student get "promoted" sideways into the wrong jenjang.
+     */
+    public function test_eligible_targets_excludes_a_unit_that_is_not_the_next_jenjang_even_with_a_matching_tingkat(): void
+    {
+        $unrelatedUnit = SchoolUnit::create(['code' => 'SMA-UNRELATED', 'label' => 'SMA Tidak Terkait', 'jenjang_group' => 'sma']);
+        $source = $this->classroom($this->sd, $this->currentYear, 6, '6-A');
+        $this->classroom($unrelatedUnit, $this->nextYear, 7, '7-A-SMA'); // matching tingkat, wrong jenjang entirely
+
+        $groups = $this->service()->eligibleTargetClassrooms($source, $this->nextYear, 'promoted');
+
+        $this->assertFalse($groups['other']->pluck('school_unit_id')->contains($unrelatedUnit->id));
+    }
+
+    /**
+     * The write path used to trust whatever target_classroom_ulid was sent
+     * as long as tingkat and academic_year matched - eligibleTargetClassrooms()
+     * was only ever consulted for the picker, never re-checked at
+     * promoteBatch() time. A crafted request could promote into a unit that
+     * was never a legitimate next step.
+     */
+    public function test_promote_batch_rejects_a_target_in_a_unit_that_is_not_a_valid_next_step_even_if_tingkat_matches(): void
+    {
+        $unrelatedUnit = SchoolUnit::create(['code' => 'SMA-UNRELATED', 'label' => 'SMA Tidak Terkait', 'jenjang_group' => 'sma']);
+        $source = $this->classroom($this->sd, $this->currentYear, 6, '6-A');
+        $wrongUnitTarget = $this->classroom($unrelatedUnit, $this->nextYear, 7, '7-A-SMA');
+        $student = $this->enrolledStudent($source);
+        $actor = $this->staff('admin', $this->sd);
+
+        $entries = collect([['student' => $student, 'outcome' => 'promoted', 'target_classroom' => $wrongUnitTarget]]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->service()->promoteBatch($source, $this->nextYear, $entries, $actor);
+    }
+
+    public function test_promote_batch_rejects_an_inactive_target_classroom(): void
+    {
+        $source = $this->classroom($this->sd, $this->currentYear, 6, '6-A');
+        $inactiveTarget = $this->classroom($this->smp, $this->nextYear, 7, '7-A');
+        $inactiveTarget->update(['is_active' => false]);
+        $student = $this->enrolledStudent($source);
+        $actor = $this->staff('admin', $this->sd);
+
+        $entries = collect([['student' => $student, 'outcome' => 'promoted', 'target_classroom' => $inactiveTarget]]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->service()->promoteBatch($source, $this->nextYear, $entries, $actor);
+    }
+
+    /**
+     * A student who already has an enrollment in the target year - what a
+     * genuine concurrent-collision race between two admins would leave
+     * behind - must fail cleanly through the full HTTP stack (422, a real
+     * message), not surface as a raw 500 from an uncaught QueryException.
+     * PHPUnit can't reproduce the actual race (one DB connection, one
+     * transaction), so this proves the failure mode's outcome is clean
+     * rather than the race itself.
+     */
+    public function test_the_promotion_endpoint_returns_a_clean_error_when_a_student_already_has_a_target_year_enrollment(): void
+    {
+        $source = $this->classroom($this->sd, $this->currentYear, 6, '6-A');
+        $target = $this->classroom($this->sd, $this->nextYear, 7, '7-A');
+        $student = $this->enrolledStudent($source);
+        Enrollment::create([
+            'student_id' => $student->id, 'classroom_id' => $target->id,
+            'academic_year_id' => $this->nextYear->id, 'status' => 'active', 'joined_on' => $this->nextYear->starts_on,
+        ]);
+        $admin = $this->staff('admin', $this->sd);
+
+        $response = $this->actingAs($admin)->postJson("/api/admin/classrooms/{$source->ulid}/promote", [
+            'academic_year_ulid' => $this->nextYear->ulid,
+            'entries' => [
+                ['student_ulid' => $student->ulid, 'outcome' => 'promoted', 'target_classroom_ulid' => $target->ulid],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+    }
 }

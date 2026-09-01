@@ -44,9 +44,11 @@ class GradeController extends Controller
     public function rapor(Request $request, string $studentUlid, RaporPdfService $pdf, GradeService $service): Response
     {
         $student = Student::visibleTo($request->user())->where('ulid', $studentUlid)->firstOrFail();
-        $term = Term::current();
 
-        abort_if(! $term, 422, 'Belum ada semester aktif.');
+        $termUlid = $request->string('term_ulid')->value();
+        $term = $termUlid ? Term::where('ulid', $termUlid)->first() : Term::current();
+
+        abort_if(! $term, 422, 'Belum ada semester yang bisa dipilih.');
 
         return $pdf->render($student, $term, $service)->stream($pdf->filename($student, $term));
     }

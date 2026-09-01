@@ -110,8 +110,8 @@ class AttendanceSessionTest extends TestCase
     public function test_a_guru_opens_a_session_for_their_own_schedule_via_the_api(): void
     {
         $classroom = $this->classroomIn($this->sd);
-        $schedule = $this->scheduleFor($classroom, $this->subject());
         $guru = $this->staff('guru', $this->sd);
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
 
         $this->actingAs($guru)->postJson("/api/guru/schedules/{$schedule->ulid}/attendance-sessions")
             ->assertStatus(200)
@@ -263,8 +263,8 @@ class AttendanceSessionTest extends TestCase
     {
         $classroom = $this->classroomIn($this->sd);
         $this->studentIn($classroom, 'Aisyah', '20006');
-        $schedule = $this->scheduleFor($classroom, $this->subject());
         $guru = $this->staff('guru', $this->sd);
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
         $session = $this->openSession($schedule, $guru);
 
         $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20006']);
@@ -283,8 +283,8 @@ class AttendanceSessionTest extends TestCase
     {
         $classroom = $this->classroomIn($this->sd);
         $student = $this->studentIn($classroom, nis: '20007');
-        $schedule = $this->scheduleFor($classroom, $this->subject());
         $guru = $this->staff('guru', $this->sd);
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
         $session = $this->openSession($schedule, $guru);
 
         $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20007']);
@@ -339,8 +339,8 @@ class AttendanceSessionTest extends TestCase
         $classroom = $this->classroomIn($this->sd);
         $hadir = $this->studentIn($classroom, 'Sudah Hadir', '20010');
         $sakit = $this->studentIn($classroom, 'Lagi Sakit', '20011');
-        $schedule = $this->scheduleFor($classroom, $this->subject());
         $guru = $this->staff('guru', $this->sd);
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
         $session = $this->openSession($schedule, $guru);
 
         $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20010']);
@@ -486,5 +486,101 @@ class AttendanceSessionTest extends TestCase
         $response = $this->actingAs($sdAdmin)->getJson('/api/admin/reports/attendance')->assertStatus(200);
 
         $this->assertSame(1, $response->json('summary.total_records'));
+    }
+
+    // --- Regression: bugs found and closed in the debugging pass -----------
+
+    public function test_reopening_a_closed_session_reuses_the_row_instead_of_creating_a_second_one(): void
+    {
+        $classroom = $this->classroomIn($this->sd);
+        $guru = $this->staff('guru', $this->sd);
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
+
+        $first = $this->openSession($schedule, $guru);
+        $first->forceFill(['status' => 'closed', 'closed_at' => now()])->save();
+
+        $second = $this->openSession($schedule, $guru);
+
+        $this->assertSame($first->id, $second->id);
+        $this->assertSame('open', $second->fresh()->status);
+        $this->assertDatabaseCount('attendance_sessions', 1);
+    }
+
+    public function test_reopening_an_expired_but_still_open_session_extends_it_instead_of_creating_a_second_one(): void
+    {
+        $classroom = $this->classroomIn($this->sd);
+        $guru = $this->staff('guru', $this->sd);
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
+
+        $first = $this->openSession($schedule, $guru);
+        $first->forceFill(['expires_at' => now()->subMinute()])->save();
+
+        $second = $this->openSession($schedule, $guru);
+
+        $this->assertSame($first->id, $second->id);
+        $this->assertTrue($second->fresh()->expires_at->isFuture());
+        $this->assertDatabaseCount('attendance_sessions', 1);
+    }
+
+    public function test_a_guru_who_is_not_assigned_to_the_schedule_cannot_open_it_even_in_their_own_unit(): void
+    {
+        $classroom = $this->classroomIn($this->sd);
+        $assignedGuru = $this->staff('guru', $this->sd);
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $assignedGuru);
+        $otherGuru = $this->staff('guru', $this->sd);
+
+        $this->actingAs($otherGuru)->postJson("/api/guru/schedules/{$schedule->ulid}/attendance-sessions")
+            ->assertStatus(404);
+    }
+
+    public function test_a_guru_who_is_not_assigned_to_the_schedule_cannot_complete_its_session(): void
+    {
+        $classroom = $this->classroomIn($this->sd);
+        $assignedGuru = $this->staff('guru', $this->sd);
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $assignedGuru);
+        $session = $this->openSession($schedule, $assignedGuru);
+        $otherGuru = $this->staff('guru', $this->sd);
+
+        $this->actingAs($otherGuru)->postJson("/api/guru/attendance-sessions/{$session->ulid}/complete", ['records' => []])
+            ->assertStatus(404);
+    }
+
+    public function test_completing_a_session_rejects_a_student_who_is_not_enrolled_in_this_classroom(): void
+    {
+        $classroom = $this->classroomIn($this->sd);
+        $guru = $this->staff('guru', $this->sd);
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
+        $session = $this->openSession($schedule, $guru);
+
+        $otherClassroom = Classroom::create([
+            'school_unit_id' => $this->sd->id, 'academic_year_id' => $this->term->academic_year_id,
+            'name' => '1-B', 'tingkat' => 1,
+        ]);
+        $outsider = $this->studentIn($otherClassroom, 'Bukan Anak Kelas Ini', '20099');
+
+        $response = $this->actingAs($guru)->postJson("/api/guru/attendance-sessions/{$session->ulid}/complete", [
+            'records' => [
+                ['student_ulid' => $outsider->ulid, 'status' => 'hadir'],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertDatabaseMissing('attendance_records', ['student_id' => $outsider->id]);
+    }
+
+    public function test_check_in_is_rejected_cleanly_when_there_is_no_active_term(): void
+    {
+        $this->term->update(['is_active' => false]);
+
+        $classroom = $this->classroomIn($this->sd);
+        $this->studentIn($classroom, nis: '20100');
+        $guru = $this->staff('guru', $this->sd);
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
+        $session = $this->openSession($schedule, $guru);
+
+        $response = $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20100']);
+
+        $response->assertStatus(503);
+        $this->assertDatabaseCount('attendance_records', 0);
     }
 }

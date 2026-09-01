@@ -330,4 +330,76 @@ class GradeTest extends TestCase
         $this->assertSame($subject->id, $grade->subject_id);
         $this->assertSame($classroom->id, $grade->classroom_id);
     }
+
+    /**
+     * Regression: a teacher authorized for (classroom A, subject X) used to
+     * be able to submit a grade for a student who is actually enrolled in
+     * classroom B, because the student lookup was unit-wide
+     * (Student::visibleTo()) rather than scoped to classroom A's own
+     * roster - silently attaching classroom A's classroom_id to what should
+     * have been classroom B's grade.
+     */
+    public function test_a_teacher_cannot_grade_a_student_not_enrolled_in_the_classroom_they_are_authorized_for(): void
+    {
+        $subject = $this->subject();
+        $classroomA = $this->classroom();
+        $classroomB = Classroom::create([
+            'school_unit_id' => $this->unit->id, 'academic_year_id' => $this->year->id,
+            'name' => '1-B', 'tingkat' => 1,
+        ]);
+
+        $teacherA = $this->guru();
+        $this->schedule($classroomA, $subject, $teacherA);
+
+        $studentInB = $this->student($classroomB, 'Anak Kelas B', '10007');
+
+        $response = $this->actingAs($teacherA)->postJson(
+            "/api/guru/classrooms/{$classroomA->ulid}/subjects/{$subject->ulid}/grades",
+            ['category' => 'tugas', 'entries' => [['student_ulid' => $studentInB->ulid, 'score' => 90]]],
+        );
+
+        $response->assertStatus(422);
+        $this->assertDatabaseMissing('grades', ['student_id' => $studentInB->id]);
+    }
+
+    /**
+     * Regression: rapor/grades used to hardcode Term::current(), so once a
+     * new semester activated there was no way to reach a past one at all -
+     * and summaryForRapor() used the student's CURRENT classroom regardless
+     * of which term was asked for, which would have silently shown the
+     * wrong subject list the moment a term selector existed.
+     */
+    public function test_a_past_terms_grades_stay_reachable_after_a_new_term_activates(): void
+    {
+        $subject = $this->subject();
+        $classroom = $this->classroom();
+        $teacher = $this->guru();
+        $this->schedule($classroom, $subject, $teacher);
+        $student = $this->student($classroom, nis: '10008');
+        $guardian = $this->guardianFor($student);
+
+        $this->actingAs($teacher)->postJson(
+            "/api/guru/classrooms/{$classroom->ulid}/subjects/{$subject->ulid}/grades",
+            ['category' => 'uas', 'entries' => [['student_ulid' => $student->ulid, 'score' => 77]]],
+        );
+
+        $oldTerm = $this->term;
+        $newTerm = Term::create([
+            'academic_year_id' => $this->year->id, 'name' => 'genap',
+            'starts_on' => '2027-01-01', 'ends_on' => '2027-06-30', 'is_active' => true,
+        ]);
+        $oldTerm->update(['is_active' => false]);
+
+        // Current-term view is now empty (nothing graded in the new term)...
+        $current = $this->actingAs($guardian)->getJson("/api/wali/students/{$student->ulid}/grades");
+        $current->assertOk();
+        $this->assertSame('Genap 2026/2027', $current->json('term'));
+
+        // ...but the old term's data is still reachable by ulid, still
+        // pointing at the classroom the student was actually in then.
+        $past = $this->actingAs($guardian)->getJson("/api/wali/students/{$student->ulid}/grades?term_ulid={$oldTerm->ulid}");
+        $past->assertOk();
+        $subjects = $past->json('subjects');
+        $this->assertEquals(77.0, collect($subjects)->firstWhere('subject.ulid', $subject->ulid)['uas']);
+    }
 }

@@ -7,6 +7,7 @@ use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Classroom;
 use App\Models\SchoolUnit;
+use App\Models\Term;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -37,6 +38,16 @@ class ReferenceController extends Controller
                 'starts_on' => $y->starts_on?->format('Y-m-d'),
                 'ends_on' => $y->ends_on?->format('Y-m-d'),
                 'is_active' => $y->is_active,
+            ]),
+        ]);
+    }
+
+    /** Every semester that has ever existed - so a past one stays pickable for grade oversight and archived rapor downloads once a newer one activates. */
+    public function terms(): JsonResponse
+    {
+        return response()->json([
+            'terms' => Term::orderByDesc('starts_on')->get()->map(fn (Term $t) => [
+                'ulid' => $t->ulid, 'label' => $t->label(), 'is_active' => $t->is_active,
             ]),
         ]);
     }

@@ -8,6 +8,7 @@ use App\Models\ActivityLog;
 use App\Models\Classroom;
 use App\Models\Student;
 use App\Services\Academic\PromotionService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
@@ -95,6 +96,16 @@ class PromotionController extends Controller
             $results = $service->promoteBatch($classroom, $newYear, $entries, $request->user());
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
+        } catch (QueryException $e) {
+            // assertValidTarget()'s own "already enrolled" check is a
+            // read-then-write - two admins promoting overlapping students in
+            // the same classroom at once can both pass it and then collide
+            // on enrollments' (student_id, academic_year_id) unique
+            // constraint. The whole batch already rolled back atomically;
+            // this just keeps that from surfacing as a raw 500.
+            return response()->json([
+                'message' => 'Sebagian siswa mungkin sudah diproses oleh admin lain secara bersamaan. Muat ulang dan coba lagi.',
+            ], 409);
         }
 
         ActivityLog::record($request->user(), 'promotion.executed', $classroom, [
