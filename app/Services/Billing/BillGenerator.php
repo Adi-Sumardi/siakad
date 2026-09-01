@@ -6,6 +6,7 @@ use App\Models\AcademicYear;
 use App\Models\Bill;
 use App\Models\BillingRun;
 use App\Models\BillLine;
+use App\Models\ExtracurricularMember;
 use App\Models\FeeRate;
 use App\Models\FeeType;
 use App\Models\SchoolUnit;
@@ -208,6 +209,23 @@ class BillGenerator
                 return $base + [
                     'reason' => 'Menunggu pemilihan orang tua',
                     'detail' => $type->name.' membutuhkan pemilihan item/ukuran - orang tua belum mengisinya di portal wali.',
+                ];
+            }
+        }
+
+        if ($type->requires_roster_membership) {
+            // ekskul - only students actively rostered into at least one
+            // extracurricular this academic year get billed. See
+            // ExtracurricularService and the migration that flips this flag.
+            $hasActiveMembership = ExtracurricularMember::where('student_id', $student->id)
+                ->where('academic_year_id', $year->id)
+                ->where('status', 'active')
+                ->exists();
+
+            if (! $hasActiveMembership) {
+                return $base + [
+                    'reason' => 'Belum terdaftar ekstrakurikuler',
+                    'detail' => $type->name.' hanya ditagih untuk siswa yang terdaftar aktif di minimal satu ekstrakurikuler.',
                 ];
             }
         }

@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Award, ClipboardList, Download, FileDown, Plus, Sparkles, UserCheck, X } from "lucide-react";
+import { ArrowLeft, Award, ClipboardList, Download, FileDown, Plus, Sparkles, Trophy, UserCheck, X } from "lucide-react";
 import { toast } from "sonner";
 import { WaliShell } from "@/components/layout/wali-shell";
 import { Badge } from "@/components/ui/badge";
@@ -255,6 +255,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
   const [attendance, setAttendance] = useState<AttendanceOverview | null>(null);
   const [achievements, setAchievements] = useState<Achievement[] | null>(null);
   const [grades, setGrades] = useState<{ term: string | null; subjects: SubjectGradeSummary[] } | null>(null);
+  const [extracurriculars, setExtracurriculars] = useState<{ ulid: string; name: string; pembina: string | null; school_unit: string | null }[] | null>(null);
   const [downloadingRapor, setDownloadingRapor] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -279,6 +280,10 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
     api
       .get<{ term: string | null; subjects: SubjectGradeSummary[] }>(`/api/wali/students/${ulid}/grades`)
       .then(setGrades)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+    api
+      .get<{ extracurriculars: { ulid: string; name: string; pembina: string | null; school_unit: string | null }[] }>(`/api/wali/students/${ulid}/extracurriculars`)
+      .then((d) => setExtracurriculars(d.extracurriculars))
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
     loadAchievements();
   }, [ulid, user]);
@@ -463,6 +468,30 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
                 </tbody>
               </table>
             </Card>
+          )}
+        </section>
+
+        {/* SECTION 1D: EKSTRAKURIKULER */}
+        <section className="space-y-3 pt-4 border-t border-border">
+          <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+            <Trophy className="size-5 text-primary" />
+            <span>Ekstrakurikuler</span>
+          </h2>
+
+          {extracurriculars === null ? (
+            <Skeleton className="h-16 w-full" />
+          ) : extracurriculars.length === 0 ? (
+            <Card className="p-6 text-center text-sm text-muted-foreground">
+              Ananda belum terdaftar di ekstrakurikuler apa pun.
+            </Card>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {extracurriculars.map((e) => (
+                <Badge key={e.ulid} variant="primary" className="px-3 py-1.5 text-xs">
+                  {e.name}{e.pembina ? ` · ${e.pembina}` : ""}
+                </Badge>
+              ))}
+            </div>
           )}
         </section>
 

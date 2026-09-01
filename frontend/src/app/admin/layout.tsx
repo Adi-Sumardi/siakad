@@ -17,6 +17,7 @@ import {
   ScrollText,
   SlidersHorizontal,
   Sparkles,
+  Trophy,
   Users,
   Wallet,
 } from "lucide-react";
@@ -37,6 +38,7 @@ const NAV: StaffNavItem[] = [
   { href: "/admin/nilai", label: "Nilai & Rapor", icon: ClipboardList },
   { href: "/admin/kelas", label: "Data Kelas", icon: School },
   { href: "/admin/kenaikan-kelas", label: "Kenaikan Kelas", icon: ArrowUpCircle },
+  { href: "/admin/ekstrakurikuler", label: "Ekstrakurikuler", icon: Trophy },
   { href: "/admin/poin", label: "Poin & Tata Tertib", icon: Sparkles },
   { href: "/admin/prestasi", label: "Prestasi Siswa", icon: Award },
   { href: "/admin/informasi", label: "Pengumuman", icon: Megaphone },

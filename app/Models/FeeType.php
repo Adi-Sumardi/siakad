@@ -12,12 +12,13 @@ class FeeType extends Model
 
     protected $fillable = [
         'code', 'name', 'recurrence', 'allow_installment',
-        'requires_selection', 'is_active', 'sort_order',
+        'requires_selection', 'requires_roster_membership', 'is_active', 'sort_order',
     ];
 
     protected $casts = [
         'allow_installment' => 'boolean',
         'requires_selection' => 'boolean',
+        'requires_roster_membership' => 'boolean',
         'is_active' => 'boolean',
         'sort_order' => 'integer',
     ];

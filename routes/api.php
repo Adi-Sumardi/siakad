@@ -107,6 +107,8 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
     Route::get('/students/{ulid}/grades', [WaliGradeController::class, 'index']);
     Route::get('/students/{ulid}/rapor', [WaliGradeController::class, 'rapor']);
 
+    Route::get('/students/{ulid}/extracurriculars', [\App\Http\Controllers\Api\Wali\ExtracurricularController::class, 'index']);
+
     Route::get('/announcements', [WaliAnnouncementController::class, 'index']);
 });
 
@@ -140,6 +142,12 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     Route::get('/my-subjects', [GuruGradeController::class, 'myAssignments']);
     Route::get('/classrooms/{classroomUlid}/subjects/{subjectUlid}/grades', [GuruGradeController::class, 'roster']);
     Route::post('/classrooms/{classroomUlid}/subjects/{subjectUlid}/grades', [GuruGradeController::class, 'store']);
+
+    // A pembina manages only the activities they themselves supervise.
+    Route::get('/my-extracurriculars', [\App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'index']);
+    Route::get('/extracurriculars/{ulid}/members', [\App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'roster']);
+    Route::post('/extracurriculars/{ulid}/members', [\App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'assignStudent']);
+    Route::delete('/extracurriculars/{ulid}/members/{memberUlid}', [\App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'removeMember']);
 });
 
 /*
@@ -204,6 +212,13 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/classrooms/{classroomUlid}/promotion-roster', [\App\Http\Controllers\Api\Admin\PromotionController::class, 'roster']);
     Route::get('/classrooms/{classroomUlid}/promotion-targets', [\App\Http\Controllers\Api\Admin\PromotionController::class, 'targets']);
     Route::post('/classrooms/{classroomUlid}/promote', [\App\Http\Controllers\Api\Admin\PromotionController::class, 'store']);
+
+    Route::get('/extracurriculars', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'index']);
+    Route::post('/extracurriculars', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'store']);
+    Route::patch('/extracurriculars/{ulid}', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'update']);
+    Route::get('/extracurriculars/{ulid}/members', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'roster']);
+    Route::post('/extracurriculars/{ulid}/members', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'assignStudent']);
+    Route::delete('/extracurriculars/{ulid}/members/{memberUlid}', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'removeMember']);
 
     // A per-unit admin manages their own unit's rules/thresholds and never a
     // school-wide one - PointRuleController and PointThresholdController
