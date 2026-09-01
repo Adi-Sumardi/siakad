@@ -37,17 +37,21 @@ export type BillSummary = {
 
 export type VirtualAccountInfo = {
   va_number: string;
+  bank_key?: "muamalat" | "bsi";
   bank_name: string;
   bank_code: string;
+  all_va?: { muamalat: string; bsi: string };
   amount: number;
   due_date?: string | null;
 };
 
 export type GatewayResponseInfo = {
   provider?: string;
+  bank_key?: "muamalat" | "bsi";
   va_number?: string;
   bank_name?: string;
   bank_code?: string;
+  all_va?: { muamalat: string; bsi: string };
   amount?: number;
   due_date?: string;
   billing_uuid?: string;

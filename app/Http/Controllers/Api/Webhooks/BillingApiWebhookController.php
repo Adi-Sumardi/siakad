@@ -11,7 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Handles inbound payment callback webhooks from e-SPP / Bank Muamalat (BMI).
+ * Handles inbound payment callback webhooks from e-SPP (Bank Muamalat & BSI Virtual Account).
  * Path: POST /api/payment-webhook/{uuid}
  */
 class BillingApiWebhookController extends Controller
@@ -50,6 +50,8 @@ class BillingApiWebhookController extends Controller
             $payment = Payment::where('payment_number', $referenceNo)
                 ->orWhere('external_transaction_id', $referenceNo)
                 ->orWhere('gateway_response->va_number', $referenceNo)
+                ->orWhere('gateway_response->all_va->muamalat', $referenceNo)
+                ->orWhere('gateway_response->all_va->bsi', $referenceNo)
                 ->first();
         }
 
@@ -73,38 +75,28 @@ class BillingApiWebhookController extends Controller
             return response()->json(['success' => true, 'message' => 'Payment already settled.'], 200);
         }
 
-        // e-SPP's "Callback Keluar" carries no signature or shared secret to
-        // check - there is nothing here playing the role Xendit's callback
-        // token or SendagoPay's HMAC secret play elsewhere in this codebase.
-        // This live lookup against e-SPP's own record of the VA is the only
-        // thing standing between "a POST arrived claiming this paid" and
-        // actually settling money, which is why it must fail closed: on any
-        // failure to confirm - can't reach e-SPP, no va_number to check, a
-        // remaining balance still shown - the payment is left exactly as it
-        // was. payments:poll-billing-va runs on a schedule and does this same
-        // live check independently, so a payment that's genuinely settled but
-        // couldn't be verified here isn't lost, only delayed until the next
-        // poll - a real family paying is not blocked by a transient e-SPP
-        // outage; a forged callback with nothing to confirm it is.
-        $vaNumber = $payment->gateway_response['va_number'] ?? $referenceNo;
+        // Live lookup against e-SPP's own record of the VA
+        $vaLookup = $payment->gateway_response['all_va']['muamalat']
+            ?? $payment->gateway_response['va_number']
+            ?? $referenceNo;
         $verified = false;
 
-        if ($vaNumber) {
+        if ($vaLookup) {
             try {
-                $statusRes = $this->client->getByVaNumber($vaNumber);
+                $statusRes = $this->client->getByVaNumber($vaLookup);
                 $remaining = (float) ($statusRes['sisa'] ?? $statusRes['data']['sisa'] ?? 0);
 
                 if ($remaining <= 0) {
                     $verified = true;
                 } else {
                     Log::warning('[BillingApiWebhook] e-SPP VA still shows outstanding balance', [
-                        'va_number' => $vaNumber,
+                        'va_number' => $vaLookup,
                         'sisa' => $remaining,
                     ]);
                 }
             } catch (\Throwable $e) {
                 Log::warning('[BillingApiWebhook] Could not verify against e-SPP, leaving unsettled for the poller to pick up: '.$e->getMessage(), [
-                    'va_number' => $vaNumber,
+                    'va_number' => $vaLookup,
                     'payment' => $payment->payment_number,
                 ]);
             }

@@ -13,8 +13,10 @@ class PaymentResource extends JsonResource
         if (! empty($this->gateway_response['va_number'])) {
             $vaData = [
                 'va_number' => $this->gateway_response['va_number'],
+                'bank_key' => $this->gateway_response['bank_key'] ?? 'muamalat',
                 'bank_name' => $this->gateway_response['bank_name'] ?? 'Bank Muamalat',
                 'bank_code' => $this->gateway_response['bank_code'] ?? '147',
+                'all_va' => $this->gateway_response['all_va'] ?? null,
                 'amount' => (float) ($this->gateway_response['amount'] ?? $this->amount),
                 'due_date' => $this->gateway_response['due_date'] ?? $this->expires_at?->toDateString(),
             ];

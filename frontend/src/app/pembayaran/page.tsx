@@ -1,27 +1,22 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
-  ArrowLeft,
   Building2,
-  Check,
   CheckCircle2,
   Clock,
   Copy,
-  Download,
   ExternalLink,
   Info,
   QrCode,
   Receipt,
-  RefreshCw,
+  RotateCcw,
   ShieldCheck,
-  Sparkles,
   Wallet,
   X,
-  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { WaliShell } from "@/components/layout/wali-shell";
@@ -29,117 +24,147 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
-import { rupiah, tanggal } from "@/lib/format";
-import type { Payment } from "@/lib/types/billing";
+import { api, ApiError } from "@/lib/api";
+import { Payment } from "@/lib/types/billing";
 
-const STATUS_LABEL: Record<string, { label: string; variant: "good" | "warn" | "bad" | "default" }> = {
-  completed: { label: "Lunas / Berhasil", variant: "good" },
+const STATUS_LABEL: Record<string, { label: string; variant: "default" | "warn" | "good" | "bad" | "primary" }> = {
   pending: { label: "Menunggu Pembayaran", variant: "warn" },
-  processing: { label: "Menunggu Pembayaran", variant: "warn" },
-  expired: { label: "Kedaluwarsa", variant: "default" },
+  processing: { label: "Sedang Diproses", variant: "primary" },
+  completed: { label: "Lunas / Berhasil", variant: "good" },
   failed: { label: "Gagal", variant: "bad" },
-  cancelled: { label: "Dibatalkan", variant: "default" },
-  refunded: { label: "Dikembalikan", variant: "default" },
+  expired: { label: "Kedaluwarsa", variant: "default" },
 };
+
+function rupiah(amount: number): string {
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function tanggal(dateStr: string): string {
+  if (!dateStr) return "-";
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(dateStr));
+}
 
 function PaymentsContent() {
   const { user, loading } = useRequireRole("orangtua");
   const searchParams = useSearchParams();
-  const highlightPaymentUlid = searchParams.get("payment");
+  const initialPaymentUlid = searchParams.get("payment");
 
   const [payments, setPayments] = useState<Payment[] | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [simulating, setSimulating] = useState(false);
-  const [copiedText, setCopiedText] = useState<string | null>(null);
 
-  function load() {
-    api
-      .get<{ payments: Payment[] }>("/api/wali/payments")
-      .then((d) => {
-        setPayments(d.payments);
-        if (highlightPaymentUlid) {
-          const match = d.payments.find((p) => p.ulid === highlightPaymentUlid);
-          if (match) setSelectedPayment(match);
-        }
-      })
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat riwayat pembayaran."));
-  }
+  const load = useCallback(async () => {
+    try {
+      const data = await api.get<{ payments: Payment[] }>("/api/wali/bills/payments");
+      setPayments(data.payments);
+
+      // Auto-open modal if requested via URL param
+      if (initialPaymentUlid && !selectedPayment) {
+        const found = data.payments.find((p) => p.ulid === initialPaymentUlid);
+        if (found) setSelectedPayment(found);
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal memuat riwayat transaksi.");
+    }
+  }, [initialPaymentUlid, selectedPayment]);
 
   useEffect(() => {
-    if (user?.role === "orangtua") {
-      load();
-    }
-  }, [user, highlightPaymentUlid]);
+    if (user?.role === "orangtua") load();
+  }, [user, load]);
 
   function copyToClipboard(text: string, label: string) {
     navigator.clipboard.writeText(text);
-    setCopiedText(label);
     toast.success(`${label} berhasil disalin ke clipboard!`);
-    setTimeout(() => setCopiedText(null), 2000);
   }
 
   async function handleSimulateSettle(payment: Payment) {
     setSimulating(true);
     try {
       const res = await api.post<{ message: string; payment: Payment }>(
-        `/api/wali/payments/${payment.ulid}/simulate-settle`
+        `/api/wali/bills/payments/${payment.ulid}/simulate-settle`,
+        {}
       );
       toast.success(res.message);
       setSelectedPayment(res.payment);
-      load();
+      await load();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Gagal memproses simulasi.");
+      toast.error(err instanceof ApiError ? err.message : "Gagal menyelesaikan simulasi.");
     } finally {
       setSimulating(false);
     }
   }
 
-  if (loading || !user || user.role !== "orangtua") {
+  if (loading || !user || payments === null) {
     return (
       <WaliShell>
         <div className="space-y-4">
-          <Skeleton className="h-8 w-48" />
-          <Skeleton className="h-32 w-full rounded-2xl" />
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-48 w-full" />
         </div>
       </WaliShell>
     );
   }
 
+  const isBsi =
+    selectedPayment?.virtual_account?.bank_key === "bsi" ||
+    selectedPayment?.gateway_response?.bank_key === "bsi" ||
+    (selectedPayment?.virtual_account?.bank_name || selectedPayment?.gateway_response?.bank_name || "")
+      .toLowerCase()
+      .includes("bsi");
+
+  const activeBankName =
+    selectedPayment?.virtual_account?.bank_name ||
+    selectedPayment?.gateway_response?.bank_name ||
+    (isBsi ? "Bank Syariah Indonesia (BSI)" : "Bank Muamalat");
+
+  const activeBankCode =
+    selectedPayment?.virtual_account?.bank_code ||
+    selectedPayment?.gateway_response?.bank_code ||
+    (isBsi ? "451" : "147");
+
+  const activeVaNumber =
+    selectedPayment?.virtual_account?.va_number ||
+    selectedPayment?.gateway_response?.va_number;
+
   return (
     <WaliShell>
-      <div className="space-y-6 pb-24">
+      <div className="space-y-6">
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-foreground">
-              Riwayat Pembayaran & Tagihan
-            </h1>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-              Histori seluruh transaksi pembayaran SPP & Tagihan Sekolah melalui Virtual Account Bank Muamalat (BMI) maupun loket administrasi YAPI.
+            <h1 className="text-2xl font-black tracking-tight text-foreground">Riwayat Pembayaran & Transaksi</h1>
+            <p className="text-xs text-muted-foreground mt-1">
+              Daftar seluruh invoice, Virtual Account, dan riwayat pelunasan tagihan sekolah ananda.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={load} className="gap-2 text-xs font-semibold">
-              <RefreshCw className="size-3.5" />
-              <span>Segarkan</span>
-            </Button>
-            <Link href="/tagihan">
-              <Button size="sm" className="gap-2 text-xs font-bold">
-                <Receipt className="size-3.5" />
-                <span>Lihat Tagihan</span>
-              </Button>
-            </Link>
-          </div>
+          <Button variant="outline" size="sm" onClick={load} className="gap-2 self-start sm:self-auto font-semibold">
+            <RotateCcw className="size-3.5" />
+            <span>Segarkan Data</span>
+          </Button>
         </div>
 
-        {/* Loading State */}
-        {payments === null && (
-          <div className="space-y-3">
-            <Skeleton className="h-28 w-full rounded-2xl" />
-            <Skeleton className="h-28 w-full rounded-2xl" />
+        {/* Notice Info */}
+        {payments?.some((p) => p.status === "pending" || p.status === "processing") && (
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 text-xs text-amber-900 dark:text-amber-200">
+            <Clock className="size-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Terdapat tagihan/Virtual Account yang belum selesai dibayar.</p>
+              <p className="text-amber-800 dark:text-amber-300 mt-0.5">
+                Silakan klik tombol <strong>Bayar Sekarang</strong> pada transaksi di bawah untuk melihat nomor Virtual Account atau QRIS pembayaran Anda.
+              </p>
+            </div>
           </div>
         )}
 
@@ -167,7 +192,6 @@ function PaymentsContent() {
             const isCompleted = payment.status === "completed";
             const gatewayResp = (payment as unknown as { gateway_response?: Record<string, unknown> })?.gateway_response;
             const uniqueCode = typeof gatewayResp?.unique_code === "number" ? gatewayResp.unique_code : 0;
-            const totalWithUnique = typeof gatewayResp?.total_with_code === "number" ? gatewayResp.total_with_code : payment.amount;
 
             return (
               <Card
@@ -191,7 +215,7 @@ function PaymentsContent() {
                     </p>
 
                     <p className="text-xs text-muted-foreground">
-                      Metode: <strong className="uppercase text-foreground">{payment.method ?? "Transfer Bank / QRIS"}</strong>
+                      Metode: <strong className="uppercase text-foreground">{payment.method ?? "Virtual Account"}</strong>
                       {payment.paid_at && ` · Diselesaikan: ${tanggal(payment.paid_at)}`}
                     </p>
                   </div>
@@ -269,7 +293,7 @@ function PaymentsContent() {
 
                 <button
                   onClick={() => setSelectedPayment(null)}
-                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent"
+                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent cursor-pointer"
                 >
                   <X className="size-5" />
                 </button>
@@ -293,7 +317,7 @@ function PaymentsContent() {
                     <span className="tabular text-xl font-black text-primary">{rupiah(selectedPayment.amount)}</span>
                     <button
                       onClick={() => copyToClipboard(String(selectedPayment.amount), "Nominal")}
-                      className="ml-2 inline-flex items-center text-xs text-muted-foreground hover:text-foreground"
+                      className="ml-2 inline-flex items-center text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                       title="Salin Nominal"
                     >
                       <Copy className="size-3" />
@@ -302,8 +326,8 @@ function PaymentsContent() {
                 </div>
               </div>
 
-              {/* VIRTUAL ACCOUNT BANK MUAMALAT (BMI) SECTION */}
-              {selectedPayment.status !== "completed" && (selectedPayment.virtual_account?.va_number || selectedPayment.gateway_response?.va_number) ? (
+              {/* VIRTUAL ACCOUNT DUAL-BANK (BMI & BSI) SECTION */}
+              {selectedPayment.status !== "completed" && activeVaNumber ? (
                 <div className="space-y-4">
                   {/* VA Card */}
                   <div className="p-4 rounded-2xl bg-emerald-500/10 border-2 border-emerald-500/30 space-y-3">
@@ -311,11 +335,11 @@ function PaymentsContent() {
                       <div className="flex items-center gap-2">
                         <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
                         <span className="font-bold text-xs text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">
-                          Virtual Account Bank Muamalat (BMI)
+                          Virtual Account {activeBankName}
                         </span>
                       </div>
-                      <Badge variant="default" className="text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white">
-                        Kode Bank: 147
+                      <Badge variant="default" className="text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white font-mono">
+                        Kode Bank: {activeBankCode}
                       </Badge>
                     </div>
 
@@ -323,18 +347,13 @@ function PaymentsContent() {
                       <div>
                         <p className="text-[11px] text-muted-foreground font-medium">Nomor Virtual Account:</p>
                         <p className="font-mono text-lg sm:text-xl font-black text-foreground tracking-wider mt-0.5">
-                          {selectedPayment.virtual_account?.va_number || selectedPayment.gateway_response?.va_number}
+                          {activeVaNumber}
                         </p>
                       </div>
                       <Button
                         size="sm"
-                        onClick={() =>
-                          copyToClipboard(
-                            selectedPayment.virtual_account?.va_number || selectedPayment.gateway_response?.va_number || "",
-                            "Nomor Virtual Account"
-                          )
-                        }
-                        className="h-9 gap-1.5 font-bold shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white"
+                        onClick={() => copyToClipboard(activeVaNumber, "Nomor Virtual Account")}
+                        className="h-9 gap-1.5 font-bold shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
                       >
                         <Copy className="size-3.5" />
                         <span>Salin VA</span>
@@ -353,31 +372,39 @@ function PaymentsContent() {
                   <div className="p-3.5 rounded-xl bg-muted/50 border border-border text-xs space-y-2">
                     <p className="font-bold text-foreground flex items-center gap-1.5">
                       <Info className="size-4 text-primary shrink-0" />
-                      <span>Petunjuk Cara Pembayaran:</span>
+                      <span>Petunjuk Cara Pembayaran {activeBankName}:</span>
                     </p>
-                    <div className="space-y-1.5 text-[11px] text-muted-foreground leading-relaxed pl-5 list-decimal">
-                      <div>
-                        <strong>1. Aplikasi Muamalat DIN:</strong> Pilih menu <em>Bayar/Beli</em> &rarr; <em>Virtual Account</em> &rarr; Masukkan Nomor VA di atas &rarr; Periksa nama tagihan &rarr; Konfirmasi PIN.
+                    {isBsi ? (
+                      <div className="space-y-1.5 text-[11px] text-muted-foreground leading-relaxed pl-5 list-decimal">
+                        <div>
+                          <strong>1. BSI Mobile (Institusi / Akademik):</strong> Menu <em>Bayar</em> &rarr; <em>Institusi / Akademik</em> &rarr; Kode Institusi <strong>3656</strong> (YAPI) &rarr; Masukkan No. VA <strong>{activeVaNumber}</strong> &rarr; Periksa nama tagihan &rarr; Masukkan PIN.
+                        </div>
+                        <div>
+                          <strong>2. BSI Mobile (Virtual Account):</strong> Menu <em>Bayar</em> &rarr; <em>Virtual Account</em> &rarr; Masukkan No. VA <strong>{activeVaNumber}</strong> &rarr; Konfirmasi PIN.
+                        </div>
+                        <div>
+                          <strong>3. ATM BSI:</strong> Pilih <em>Pembayaran / Pembelian</em> &rarr; <em>Akademik / Virtual Account</em> &rarr; Masukkan No. VA <strong>{activeVaNumber}</strong> &rarr; Konfirmasi.
+                        </div>
+                        <div>
+                          <strong>4. Transfer Antar Bank (BCA/Mandiri/BRI/Muamalat/dll):</strong> Pilih <em>Transfer Antar Bank</em> &rarr; Pilih <strong>Bank BSI (Kode: 451)</strong> &rarr; Masukkan No. VA sebagai rekening tujuan &rarr; Masukkan nominal ({rupiah(selectedPayment.amount)}) &rarr; Konfirmasi.
+                        </div>
                       </div>
-                      <div>
-                        <strong>2. ATM Bank Muamalat:</strong> Pilih <em>Transaksi Lainnya</em> &rarr; <em>Pembayaran</em> &rarr; <em>Virtual Account</em> &rarr; Masukkan Nomor VA &rarr; Konfirmasi.
+                    ) : (
+                      <div className="space-y-1.5 text-[11px] text-muted-foreground leading-relaxed pl-5 list-decimal">
+                        <div>
+                          <strong>1. Aplikasi Muamalat DIN:</strong> Pilih menu <em>Bayar/Beli</em> &rarr; <em>Virtual Account</em> &rarr; Masukkan Nomor VA <strong>{activeVaNumber}</strong> &rarr; Periksa nama tagihan &rarr; Konfirmasi PIN.
+                        </div>
+                        <div>
+                          <strong>2. ATM Bank Muamalat:</strong> Pilih <em>Transaksi Lainnya</em> &rarr; <em>Pembayaran</em> &rarr; <em>Virtual Account</em> &rarr; Masukkan Nomor VA <strong>{activeVaNumber}</strong> &rarr; Konfirmasi.
+                        </div>
+                        <div>
+                          <strong>3. Transfer Antar Bank (BCA/Mandiri/BRI/BSI/dll):</strong> Pilih <em>Transfer Antar Bank</em> &rarr; Pilih <strong>Bank Muamalat (Kode: 147)</strong> &rarr; Masukkan Nomor VA sebagai rekening tujuan &rarr; Masukkan nominal tepat ({rupiah(selectedPayment.amount)}) &rarr; Konfirmasi.
+                        </div>
                       </div>
-                      <div>
-                        <strong>3. Transfer Antar Bank (BCA/Mandiri/BRI/BSI/dll):</strong> Pilih <em>Transfer Antar Bank</em> &rarr; Pilih <strong>Bank Muamalat (Kode: 147)</strong> &rarr; Masukkan Nomor VA sebagai rekening tujuan &rarr; Masukkan nominal tepat ({rupiah(selectedPayment.amount)}) &rarr; Konfirmasi.
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               ) : selectedPayment.status !== "completed" ? (
-                /* No VA registered for this payment (e.g. a transaction from
-                   before the switch to Bank Muamalat VA). This used to show
-                   three hardcoded "official" bank accounts as a manual-
-                   transfer fallback - unverified placeholder numbers that
-                   were never confirmed as YAPI's real accounts, carried
-                   unchanged across three gateway migrations. Bank Muamalat
-                   VA is the only payment method in use for now, so rather
-                   than risk a family transferring to an account nobody
-                   confirmed is real, this points them to the school instead. */
                 <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs flex gap-2.5">
                   <AlertCircle className="size-4 shrink-0 mt-0.5 text-amber-600" />
                   <div className="space-y-1">
@@ -390,18 +417,13 @@ function PaymentsContent() {
                 </div>
               ) : null}
 
-              {/* Simulation Mode Action for Test Flow - dev/staging only.
-                  The matching endpoint 404s outside local/testing on the
-                  backend now too; this keeps a real family from ever seeing
-                  a "confirm payment" button that can't do anything, and keeps
-                  it from being the free lunas-without-paying button it was
-                  before that backend guard existed. */}
+              {/* Simulation Mode Action for Test Flow */}
               {process.env.NODE_ENV !== "production" && selectedPayment.status !== "completed" && (
                 <div className="pt-2 border-t border-border space-y-2">
                   <Button
                     onClick={() => handleSimulateSettle(selectedPayment)}
                     disabled={simulating}
-                    className="w-full gap-2 font-bold shadow-md bg-emerald-600 hover:bg-emerald-700 text-white"
+                    className="w-full gap-2 font-bold shadow-md bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
                   >
                     <CheckCircle2 className="size-4" />
                     <span>{simulating ? "Memverifikasi..." : "Konfirmasi Pembayaran Selesai (Simulasi Uji Coba)"}</span>
@@ -414,7 +436,7 @@ function PaymentsContent() {
 
               {/* Close Button */}
               <div className="flex justify-end pt-1">
-                <Button variant="outline" size="sm" onClick={() => setSelectedPayment(null)}>
+                <Button variant="outline" size="sm" onClick={() => setSelectedPayment(null)} className="cursor-pointer">
                   Tutup
                 </Button>
               </div>

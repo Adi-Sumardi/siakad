@@ -13,10 +13,11 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * HTTP client for the e-SPP Billing API (Bank Muamalat BMI Virtual Account webservice).
+ * HTTP client for the e-SPP Billing API (Bank Muamalat BMI & Bank Syariah Indonesia BSI Virtual Account webservice).
  */
 class BillingApiClient
 {
+    // Bank Muamalat (8020) Prefixes
     public const PREFIX_SPP = '802001';
     public const PREFIX_UANG_PANGKAL = '802002';
     public const PREFIX_JAMIYYAH = '802003';
@@ -26,11 +27,22 @@ class BillingApiClient
     public const PREFIX_EKSKUL_SMP12 = '802007';
     public const PREFIX_EKSKUL_SMP55 = '802008';
 
+    // Bank Syariah Indonesia / BSI (3656) Prefixes
+    public const PREFIX_BSI_SPP = '365601';
+    public const PREFIX_BSI_UANG_PANGKAL = '365602';
+    public const PREFIX_BSI_JAMIYYAH = '365603';
+    public const PREFIX_BSI_PENDAFTARAN = '365604';
+    public const PREFIX_BSI_EKSKUL_TK = '365605';
+    public const PREFIX_BSI_EKSKUL_SD = '365606';
+    public const PREFIX_BSI_EKSKUL_SMP12 = '365607';
+    public const PREFIX_BSI_EKSKUL_SMP55 = '365608';
+
     /**
-     * Resolves the 6-digit prefix based on fee type and school unit.
+     * Resolves the 6-digit prefix based on fee type, school unit, and bank.
      */
-    public static function resolvePrefix(string $feeTypeCode, ?SchoolUnit $unit = null): string
+    public static function resolvePrefix(string $feeTypeCode, ?SchoolUnit $unit = null, string $bank = 'muamalat'): string
     {
+        $bankKey = strtolower($bank) === 'bsi' ? 'bsi' : 'muamalat';
         $normalizedFee = mb_strtolower(trim($feeTypeCode));
 
         if (str_contains($normalizedFee, 'ekskul') || str_contains($normalizedFee, 'ekstrakurikuler')) {
@@ -38,37 +50,37 @@ class BillingApiClient
             $jenjang = mb_strtolower($unit?->jenjang_group ?? '');
 
             if ($unitCode === 'SMP-12') {
-                return (string) config('services.billing_api.va_prefixes.ekskul_smp12', self::PREFIX_EKSKUL_SMP12);
+                return (string) config("services.banks.{$bankKey}.prefixes.ekskul_smp12", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP12 : self::PREFIX_EKSKUL_SMP12);
             }
             if ($unitCode === 'SMP-55' || str_contains($unitCode, 'SMP')) {
-                return (string) config('services.billing_api.va_prefixes.ekskul_smp55', self::PREFIX_EKSKUL_SMP55);
+                return (string) config("services.banks.{$bankKey}.prefixes.ekskul_smp55", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP55 : self::PREFIX_EKSKUL_SMP55);
             }
             if ($jenjang === 'sd' || str_contains($unitCode, 'SD')) {
-                return (string) config('services.billing_api.va_prefixes.ekskul_sd', self::PREFIX_EKSKUL_SD);
+                return (string) config("services.banks.{$bankKey}.prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD);
             }
-            return (string) config('services.billing_api.va_prefixes.ekskul_tk', self::PREFIX_EKSKUL_TK);
+            return (string) config("services.banks.{$bankKey}.prefixes.ekskul_tk", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_TK : self::PREFIX_EKSKUL_TK);
         }
 
         if (str_contains($normalizedFee, 'jamiyyah')) {
-            return (string) config('services.billing_api.va_prefixes.jamiyyah', self::PREFIX_JAMIYYAH);
+            return (string) config("services.banks.{$bankKey}.prefixes.jamiyyah", $bankKey === 'bsi' ? self::PREFIX_BSI_JAMIYYAH : self::PREFIX_JAMIYYAH);
         }
 
         if (str_contains($normalizedFee, 'pangkal')) {
-            return (string) config('services.billing_api.va_prefixes.uang_pangkal', self::PREFIX_UANG_PANGKAL);
+            return (string) config("services.banks.{$bankKey}.prefixes.uang_pangkal", $bankKey === 'bsi' ? self::PREFIX_BSI_UANG_PANGKAL : self::PREFIX_UANG_PANGKAL);
         }
 
         if (str_contains($normalizedFee, 'pendaftaran') || str_contains($normalizedFee, 'formulir')) {
-            return (string) config('services.billing_api.va_prefixes.pendaftaran', self::PREFIX_PENDAFTARAN);
+            return (string) config("services.banks.{$bankKey}.prefixes.pendaftaran", $bankKey === 'bsi' ? self::PREFIX_BSI_PENDAFTARAN : self::PREFIX_PENDAFTARAN);
         }
 
-        return (string) config('services.billing_api.va_prefixes.spp', self::PREFIX_SPP);
+        return (string) config("services.banks.{$bankKey}.prefixes.spp", $bankKey === 'bsi' ? self::PREFIX_BSI_SPP : self::PREFIX_SPP);
     }
 
     /**
      * Generates a full 16-digit Virtual Account number.
      * [Prefix 6-digit] + [Tahun Ajaran 4-digit] + [Nomor Siswa 6-digit] = 16 digits.
      */
-    public static function generateVaNumber(Student $student, Bill|FeeType|string $billOrType): string
+    public static function generateVaNumber(Student $student, Bill|FeeType|string $billOrType, string $bank = 'muamalat'): string
     {
         $feeTypeCode = 'spp';
         $academicYear = null;
@@ -82,7 +94,7 @@ class BillingApiClient
             $feeTypeCode = $billOrType;
         }
 
-        $prefix = self::resolvePrefix($feeTypeCode, $student->schoolUnit);
+        $prefix = self::resolvePrefix($feeTypeCode, $student->schoolUnit, $bank);
         $academicYearCode = self::formatAcademicYearCode($academicYear ?: $student->entryYear?->year);
         $studentSeq = self::formatStudentCode($student);
 
@@ -90,7 +102,7 @@ class BillingApiClient
     }
 
     /**
-     * Extracts 4-digit code from academic year (e.g. '2026/2027' -> '2627', '2027/2028' -> '2728').
+     * Extracts 4-digit code from academic year (e.g. '2027/2028' -> '2728', '2026/2027' -> '2627').
      */
     public static function formatAcademicYearCode(?string $academicYear): string
     {
@@ -114,17 +126,6 @@ class BillingApiClient
     /**
      * Formats the student's identifier into a 6-digit numerical string for
      * the VA number.
-     *
-     * Deliberately the database id, not NIS or no_pendaftaran, even though
-     * NIS is unique on its own. Both used to be parsed here - the trailing
-     * six digits of NIS, or digits pulled out of a PMB registration number -
-     * and either could collide: two different (genuinely unique) NIS values
-     * sharing the same last six digits, or two different registration
-     * numbers whose extracted digits happen to match. A collision here isn't
-     * cosmetic - see BillingApiGateway - it means two different families'
-     * transfers become indistinguishable by VA number. id is the one source
-     * this table guarantees is unique and sequential; six digits holds every
-     * student any single foundation will create for centuries.
      */
     public static function formatStudentCode(Student $student): string
     {

@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
- * Bank Muamalat (BMI) Virtual Account Payment Gateway Integration via e-SPP webservice.
+ * Multi-Bank Virtual Account Payment Gateway Integration (Bank Muamalat & BSI) via e-SPP webservice.
  */
 class BillingApiGateway implements PaymentGateway
 {
@@ -31,7 +31,20 @@ class BillingApiGateway implements PaymentGateway
         }
 
         $feeTypeCode = $primaryBill->feeType?->code ?? 'spp';
-        $vaNumber = BillingApiClient::generateVaNumber($student, $primaryBill);
+        $selectedBank = strtolower((string) ($payment->metadata['bank_channel'] ?? 'muamalat'));
+        if (! in_array($selectedBank, ['muamalat', 'bsi'], true)) {
+            $selectedBank = 'muamalat';
+        }
+
+        $vaMuamalat = BillingApiClient::generateVaNumber($student, $primaryBill, 'muamalat');
+        $vaBsi = BillingApiClient::generateVaNumber($student, $primaryBill, 'bsi');
+        $primaryVa = $selectedBank === 'bsi' ? $vaBsi : $vaMuamalat;
+
+        $bankConfig = config("services.banks.{$selectedBank}") ?? [
+            'name' => $selectedBank === 'bsi' ? 'Bank Syariah Indonesia (BSI)' : 'Bank Muamalat',
+            'code' => $selectedBank === 'bsi' ? '451' : '147',
+        ];
+
         $dueDays = (int) config('services.billing_api.va_due_days', 3);
         $dueDate = now()->addDays($dueDays);
 
@@ -75,18 +88,23 @@ class BillingApiGateway implements PaymentGateway
                     'sekolah' => $student->schoolUnit?->label ?? '',
                     'kelas' => $student->currentEnrollment()?->classroom?->name ?? '',
                 ],
-                ['va_number' => $vaNumber, 'ref_number' => $payment->payment_number],
-                ['nomor_pembayaran' => $payment->payment_number, 'id_tagihan' => $payment->payment_number]
+                ['va_number' => $vaMuamalat, 'ref_number' => $payment->payment_number],
+                ['nomor_pembayaran' => $vaBsi, 'id_tagihan' => $vaBsi]
             );
 
             $rawUuid = $response['uuid'] ?? ($response['data']['uuid'] ?? null);
             $billingUuid = is_array($rawUuid) ? ($rawUuid['string'] ?? null) : $rawUuid;
 
             $gatewayResponse = [
-                'provider' => 'bank_muamalat',
-                'va_number' => $vaNumber,
-                'bank_name' => (string) config('services.billing_api.bank_name', 'Bank Muamalat'),
-                'bank_code' => '147',
+                'provider' => 'bank_' . $selectedBank,
+                'bank_key' => $selectedBank,
+                'va_number' => $primaryVa,
+                'bank_name' => (string) ($bankConfig['name'] ?? ($selectedBank === 'bsi' ? 'Bank Syariah Indonesia (BSI)' : 'Bank Muamalat')),
+                'bank_code' => (string) ($bankConfig['code'] ?? ($selectedBank === 'bsi' ? '451' : '147')),
+                'all_va' => [
+                    'muamalat' => $vaMuamalat,
+                    'bsi' => $vaBsi,
+                ],
                 'amount' => (float) $payment->amount,
                 'due_date' => $dueDate->toDateString(),
                 'billing_uuid' => $billingUuid,
@@ -99,8 +117,8 @@ class BillingApiGateway implements PaymentGateway
 
             $payment->forceFill([
                 'status' => 'processing',
-                'external_transaction_id' => $billingUuid ?: $vaNumber,
-                'invoice_id' => $billingUuid ?: $vaNumber,
+                'external_transaction_id' => $billingUuid ?: $primaryVa,
+                'invoice_id' => $billingUuid ?: $primaryVa,
                 'invoice_url' => null,
                 'expires_at' => $dueDate,
                 'gateway_response' => $gatewayResponse,
@@ -110,7 +128,7 @@ class BillingApiGateway implements PaymentGateway
         } catch (BillingApiException $e) {
             Log::error('[BillingApiGateway] Create billing failed', [
                 'payment' => $payment->payment_number,
-                'va_number' => $vaNumber,
+                'va_number' => $primaryVa,
                 'error' => $e->getMessage(),
                 'status' => $e->statusCode(),
             ]);
@@ -118,10 +136,15 @@ class BillingApiGateway implements PaymentGateway
             // If API key/connection not provisioned yet in local development, provide fallback VA info
             if (! app()->isProduction()) {
                 $gatewayResponse = [
-                    'provider' => 'bank_muamalat',
-                    'va_number' => $vaNumber,
-                    'bank_name' => (string) config('services.billing_api.bank_name', 'Bank Muamalat'),
-                    'bank_code' => '147',
+                    'provider' => 'bank_' . $selectedBank,
+                    'bank_key' => $selectedBank,
+                    'va_number' => $primaryVa,
+                    'bank_name' => (string) ($bankConfig['name'] ?? ($selectedBank === 'bsi' ? 'Bank Syariah Indonesia (BSI)' : 'Bank Muamalat')),
+                    'bank_code' => (string) ($bankConfig['code'] ?? ($selectedBank === 'bsi' ? '451' : '147')),
+                    'all_va' => [
+                        'muamalat' => $vaMuamalat,
+                        'bsi' => $vaBsi,
+                    ],
                     'amount' => (float) $payment->amount,
                     'due_date' => $dueDate->toDateString(),
                     'billing_uuid' => 'sim_'.uniqid(),
@@ -134,8 +157,8 @@ class BillingApiGateway implements PaymentGateway
 
                 $payment->forceFill([
                     'status' => 'processing',
-                    'external_transaction_id' => $vaNumber,
-                    'invoice_id' => $vaNumber,
+                    'external_transaction_id' => $primaryVa,
+                    'invoice_id' => $primaryVa,
                     'invoice_url' => null,
                     'expires_at' => $dueDate,
                     'gateway_response' => $gatewayResponse,

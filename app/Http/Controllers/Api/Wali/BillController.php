@@ -18,10 +18,6 @@ class BillController extends Controller
 {
     /**
      * Every child's bills in one list.
-     *
-     * Deliberately not filtered by the selected child: a parent wants to see
-     * what the family owes and clear it in one go, and splitting the list per
-     * child forces three checkouts and three bank fees.
      */
     public function index(Request $request): JsonResponse
     {
@@ -62,9 +58,7 @@ class BillController extends Controller
     }
 
     /**
-     * PDF for this bill - an invoice while owed, a receipt once settled. Same
-     * ownership check as everywhere else: visibleTo() before firstOrFail(), so
-     * this can never be used to fetch another family's document.
+     * PDF for this bill.
      */
     public function pdf(Request $request, string $ulid, BillPdfService $pdf): Response
     {
@@ -78,9 +72,6 @@ class BillController extends Controller
 
     /**
      * One invoice for however many bills were ticked.
-     *
-     * The list of ulids is re-checked against what this guardian may pay before
-     * anything is created - see CheckoutService::collectPayable().
      */
     public function checkout(Request $request, CheckoutService $checkout): JsonResponse
     {
@@ -88,6 +79,7 @@ class BillController extends Controller
             'bill_ulids' => 'required|array|min:1|max:50',
             'bill_ulids.*' => 'required|string',
             'method' => 'required|in:virtual_account,e_wallet,qris,bank_transfer,credit_card',
+            'bank' => 'nullable|in:muamalat,bsi',
             'custom_amounts' => 'nullable|array',
             'custom_amounts.*' => 'numeric|min:1',
         ]);
@@ -98,6 +90,7 @@ class BillController extends Controller
                 $validated['bill_ulids'],
                 $validated['method'],
                 $validated['custom_amounts'] ?? [],
+                $validated['bank'] ?? 'muamalat',
             );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -121,14 +114,7 @@ class BillController extends Controller
     }
 
     /**
-     * Settle payment for testing and simulation purposes.
-     */
-    /**
-     * Dev-only: settles a payment without any money having moved, so
-     * checkout can be exercised end to end without a live gateway callback.
-     * The route is only ever registered outside production, but a route file
-     * is not something this must trust alone - refusing here too means the
-     * only way to fake a payment is running the app in local/testing.
+     * Dev-only: settles a payment without any money having moved.
      */
     public function simulateSettle(Request $request, string $ulid, \App\Services\Billing\PaymentAllocator $allocator): JsonResponse
     {

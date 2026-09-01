@@ -9,72 +9,84 @@ use App\Models\PaymentAllocation;
 use App\Models\User;
 use App\Services\Payment\BillingApiGateway;
 use App\Services\Payment\PaymentGateway;
+use App\Services\Payment\SendagoPayGateway;
+use App\Services\Payment\XenditGateway;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
- * Turns a basket of bills into one payment.
- *
- * The whole point is that a parent settles three months of SPP for two children
- * in a single transaction: one invoice, one bank admin fee, one thing to
- * remember. The bills stay separate in the ledger through payment_allocations,
- * so each one still knows exactly what it received.
+ * Turns a guardian's checked bills into one payable invoice.
  */
 class CheckoutService
 {
     public function __construct(
-        private PaymentAllocator $allocator,
         private PaymentGateway $gateway,
+        private PaymentAllocator $allocator,
     ) {}
 
     /**
-     * @param  list<string>  $billUlids
-     * @param  array<string, float>  $customAmounts
+     * Creates a pending Payment row and its bill allocations, then hands off
+     * to the active payment gateway (e-SPP Virtual Account, SendagoPay, or Xendit).
+     *
+     * @param  array<int, string>  $billUlids
+     * @param  array<string, float|int|numeric-string>  $customAmounts  Bill ULID => custom partial amount
      */
-    public function start(User $user, array $billUlids, string $method, array $customAmounts = []): Payment
-    {
-        $bills = $this->collectPayable($user, $billUlids);
+    public function start(
+        User $user,
+        array $billUlids,
+        string $method,
+        array $customAmounts = [],
+        string $bank = 'muamalat',
+    ): Payment {
         $guardian = $user->guardian;
 
         if (! $guardian) {
-            throw new RuntimeException('Akun ini tidak terhubung ke data wali murid.');
+            throw new RuntimeException('Akun ini tidak terdaftar sebagai wali murid.');
         }
 
+        $bills = $this->collectPayable($user, $billUlids);
+
+        if ($bills->isEmpty()) {
+            throw new RuntimeException('Tidak ada tagihan yang dapat dibayar.');
+        }
+
+        // VAs in this school are per-(student, fee type, academic year).
+        // Mixing across either in one checkout produces a single VA that
+        // quiet-covers bills it cannot represent.
         $this->assertSingleVaGroupInBasket($bills);
 
+        $selectedBank = in_array(strtolower($bank), ['muamalat', 'bsi'], true) ? strtolower($bank) : 'muamalat';
+
+        // Compute per-bill charge amount (either custom amount or remaining balance)
         $allocations = [];
+        $amount = 0.0;
+
         foreach ($bills as $bill) {
-            $max = (float) $bill->remaining_amount;
+            $remaining = (float) $bill->remaining_amount;
+            $charge = $remaining;
+
             if (isset($customAmounts[$bill->ulid])) {
-                if (! $bill->allow_installment) {
-                    throw new RuntimeException("Tagihan {$bill->description} tidak mengizinkan pembayaran cicilan/kustom. Pembayaran harus dilakukan lunas.");
-                }
                 $custom = round((float) $customAmounts[$bill->ulid], 2);
-                if ($custom <= 0 || $custom > $max) {
-                    throw new RuntimeException("Jumlah pembayaran untuk {$bill->description} tidak valid (Maksimal Rp ".number_format($max, 0, ',', '.').').');
+                if ($custom <= 0) {
+                    throw new RuntimeException("Nominal kustom untuk tagihan '{$bill->description}' harus lebih dari 0.");
                 }
-                $allocations[$bill->id] = $custom;
-            } else {
-                $allocations[$bill->id] = $max;
+                if ($custom > $remaining) {
+                    throw new RuntimeException(
+                        "Nominal kustom untuk tagihan '{$bill->description}' (Rp ".number_format($custom, 0, ',', '.').") melebihi sisa tagihan (Rp ".number_format($remaining, 0, ',', '.').').'
+                    );
+                }
+                $charge = $custom;
             }
+
+            $allocations[$bill->id] = $charge;
+            $amount += $charge;
         }
 
-        $amount = round(array_sum($allocations), 2);
+        $amount = round($amount, 2);
 
-        if ($amount <= 0) {
-            throw new RuntimeException('Tidak ada tagihan yang perlu dibayar.');
-        }
-
-        $payment = DB::transaction(function () use ($guardian, $amount, $method, $bills, $allocations) {
-            // A bill may have at most one live invoice. Without this, a
-            // double-click or two open tabs each mint their own pending
-            // payment for the same bill, and if a parent somehow settles both
-            // - two Xendit invoices, two transfers - the bill ends up marked
-            // paid for more than it was ever owed, with nothing to flag it.
-            // Superseding is safe: a pending payment has reserved nothing (see
-            // PaymentAllocator's class docblock), so voiding the old one loses
-            // no money that actually moved.
+        $payment = DB::transaction(function () use ($guardian, $bills, $amount, $method, $allocations, $selectedBank) {
             $this->supersedePendingPaymentsFor($bills);
             $this->supersedeOtherVaPaymentsForSameGroup($bills);
 
@@ -84,12 +96,12 @@ class CheckoutService
                 'amount' => $amount,
                 'method' => $method,
                 'status' => 'pending',
-                'metadata' => ['bill_ulids' => $bills->pluck('ulid')->all()],
+                'metadata' => [
+                    'bill_ulids' => $bills->pluck('ulid')->all(),
+                    'bank_channel' => $selectedBank,
+                ],
             ]);
 
-            // Allocated up front, while still 'pending'. PaymentAllocator only
-            // counts allocations of completed payments, so this reserves nothing
-            // and no bill looks paid until the money actually lands.
             $this->allocator->allocate(
                 $payment,
                 $allocations,
@@ -98,17 +110,12 @@ class CheckoutService
             return $payment;
         });
 
-        // Outside the transaction: the gateway is a network call, and holding a
-        // database transaction open across one is how deadlocks are made.
+        // Outside the transaction: the gateway is a network call
         return $this->gateway->createInvoice($payment, $bills, $guardian);
     }
 
     /**
      * The bills a guardian may actually pay, in one pass.
-     *
-     * Ownership is re-checked here rather than trusted from the request. The
-     * list arrives from the browser, and "pay these ulids" without this check
-     * would let anyone settle - or inspect - another family's bills.
      *
      * @return Collection<int, Bill>
      */
@@ -130,19 +137,7 @@ class CheckoutService
     }
 
     /**
-     * A Bank Muamalat VA number is generated once per (student, fee type,
-     * academic year) - not once per checkout or per bill - because that is
-     * how this school's real VA system works: a family transfers into the
-     * same number every month for that child's SPP. See
-     * BillingApiClient::generateVaNumber(), which only ever looks at the
-     * *first* bill in the basket to decide both the student and the fee
-     * type. Nothing else about checkout knows this - the wali basket
-     * happily mixes bills across children, and across fee types for one
-     * child (SPP due alongside uang pangkal, say), on purpose, to settle
-     * several months or several kinds of fee in one transaction and one
-     * bank charge. Either kind of mixing here would register the combined
-     * amount under only the first bill's VA while quietly covering a bill
-     * that VA number doesn't actually represent.
+     * A VA number is generated once per (student, fee type, academic year).
      *
      * @param  Collection<int, Bill>  $bills
      */
@@ -154,31 +149,19 @@ class CheckoutService
 
         if ($bills->pluck('student_id')->unique()->count() > 1) {
             throw new RuntimeException(
-                'Virtual Account Bank Muamalat bersifat khusus per anak. Mohon bayar tagihan tiap anak dalam transaksi terpisah.'
+                'Virtual Account bersifat khusus per anak. Mohon bayar tagihan tiap anak dalam transaksi terpisah.'
             );
         }
 
         if ($bills->pluck('fee_type_id')->unique()->count() > 1) {
             throw new RuntimeException(
-                'Virtual Account Bank Muamalat bersifat khusus per jenis biaya (mis. SPP). Mohon bayar tiap jenis biaya dalam transaksi terpisah.'
+                'Virtual Account bersifat khusus per jenis biaya (mis. SPP). Mohon bayar tiap jenis biaya dalam transaksi terpisah.'
             );
         }
     }
 
     /**
-     * Beyond one basket: nothing stops a family from checking out July's SPP
-     * today, leaving it unpaid, and checking out August plus September
-     * together next week - two entirely separate Payment rows, each
-     * registered against the identical VA number (it depends only on
-     * student, fee type, and academic year - never the specific bill or
-     * checkout). Without this, both stay live, and this gateway has no
-     * per-payment invoice to tell a bank transfer apart by - only the VA
-     * number, which both share - so which one a real transfer actually
-     * settles becomes a guess. Superseding the older one is safe for the
-     * same reason supersedePendingPaymentsFor() is: a pending payment has
-     * reserved nothing, so voiding it loses no money that moved - the bill
-     * it was covering simply goes back to open, for the next checkout (this
-     * one, or another) to pick up.
+     * Supersedes older pending VA payments for the same student & fee type group.
      *
      * @param  Collection<int, Bill>  $bills
      */
@@ -205,7 +188,10 @@ class CheckoutService
 
         Payment::whereIn('id', $paymentIds)
             ->whereIn('status', ['pending', 'processing'])
-            ->where('gateway_response->provider', 'bank_muamalat')
+            ->where(function ($q) {
+                $q->whereIn('gateway_response->provider', ['bank_muamalat', 'bank_bsi'])
+                    ->orWhereNotNull('gateway_response->va_number');
+            })
             ->get()
             ->each(fn (Payment $stale) => $this->allocator->fail(
                 $stale,
@@ -237,9 +223,7 @@ class CheckoutService
     }
 
     /**
-     * A payment recorded by staff: cash at the front desk, or a verified
-     * transfer. Settles immediately - the money is already in hand, there is no
-     * gateway to wait for.
+     * A payment recorded by staff: cash at the front desk, or a verified transfer.
      */
     public function recordManual(
         Bill $bill,

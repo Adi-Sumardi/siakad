@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   AlertCircle,
+  Building2,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -50,6 +51,7 @@ export default function BillsPage() {
   const [summary, setSummary] = useState<BillSummary | null>(null);
   const [pendingSelections, setPendingSelections] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectedBank, setSelectedBank] = useState<"muamalat" | "bsi">("muamalat");
   const [paying, setPaying] = useState(false);
 
   // Custom Payment Modal State
@@ -99,12 +101,6 @@ export default function BillsPage() {
 
   const childrenInCart = new Set(selectedBills.map((b) => b.student?.ulid)).size;
 
-  // The active gateway (Bank Muamalat VA, via e-SPP) mints one VA number per
-  // child, stable across every bill they have - not one per checkout. A
-  // basket spanning two children would register the combined amount under
-  // only the first child's VA while quietly covering the other child's bill
-  // too, so checkout itself refuses it. Guarding the selection here means a
-  // family finds that out before building a cart, not after clicking pay.
   function toggle(ulid: string) {
     const bill = openBills.find((b) => b.ulid === ulid);
     const alreadySelected = selected.has(ulid);
@@ -149,6 +145,7 @@ export default function BillsPage() {
       const { payment } = await api.post<{ payment: Payment }>("/api/wali/checkout", {
         bill_ulids: [...selected],
         method: "virtual_account",
+        bank: selectedBank,
       });
 
       toast.success("Invoice pembayaran berhasil diterbitkan.");
@@ -184,6 +181,7 @@ export default function BillsPage() {
       const { payment } = await api.post<{ payment: Payment }>("/api/wali/checkout", {
         bill_ulids: [customBill.ulid],
         method: "virtual_account",
+        bank: selectedBank,
         custom_amounts: {
           [customBill.ulid]: amount,
         },
@@ -219,8 +217,8 @@ export default function BillsPage() {
 
   return (
     <WaliShell>
-      <div className="space-y-8 pb-28">
-        {/* Header Section */}
+      <div className="space-y-6 pb-28">
+        {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground">
@@ -401,23 +399,52 @@ export default function BillsPage() {
         {/* FLOATING MULTI-PAYMENT BASKET BAR */}
         {selected.size > 0 && (
           <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-md shadow-2xl">
-            <div className="mx-auto flex max-w-7xl 2xl:max-w-full flex-wrap items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 py-3.5">
-              <div>
+            <div className="mx-auto flex max-w-7xl 2xl:max-w-full flex-col lg:flex-row items-start lg:items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 py-3.5">
+              <div className="space-y-1">
                 <p className="tabular font-black text-foreground text-base">
                   {selected.size} Tagihan Dipilih · <span className="text-primary text-lg">{rupiah(selectedTotal)}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Diproses dalam 1x Virtual Account Bank Muamalat (BMI) untuk {selectedBills[0]?.student?.nama_panggilan ?? selectedBills[0]?.student?.nama_lengkap ?? "ananda"}
+                  Diproses untuk {selectedBills[0]?.student?.nama_panggilan ?? selectedBills[0]?.student?.nama_lengkap ?? "ananda"}
                 </p>
               </div>
 
-              <div className="flex items-center gap-2.5">
-                <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())} disabled={paying}>
+              {/* Selector Bank Virtual Account */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-muted-foreground hidden sm:inline">Pilih Bank:</span>
+                <div className="flex items-center gap-1.5 bg-muted/60 p-1 rounded-xl border">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBank("muamalat")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                      selectedBank === "muamalat"
+                        ? "bg-card text-foreground shadow-xs ring-1 ring-border font-bold"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Muamalat (147)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBank("bsi")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                      selectedBank === "bsi"
+                        ? "bg-card text-foreground shadow-xs ring-1 ring-border font-bold"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    BSI (451)
+                  </button>
+                </div>
+
+                <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())} disabled={paying} className="cursor-pointer">
                   Batal
                 </Button>
-                <Button onClick={checkoutMulti} disabled={paying} size="lg" className="gap-2 font-bold shadow-md">
+                <Button onClick={checkoutMulti} disabled={paying} size="default" className="gap-2 font-bold shadow-md cursor-pointer">
                   <Wallet className="size-4" />
-                  <span>{paying ? "Membuat Tagihan..." : "Bayar Sekarang Sekaligus"}</span>
+                  <span>{paying ? "Memproses..." : "Bayar Sekarang"}</span>
                 </Button>
               </div>
             </div>
@@ -459,11 +486,44 @@ export default function BillsPage() {
                   </p>
                 </div>
 
+                {/* Bank selection in Custom Modal */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Pilih Bank Virtual Account</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBank("muamalat")}
+                      className={cn(
+                        "flex flex-col items-start p-2.5 rounded-xl border text-left transition-all cursor-pointer",
+                        selectedBank === "muamalat"
+                          ? "border-primary bg-primary/10 ring-1 ring-primary font-bold text-foreground"
+                          : "border-border bg-muted/30 text-muted-foreground"
+                      )}
+                    >
+                      <span className="text-xs font-bold">Bank Muamalat</span>
+                      <span className="text-[10px] text-muted-foreground">Kode Bank: 147</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBank("bsi")}
+                      className={cn(
+                        "flex flex-col items-start p-2.5 rounded-xl border text-left transition-all cursor-pointer",
+                        selectedBank === "bsi"
+                          ? "border-primary bg-primary/10 ring-1 ring-primary font-bold text-foreground"
+                          : "border-border bg-muted/30 text-muted-foreground"
+                      )}
+                    >
+                      <span className="text-xs font-bold">Bank BSI</span>
+                      <span className="text-[10px] text-muted-foreground">Kode Bank: 451</span>
+                    </button>
+                  </div>
+                </div>
+
                 <div className="flex justify-end gap-2.5 pt-2">
-                  <Button type="button" variant="outline" onClick={() => setCustomBill(null)}>
+                  <Button type="button" variant="outline" onClick={() => setCustomBill(null)} className="cursor-pointer">
                     Batal
                   </Button>
-                  <Button type="submit" disabled={submittingCustom} className="gap-2 font-bold">
+                  <Button type="submit" disabled={submittingCustom} className="gap-2 font-bold cursor-pointer">
                     <Wallet className="size-4" />
                     <span>{submittingCustom ? "Memproses..." : "Lanjutkan Pembayaran"}</span>
                   </Button>
