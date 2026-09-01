@@ -38,6 +38,7 @@ class FeeSettingController extends Controller
                     'recurrence' => $type->recurrence,
                     'allow_installment' => $type->allow_installment,
                     'requires_selection' => $type->requires_selection,
+                    'requires_roster_membership' => $type->requires_roster_membership,
                     'is_active' => $type->is_active,
                     'rate_count' => $type->rates()->count(),
                 ]),
@@ -52,6 +53,10 @@ class FeeSettingController extends Controller
             'recurrence' => 'required|in:monthly,per_term,once',
             'allow_installment' => 'boolean',
             'requires_selection' => 'boolean',
+            // Mirrors requires_selection - only ekskul uses it today, but any
+            // future fee type tied to a roster (extracurricular_members-style
+            // table) can opt in the same way instead of a new hardcoded check.
+            'requires_roster_membership' => 'boolean',
             'sort_order' => 'integer',
         ]);
 
@@ -71,6 +76,7 @@ class FeeSettingController extends Controller
             // orphan bills that were issued under the old one.
             'allow_installment' => 'boolean',
             'requires_selection' => 'boolean',
+            'requires_roster_membership' => 'boolean',
             'is_active' => 'boolean',
             'sort_order' => 'integer',
         ]);

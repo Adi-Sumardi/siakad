@@ -34,6 +34,7 @@ type FeeType = {
   recurrence: string;
   allow_installment: boolean;
   requires_selection: boolean;
+  requires_roster_membership: boolean;
   is_active: boolean;
   rate_count: number;
 };
@@ -109,6 +110,7 @@ export default function FeeRatesPage() {
     recurrence: "monthly" as "monthly" | "per_term" | "once",
     allow_installment: false,
     requires_selection: false,
+    requires_roster_membership: false,
   });
 
   const emptyComponent = (): Component => ({
@@ -209,11 +211,15 @@ export default function FeeRatesPage() {
         recurrence: typeForm.recurrence,
         allow_installment: typeForm.allow_installment,
         requires_selection: typeForm.requires_selection,
+        requires_roster_membership: typeForm.requires_roster_membership,
       });
 
       toast.success("Jenis biaya baru berhasil ditambahkan.");
       setShowTypeModal(false);
-      setTypeForm({ code: "", name: "", recurrence: "monthly", allow_installment: false, requires_selection: false });
+      setTypeForm({
+        code: "", name: "", recurrence: "monthly",
+        allow_installment: false, requires_selection: false, requires_roster_membership: false,
+      });
       loadData();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menambahkan jenis biaya.");
@@ -542,6 +548,9 @@ export default function FeeRatesPage() {
                       {t.rate_count} tarif unit
                       {t.requires_selection && (
                         <Badge variant="warn" className="ml-2">Butuh pemilihan ukuran</Badge>
+                      )}
+                      {t.requires_roster_membership && (
+                        <Badge variant="warn" className="ml-2">Butuh terdaftar ekskul</Badge>
                       )}
                     </td>
                     <td className="px-5 py-4">
@@ -940,6 +949,25 @@ export default function FeeRatesPage() {
                 <p className="rounded-lg bg-muted/40 p-2.5 text-[11px] text-muted-foreground">
                   Tagihan untuk jenis biaya ini tidak akan terbit sampai orang tua memilih ukuran/item lewat
                   portal wali. Tambahkan komponennya saat membuat tarif.
+                </p>
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="type_requires_roster_membership"
+                  checked={typeForm.requires_roster_membership}
+                  onChange={(e) => setTypeForm({ ...typeForm, requires_roster_membership: e.target.checked })}
+                  className="rounded border-input text-primary size-4"
+                />
+                <Label htmlFor="type_requires_roster_membership" className="text-xs font-semibold cursor-pointer">
+                  Butuh Terdaftar di Ekstrakurikuler
+                </Label>
+              </div>
+              {typeForm.requires_roster_membership && (
+                <p className="rounded-lg bg-muted/40 p-2.5 text-[11px] text-muted-foreground">
+                  Tagihan untuk jenis biaya ini hanya terbit untuk siswa yang terdaftar aktif di minimal satu
+                  ekstrakurikuler. Kelola rosternya di menu Ekstrakurikuler.
                 </p>
               )}
 
