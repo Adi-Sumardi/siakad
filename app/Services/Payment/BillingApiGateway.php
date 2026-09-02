@@ -85,8 +85,8 @@ class BillingApiGateway implements PaymentGateway
             $response = $this->client->createBilling(
                 [
                     'customer_name' => $customerName,
-                    'va_desc' => $description,
-                    'va_desc1' => $student->schoolUnit?->label ?? '',
+                    'va_desc' => BillingApiClient::sanitizeDescription($description),
+                    'va_desc1' => BillingApiClient::sanitizeDescription($student->schoolUnit?->label ?? '', 255),
                     'jumlah_tagihan' => (int) $payment->amount,
                     'date_start' => now()->toDateString(),
                     'date_end' => $dueDate->toDateString(),

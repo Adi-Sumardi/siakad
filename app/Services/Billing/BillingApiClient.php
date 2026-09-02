@@ -159,6 +159,36 @@ class BillingApiClient
         return $clean ?: 'Siswa YAPI';
     }
 
+    /**
+     * Sanitizes a bill description (va_desc/va_desc1) before it leaves us.
+     *
+     * e-SPP's own backend 500'd on this in PMB's production traffic
+     * (2026-09-02): "iconv(): Detected an incomplete multibyte character in
+     * input string". Their server, not ours - but va_desc is built from
+     * decrypted student names and unit labels we do not otherwise
+     * constrain, and unlike customer_name (sanitizeCustomerName() above)
+     * nothing was scrubbing it before submission. iconv()'s //IGNORE here
+     * drops whatever byte sequence would have tripped theirs, so a
+     * malformed name can no longer take a real payment attempt down.
+     */
+    public static function sanitizeDescription(?string $text, int $maxLength = 255): string
+    {
+        if (! $text) {
+            return '-';
+        }
+
+        $clean = @iconv('UTF-8', 'UTF-8//IGNORE', $text);
+        $clean = $clean !== false ? $clean : preg_replace('/[^\x20-\x7E]/', '', $text);
+        $clean = preg_replace('/[^\p{L}\p{N}\s\.\,\-\/\(\):]/u', ' ', $clean ?? '');
+        $clean = preg_replace('/\s+/', ' ', trim($clean ?? ''));
+
+        if (mb_strlen($clean) > $maxLength) {
+            $clean = mb_substr($clean, 0, $maxLength);
+        }
+
+        return $clean ?: '-';
+    }
+
     public function getAccessToken(): string
     {
         $cached = Cache::get(self::TOKEN_CACHE_KEY);
