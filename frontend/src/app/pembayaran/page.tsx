@@ -377,13 +377,13 @@ function PaymentsContent() {
                     {isBsi ? (
                       <div className="space-y-1.5 text-[11px] text-muted-foreground leading-relaxed pl-5 list-decimal">
                         <div>
-                          <strong>1. BSI Mobile (Virtual Account):</strong> Menu <em>Bayar</em> &rarr; <em>Virtual Account</em> &rarr; Masukkan No. VA <strong>{activeVaNumber}</strong> &rarr; Konfirmasi PIN.
+                          <strong>1. Byond by BSI:</strong> Menu <em>Bayar/Beli</em> &rarr; <em>Akademik</em> &rarr; Kode Biller <strong>3656</strong> (YAPI) &rarr; Masukkan Nomor Bayar <strong>{activeVaNumber?.slice(4)}</strong> &rarr; Konfirmasi PIN.
                         </div>
                         <div>
-                          <strong>2. ATM BSI:</strong> Pilih <em>Pembayaran / Pembelian</em> &rarr; <em>Akademik / Virtual Account</em> &rarr; Masukkan No. VA <strong>{activeVaNumber}</strong> &rarr; Konfirmasi.
+                          <strong>2. ATM BSI:</strong> Bayar &amp; Beli &rarr; Akademik/Institusi &rarr; Masukkan kode pembayaran <strong>3656{activeVaNumber?.slice(4)}</strong> &rarr; Konfirmasi.
                         </div>
                         <div>
-                          <strong>3. Transfer Antar Bank (BCA/Mandiri/BRI/Muamalat/dll):</strong> Pilih <em>Transfer Antar Bank</em> &rarr; Pilih <strong>Bank BSI (Kode: 451)</strong> &rarr; Masukkan No. VA sebagai rekening tujuan &rarr; Masukkan nominal ({rupiah(selectedPayment.amount)}) &rarr; Konfirmasi.
+                          <strong>3. Transfer Antar Bank (BCA/Mandiri/BRI/Muamalat/dll):</strong> Pilih <em>Transfer Antar Bank</em> &rarr; Pilih <strong>Bank BSI (Kode: 451)</strong> &rarr; Nomor rekening tujuan: ketik <strong>900</strong> + <strong>3656</strong> + nomor bayar &rarr; <strong>9003656{activeVaNumber?.slice(4)}</strong> &rarr; Masukkan nominal ({rupiah(selectedPayment.amount)}) &rarr; Konfirmasi.
                         </div>
                       </div>
                     ) : (
