@@ -34,7 +34,15 @@ class DashboardChartController extends Controller
                 ?? AcademicYear::latest('starts_on')->first();
         }
 
-        $units = SchoolUnit::active()->ordered()->get();
+        // A unit-scoped admin/guru's bills were already filtered by
+        // visibleTo() below, but the unit LIST itself was not - every other
+        // unit's code/label/jenjang still showed up in the response with
+        // zeroed-out totals. Not a financial leak (the totals were
+        // genuinely empty), but still more of the school's structure than
+        // a single-unit admin should see.
+        $units = SchoolUnit::active()->ordered()
+            ->when($request->user()?->isUnitScoped(), fn ($q) => $q->where('id', $request->user()->school_unit_id))
+            ->get();
 
         $billsQuery = Bill::query()
             ->visibleTo($request->user())
@@ -122,7 +130,9 @@ class DashboardChartController extends Controller
         $endDate = $request->input('end_date');
         $kategori = $request->input('kategori');
 
-        $units = SchoolUnit::active()->ordered()->get();
+        $units = SchoolUnit::active()->ordered()
+            ->when($request->user()?->isUnitScoped(), fn ($q) => $q->where('id', $request->user()->school_unit_id))
+            ->get();
 
         $query = Achievement::query()
             ->visibleTo($request->user())
