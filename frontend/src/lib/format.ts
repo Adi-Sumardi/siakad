@@ -36,3 +36,16 @@ export function tanggalWaktu(iso: string | null): string {
     minute: "2-digit",
   });
 }
+
+/**
+ * Today's date in Jakarta, as YYYY-MM-DD - for a <input type="date">'s
+ * default value or max. `new Date().toISOString().slice(0, 10)` (the usual
+ * shortcut) converts to UTC first: for the seven hours every morning
+ * (00:00-07:00 WIB) that fall on UTC's previous day, it silently returns
+ * yesterday - capping the max at yesterday makes today unselectable, and
+ * defaulting to yesterday pre-fills the wrong date, right when a teacher is
+ * recording something that happened this morning.
+ */
+export function todayJakarta(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+}

@@ -102,7 +102,12 @@ class PointController extends Controller
             'student_ulids' => 'required|array|min:1|max:200',
             'student_ulids.*' => 'required|string',
             'point_rule_ulid' => 'required|string',
-            'occurred_on' => 'required|date|before_or_equal:today',
+            // Laravel's bare 'today' keyword resolves against
+            // config('app.timezone'), which is UTC (see ClassroomController's
+            // note on the same root cause) - an explicit Jakarta date avoids
+            // rejecting a same-day entry as "in the future" during the seven
+            // hours every morning UTC's calendar date still lags Jakarta's.
+            'occurred_on' => ['required', 'date', 'before_or_equal:'.Carbon::today('Asia/Jakarta')->toDateString()],
             'description' => 'required|string|max:1000',
         ]);
 
@@ -158,7 +163,12 @@ class PointController extends Controller
         return $request->validate([
             'student_ulid' => 'required|string',
             'point_rule_ulid' => 'required|string',
-            'occurred_on' => 'required|date|before_or_equal:today',
+            // Laravel's bare 'today' keyword resolves against
+            // config('app.timezone'), which is UTC (see ClassroomController's
+            // note on the same root cause) - an explicit Jakarta date avoids
+            // rejecting a same-day entry as "in the future" during the seven
+            // hours every morning UTC's calendar date still lags Jakarta's.
+            'occurred_on' => ['required', 'date', 'before_or_equal:'.Carbon::today('Asia/Jakarta')->toDateString()],
             'description' => 'required|string|max:1000',
             'evidence' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
         ]);

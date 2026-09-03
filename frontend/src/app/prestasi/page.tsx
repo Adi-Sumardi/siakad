@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { API_BASE, api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
-import { tanggal } from "@/lib/format";
+import { tanggal, todayJakarta } from "@/lib/format";
 import {
   JUARA_OPTIONS,
   KATEGORI_OPTIONS,
@@ -369,7 +369,7 @@ export default function WaliPrestasiPage() {
                       id="tanggal_event"
                       name="tanggal_event"
                       type="date"
-                      max={new Date().toISOString().slice(0, 10)}
+                      max={todayJakarta()}
                       className="mt-1"
                     />
                   </div>

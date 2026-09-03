@@ -568,6 +568,68 @@ class AttendanceSessionTest extends TestCase
         $this->assertDatabaseMissing('attendance_records', ['student_id' => $outsider->id]);
     }
 
+    /**
+     * config('app.timezone') is UTC, not the Asia/Jakarta .env sets it to
+     * (config/app.php never reads the env var) - a bare Carbon::today() dates
+     * the session to the previous calendar day for the seven hours every
+     * morning (00:00-06:59 WIB) that fall on UTC's previous day, exactly when
+     * a teacher opens roll call for an early first period.
+     */
+    public function test_a_session_opened_early_in_the_jakarta_morning_is_dated_to_the_jakarta_day_not_utc(): void
+    {
+        // 2026-09-07 20:00 UTC = 2026-09-08 03:00 WIB - UTC and Jakarta
+        // disagree on what day it is.
+        Carbon::setTestNow(Carbon::create(2026, 9, 7, 20, 0, 0, 'UTC'));
+
+        try {
+            $classroom = $this->classroomIn($this->sd);
+            $guru = $this->staff('guru', $this->sd);
+            $schedule = ClassSchedule::create([
+                'classroom_id' => $classroom->id, 'subject_id' => $this->subject()->id, 'teacher_id' => $guru->id,
+                'day_of_week' => Carbon::now('Asia/Jakarta')->dayOfWeekIso,
+                'start_time' => '07:00', 'end_time' => '23:59',
+            ]);
+
+            $this->actingAs($guru)->postJson("/api/guru/schedules/{$schedule->ulid}/attendance-sessions")
+                ->assertStatus(200);
+
+            $session = AttendanceSession::first();
+            $this->assertSame('2026-09-08', $session->occurred_on->toDateString());
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_todays_schedule_uses_the_jakarta_day_not_utc_early_in_the_morning(): void
+    {
+        Carbon::setTestNow(Carbon::create(2026, 9, 7, 20, 0, 0, 'UTC'));
+
+        try {
+            $classroom = $this->classroomIn($this->sd);
+            $guru = $this->staff('guru', $this->sd);
+            $schedule = ClassSchedule::create([
+                'classroom_id' => $classroom->id, 'subject_id' => $this->subject()->id, 'teacher_id' => $guru->id,
+                'day_of_week' => Carbon::now('Asia/Jakarta')->dayOfWeekIso, // the real Jakarta "today"
+                'start_time' => '07:00', 'end_time' => '08:30',
+            ]);
+            // A schedule on UTC's stale "today" instead must not show up.
+            ClassSchedule::create([
+                'classroom_id' => $classroom->id, 'subject_id' => $this->subject()->id, 'teacher_id' => $guru->id,
+                'day_of_week' => Carbon::now('UTC')->dayOfWeekIso,
+                'start_time' => '09:00', 'end_time' => '10:00',
+            ]);
+
+            $response = $this->actingAs($guru)
+                ->getJson("/api/guru/classrooms/{$classroom->ulid}/schedules/today")
+                ->assertStatus(200);
+
+            $this->assertCount(1, $response->json('schedules'));
+            $this->assertSame($schedule->ulid, $response->json('schedules.0.ulid'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_check_in_is_rejected_cleanly_when_there_is_no_active_term(): void
     {
         $this->term->update(['is_active' => false]);

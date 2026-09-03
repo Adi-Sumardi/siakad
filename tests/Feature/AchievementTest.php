@@ -117,6 +117,26 @@ class AchievementTest extends TestCase
         $this->assertSame('merit', $record->type);
     }
 
+    public function test_guru_store_with_points_is_refused_rather_than_silently_dropped_when_no_term_is_active(): void
+    {
+        // Same failure mode as Admin\AchievementController::verify(): the
+        // achievement used to save either way, with point_awarded quietly
+        // left null and the response still 201, whenever Term::current()
+        // (an admin-managed is_active flag, routinely null right after a
+        // semester ends) returned nothing.
+        $this->term->update(['is_active' => false]);
+
+        $student = $this->student();
+        $guru = $this->staff('guru');
+
+        $this->actingAs($guru)->postJson('/api/guru/achievements', $this->payload() + [
+            'student_ulid' => $student->ulid, 'points_awarded' => 15,
+        ])->assertStatus(422);
+
+        $this->assertDatabaseCount('achievements', 0);
+        $this->assertDatabaseCount('point_records', 0);
+    }
+
     public function test_a_guardians_submission_starts_pending_with_no_points(): void
     {
         $student = $this->student();

@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
-import { tanggal } from "@/lib/format";
+import { tanggal, todayJakarta } from "@/lib/format";
 import type { PointRecord } from "@/lib/types/kesiswaan";
 
 type StudentRow = { ulid: string; nama_lengkap: string; nis: string | null; point_balance: number | null };
@@ -101,7 +101,7 @@ function SingleRecordForm({
   onCancel: () => void;
 }) {
   const [ruleUlid, setRuleUlid] = useState("");
-  const [occurredOn, setOccurredOn] = useState(new Date().toISOString().slice(0, 10));
+  const [occurredOn, setOccurredOn] = useState(todayJakarta());
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +138,7 @@ function SingleRecordForm({
           value={occurredOn}
           onChange={(e) => setOccurredOn(e.target.value)}
           type="date"
-          max={new Date().toISOString().slice(0, 10)}
+          max={todayJakarta()}
           className="w-36 h-9 text-xs"
         />
       </div>
@@ -246,7 +246,7 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
   const [openLedger, setOpenLedger] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkRule, setBulkRule] = useState("");
-  const [bulkDate, setBulkDate] = useState(new Date().toISOString().slice(0, 10));
+  const [bulkDate, setBulkDate] = useState(todayJakarta());
   const [bulkDescription, setBulkDescription] = useState("");
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
@@ -441,7 +441,7 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
                 value={bulkDate}
                 onChange={(e) => setBulkDate(e.target.value)}
                 type="date"
-                max={new Date().toISOString().slice(0, 10)}
+                max={todayJakarta()}
                 className="w-32 h-9 text-xs"
               />
               <Input

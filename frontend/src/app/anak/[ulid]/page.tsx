@@ -15,7 +15,7 @@ import { PointMeter } from "@/components/point-meter";
 import { AttendanceMeter } from "@/components/attendance-meter";
 import { API_BASE, api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
-import { tanggal } from "@/lib/format";
+import { tanggal, todayJakarta } from "@/lib/format";
 import {
   ATTENDANCE_STATUS_LABEL,
   JUARA_OPTIONS,
@@ -218,7 +218,7 @@ function SubmitAchievementForm({ studentUlid, onSubmitted }: { studentUlid: stri
           </div>
           <div>
             <Label htmlFor="tanggal_event" className="text-xs">Tanggal Pelaksanaan</Label>
-            <Input id="tanggal_event" name="tanggal_event" type="date" max={new Date().toISOString().slice(0, 10)} className="mt-1" />
+            <Input id="tanggal_event" name="tanggal_event" type="date" max={todayJakarta()} className="mt-1" />
           </div>
         </div>
 

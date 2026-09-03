@@ -28,7 +28,12 @@ class AttendanceSessionController extends Controller
             ->where('ulid', $scheduleUlid)
             ->firstOrFail();
 
-        $session = $sessions->open($schedule, Carbon::today(), $request->user());
+        // config('app.timezone') is UTC, not the Asia/Jakarta .env sets it to
+        // (config/app.php never reads the env var) - a bare Carbon::today()
+        // dates the session to the previous calendar day for the seven hours
+        // every morning (00:00-07:00 WIB) that fall on UTC's previous day,
+        // exactly when a teacher opens roll call for an early first period.
+        $session = $sessions->open($schedule, Carbon::today('Asia/Jakarta'), $request->user());
 
         ActivityLog::record($request->user(), 'attendance.session_opened', $session, [
             'classroom' => $schedule->classroom->name, 'subject' => $schedule->subject->name,

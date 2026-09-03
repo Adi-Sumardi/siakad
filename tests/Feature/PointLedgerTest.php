@@ -12,6 +12,7 @@ use App\Models\Term;
 use App\Models\User;
 use App\Services\Points\PointLedger;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 /**
@@ -196,6 +197,34 @@ class PointLedgerTest extends TestCase
         ])->assertStatus(201)->assertJsonPath('record.points', -10);
 
         $this->assertDatabaseCount('point_records', 1);
+    }
+
+    /**
+     * config('app.timezone') is UTC, not the Asia/Jakarta .env sets it to -
+     * Laravel's bare 'today' validation keyword resolves against it, so
+     * before_or_equal:today used to reject a genuinely same-day entry as "in
+     * the future" for the seven hours every morning (00:00-06:59 WIB) that
+     * still fall on UTC's previous calendar day.
+     */
+    public function test_recording_a_point_for_the_jakarta_today_is_accepted_even_when_utc_still_says_yesterday(): void
+    {
+        // 2026-09-07 20:00 UTC = 2026-09-08 03:00 WIB.
+        Carbon::setTestNow(Carbon::create(2026, 9, 7, 20, 0, 0, 'UTC'));
+
+        try {
+            $student = $this->studentIn($this->sd);
+            $rule = $this->rule();
+            $guru = $this->staff('guru', $this->sd);
+
+            $this->actingAs($guru)->postJson('/api/guru/points', [
+                'student_ulid' => $student->ulid,
+                'point_rule_ulid' => $rule->ulid,
+                'occurred_on' => '2026-09-08', // Jakarta's actual today
+                'description' => 'Terlambat 10 menit',
+            ])->assertStatus(201);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_a_guru_cannot_record_points_for_a_student_outside_their_unit(): void

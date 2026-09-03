@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
-import { rupiah } from "@/lib/format";
+import { rupiah, todayJakarta } from "@/lib/format";
 
 type Receivables = {
   summary: { outstanding: number; bills: number; families: number; overdue_bills: number };
@@ -39,16 +39,16 @@ type Collections = {
   by_fee_type: { fee_type: string; total: number }[];
 };
 
+/** The 1st of the current month, in Jakarta - see todayJakarta() for why UTC-based conversion loses a day near midnight WIB. */
 function firstOfMonth(): string {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  return todayJakarta().slice(0, 7) + "-01";
 }
 
 export default function ReportsPage() {
   const [receivables, setReceivables] = useState<Receivables | null>(null);
   const [collections, setCollections] = useState<Collections | null>(null);
   const [from, setFrom] = useState(firstOfMonth());
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [to, setTo] = useState(todayJakarta());
   const [loading, setLoading] = useState(false);
 
   async function loadData() {

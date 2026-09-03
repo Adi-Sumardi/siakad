@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, ApiError } from "@/lib/api";
+import { todayJakarta } from "@/lib/format";
 import { JUARA_OPTIONS, KATEGORI_OPTIONS, TINGKAT_OPTIONS } from "@/lib/types/kesiswaan";
 
 type Classroom = { ulid: string; name: string };
@@ -134,7 +135,7 @@ export default function GuruAchievementPage() {
             </div>
             <div>
               <Label htmlFor="tanggal_event" className="text-xs">Tanggal Pelaksanaan</Label>
-              <Input id="tanggal_event" name="tanggal_event" type="date" max={new Date().toISOString().slice(0, 10)} className="mt-1" />
+              <Input id="tanggal_event" name="tanggal_event" type="date" max={todayJakarta()} className="mt-1" />
             </div>
             <div>
               <Label htmlFor="points_awarded" className="text-xs">Poin Apresiasi Diberikan</Label>

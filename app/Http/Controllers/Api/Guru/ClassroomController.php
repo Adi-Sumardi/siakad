@@ -75,7 +75,12 @@ class ClassroomController extends Controller
     {
         $classroom = Classroom::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
-        $today = Carbon::now()->dayOfWeekIso; // 1 = Senin ... 7 = Minggu
+        // config('app.timezone') is UTC, not the Asia/Jakarta .env sets it to
+        // (config/app.php never reads the env var) - a bare Carbon::now()
+        // reports the wrong day of week for the seven hours every morning
+        // (00:00-07:00 WIB) that fall on the previous UTC day, which is
+        // exactly when a teacher opens this screen to take attendance.
+        $today = Carbon::now('Asia/Jakarta')->dayOfWeekIso; // 1 = Senin ... 7 = Minggu
 
         $schedules = $classroom->classSchedules()
             ->where('day_of_week', $today)
