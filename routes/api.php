@@ -292,6 +292,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::patch('/users/{user}', [\App\Http\Controllers\Api\Admin\UserController::class, 'update']);
     Route::delete('/users/{user}', [\App\Http\Controllers\Api\Admin\UserController::class, 'destroy']);
 
+    Route::patch('/students/{student}', [\App\Http\Controllers\Api\Admin\StudentController::class, 'update']);
+    Route::delete('/students/{student}', [\App\Http\Controllers\Api\Admin\StudentController::class, 'destroy']);
+
     // Academic year management
     Route::post('/academic-years', [ReferenceController::class, 'storeAcademicYear']);
     Route::post('/academic-years/{academicYear}/activate', [ReferenceController::class, 'activateAcademicYear']);

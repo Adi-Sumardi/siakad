@@ -7,6 +7,7 @@ import {
   Calendar,
   ChevronRight,
   Download,
+  Edit2,
   FileSpreadsheet,
   Filter,
   GraduationCap,
@@ -16,6 +17,7 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  Trash2,
   UploadCloud,
   User,
   Users,
@@ -29,6 +31,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/lib/auth/auth-context";
 import { api, ApiError } from "@/lib/api";
 import { rupiah } from "@/lib/format";
 
@@ -75,6 +78,9 @@ type SchoolUnit = { ulid: string; code: string; label: string; jenjang_group: st
 type AcademicYear = { ulid: string; year: string; is_active: boolean };
 
 export default function AdminStudentsPage() {
+  const { user } = useAuth();
+  const isAdministrator = user?.role === "admin";
+
   const [students, setStudents] = useState<StudentItem[] | null>(null);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
@@ -93,6 +99,18 @@ export default function AdminStudentsPage() {
   const [importYearUlid, setImportYearUlid] = useState("");
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ message: string; imported: number; updated: number; errors: string[] } | null>(null);
+
+  // Edit/Delete (administrator only)
+  const [editingStudent, setEditingStudent] = useState<StudentItem | null>(null);
+  const [deletingStudent, setDeletingStudent] = useState<StudentItem | null>(null);
+  const [formNamaLengkap, setFormNamaLengkap] = useState("");
+  const [formNamaPanggilan, setFormNamaPanggilan] = useState("");
+  const [formNis, setFormNis] = useState("");
+  const [formNisn, setFormNisn] = useState("");
+  const [formJenisKelamin, setFormJenisKelamin] = useState<"L" | "P">("L");
+  const [formSchoolUnitUlid, setFormSchoolUnitUlid] = useState("");
+  const [formStatus, setFormStatus] = useState("active");
+  const [submitting, setSubmitting] = useState(false);
 
   function loadStudents() {
     setLoading(true);
@@ -178,6 +196,56 @@ export default function AdminStudentsPage() {
       toast.error(err instanceof ApiError ? err.message : "Gagal mengimpor data siswa.");
     } finally {
       setImporting(false);
+    }
+  }
+
+  function openEdit(s: StudentItem) {
+    setEditingStudent(s);
+    setFormNamaLengkap(s.nama_lengkap);
+    setFormNamaPanggilan(s.nama_panggilan ?? "");
+    setFormNis(s.nis ?? "");
+    setFormNisn(s.nisn ?? "");
+    setFormJenisKelamin(s.jenis_kelamin);
+    setFormSchoolUnitUlid(s.unit?.ulid ?? "");
+    setFormStatus(s.status);
+  }
+
+  async function handleUpdate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingStudent) return;
+    setSubmitting(true);
+    try {
+      await api.patch(`/api/admin/students/${editingStudent.ulid}`, {
+        nama_lengkap: formNamaLengkap,
+        nama_panggilan: formNamaPanggilan || null,
+        nis: formNis || null,
+        nisn: formNisn || null,
+        jenis_kelamin: formJenisKelamin,
+        school_unit_ulid: formSchoolUnitUlid,
+        status: formStatus,
+      });
+      toast.success("Data siswa berhasil diperbarui.");
+      setEditingStudent(null);
+      loadStudents();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal memperbarui data siswa.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deletingStudent) return;
+    setSubmitting(true);
+    try {
+      await api.delete(`/api/admin/students/${deletingStudent.ulid}`);
+      toast.success("Data siswa berhasil dihapus.");
+      setDeletingStudent(null);
+      loadStudents();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal menghapus data siswa.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -376,12 +444,13 @@ export default function AdminStudentsPage() {
                 <th className="px-5 py-3.5 text-right">Tarif Pokok</th>
                 <th className="px-5 py-3.5">Diskon / Beasiswa</th>
                 <th className="px-5 py-3.5 text-right">SPP Net / Bulan</th>
+                {isAdministrator && <th className="px-5 py-3.5 text-right">Aksi</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
               {loading && (
                 <tr>
-                  <td colSpan={7} className="p-5">
+                  <td colSpan={isAdministrator ? 8 : 7} className="p-5">
                     <Skeleton className="h-24 w-full rounded-xl" />
                   </td>
                 </tr>
@@ -389,7 +458,7 @@ export default function AdminStudentsPage() {
 
               {!loading && students?.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                  <td colSpan={isAdministrator ? 8 : 7} className="p-8 text-center text-muted-foreground">
                     Tidak ada data siswa yang ditemukan untuk kriteria filter ini.
                   </td>
                 </tr>
@@ -488,6 +557,30 @@ export default function AdminStudentsPage() {
                           )}
                         </div>
                       </td>
+
+                      {isAdministrator && (
+                        <td className="px-5 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openEdit(s)}
+                              className="h-8 px-2.5 text-xs font-semibold gap-1"
+                            >
+                              <Edit2 className="size-3.5" />
+                              <span>Edit</span>
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setDeletingStudent(s)}
+                              className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -574,6 +667,130 @@ export default function AdminStudentsPage() {
                 </Button>
               </div>
             </form>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL: EDIT SISWA (Administrator saja) */}
+      {editingStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-lg p-6 border-border shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <Edit2 className="size-5 text-primary" />
+                <span>Edit Data Siswa</span>
+              </h2>
+              <button onClick={() => setEditingStudent(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdate} className="space-y-3.5 text-xs">
+              <div>
+                <Label className="text-xs">Nama Lengkap</Label>
+                <Input value={formNamaLengkap} onChange={(e) => setFormNamaLengkap(e.target.value)} required className="mt-1" />
+              </div>
+
+              <div>
+                <Label className="text-xs">Nama Panggilan</Label>
+                <Input value={formNamaPanggilan} onChange={(e) => setFormNamaPanggilan(e.target.value)} className="mt-1" />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">NIS</Label>
+                  <Input value={formNis} onChange={(e) => setFormNis(e.target.value)} className="mt-1" />
+                </div>
+                <div>
+                  <Label className="text-xs">NISN</Label>
+                  <Input value={formNisn} onChange={(e) => setFormNisn(e.target.value)} className="mt-1" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Jenis Kelamin</Label>
+                  <select
+                    value={formJenisKelamin}
+                    onChange={(e) => setFormJenisKelamin(e.target.value as "L" | "P")}
+                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                  >
+                    <option value="L">Laki-laki</option>
+                    <option value="P">Perempuan</option>
+                  </select>
+                </div>
+                <div>
+                  <Label className="text-xs">Status Siswa</Label>
+                  <select
+                    value={formStatus}
+                    onChange={(e) => setFormStatus(e.target.value)}
+                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                  >
+                    <option value="prospective">Calon Siswa</option>
+                    <option value="active">Aktif</option>
+                    <option value="graduated">Lulus</option>
+                    <option value="transferred">Mutasi / Keluar</option>
+                    <option value="dropped_out">Berhenti</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs">Unit Sekolah</Label>
+                <select
+                  value={formSchoolUnitUlid}
+                  onChange={(e) => setFormSchoolUnitUlid(e.target.value)}
+                  required
+                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                >
+                  {units.map((u) => (
+                    <option key={u.ulid} value={u.ulid}>
+                      {u.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="ghost" onClick={() => setEditingStudent(null)} disabled={submitting}>
+                  Batal
+                </Button>
+                <Button type="submit" disabled={submitting} className="font-bold shadow-xs">
+                  {submitting ? "Menyimpan…" : "Simpan Perubahan"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL: KONFIRMASI HAPUS SISWA (Administrator saja) */}
+      {deletingStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <Card className="w-full max-w-md p-6 border-border shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-destructive">
+              <div className="size-10 rounded-full bg-destructive/10 grid place-items-center">
+                <Trash2 className="size-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-foreground">Hapus Data Siswa</h3>
+                <p className="text-xs text-muted-foreground">Riwayat tagihan &amp; nilai tetap tersimpan, hanya siswa yang disembunyikan.</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Apakah Anda yakin ingin menghapus data siswa <strong className="text-foreground">{deletingStudent.nama_lengkap}</strong>
+              {deletingStudent.nis ? ` (NIS: ${deletingStudent.nis})` : ""}?
+            </p>
+
+            <div className="flex justify-end gap-2 border-t border-border pt-4">
+              <Button variant="ghost" size="sm" onClick={() => setDeletingStudent(null)} disabled={submitting}>
+                Batal
+              </Button>
+              <Button variant="destructive" size="sm" onClick={handleDelete} disabled={submitting} className="font-bold">
+                {submitting ? "Menghapus…" : "Ya, Hapus Siswa"}
+              </Button>
+            </div>
           </Card>
         </div>
       )}

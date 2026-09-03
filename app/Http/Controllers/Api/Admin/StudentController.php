@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\AcademicYear;
+use App\Models\ActivityLog;
 use App\Models\FeeRate;
 use App\Models\FeeType;
 use App\Models\SchoolUnit;
@@ -12,6 +13,7 @@ use App\Models\StudentDiscount;
 use App\Services\Export\DapodikExportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class StudentController extends Controller
@@ -195,5 +197,50 @@ class StudentController extends Controller
             'Content-Type' => 'text/csv',
             'Content-Disposition' => "attachment; filename=\"{$filename}\"",
         ]);
+    }
+
+    /**
+     * Central-admin only (route gated, see routes/api.php) - a unit's own
+     * TU/admin_unit can view and export their students but not edit or
+     * remove them, same tier as user management and fee settings.
+     */
+    public function update(Request $request, Student $student): JsonResponse
+    {
+        $validated = $request->validate([
+            'nama_lengkap' => 'sometimes|string|max:255',
+            'nama_panggilan' => 'nullable|string|max:100',
+            'nis' => ['nullable', 'string', 'max:50', Rule::unique('students', 'nis')->ignore($student->id)],
+            'nisn' => 'nullable|string|max:50',
+            'jenis_kelamin' => 'sometimes|in:L,P',
+            'school_unit_ulid' => 'sometimes|exists:school_units,ulid',
+            'status' => 'sometimes|in:prospective,active,graduated,transferred,dropped_out',
+        ]);
+
+        if (array_key_exists('school_unit_ulid', $validated)) {
+            $unit = SchoolUnit::where('ulid', $validated['school_unit_ulid'])->firstOrFail();
+            $student->school_unit_id = $unit->id;
+        }
+
+        $student->fill(collect($validated)->except(['school_unit_ulid'])->all());
+        $student->save();
+
+        ActivityLog::record($request->user(), 'student.updated', $student, collect($validated)->except(['nisn'])->all());
+
+        return response()->json(['student' => $student->fresh('schoolUnit')]);
+    }
+
+    /**
+     * A soft delete (Student uses SoftDeletes) - bills, payments, and
+     * academic history a family or teacher already relies on stay intact
+     * and merely stop surfacing this student as active, rather than being
+     * torn out with them.
+     */
+    public function destroy(Request $request, Student $student): JsonResponse
+    {
+        ActivityLog::record($request->user(), 'student.deleted', $student, ['nama_lengkap' => $student->nama_lengkap]);
+
+        $student->delete();
+
+        return response()->json(['message' => 'Data siswa berhasil dihapus.']);
     }
 }
