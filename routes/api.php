@@ -210,6 +210,7 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     // below, this only writes).
     Route::post('/classrooms', [\App\Http\Controllers\Api\Admin\ClassroomController::class, 'store']);
     Route::patch('/classrooms/{ulid}', [\App\Http\Controllers\Api\Admin\ClassroomController::class, 'update']);
+    Route::delete('/classrooms/{ulid}', [\App\Http\Controllers\Api\Admin\ClassroomController::class, 'destroy']);
 
     // Kenaikan kelas massal: roster of one classroom -> candidate classrooms
     // in the next academic year -> execute the batch.

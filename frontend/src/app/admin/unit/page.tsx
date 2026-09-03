@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Building2, Check, Edit2, Plus, Trash2, X } from "lucide-react";
+import { Building2, Check, Edit2, Plus, Power, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,7 @@ export default function AdminSchoolUnitsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingUnit, setEditingUnit] = useState<UnitItem | null>(null);
   const [deletingUnit, setDeletingUnit] = useState<UnitItem | null>(null);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState("");
 
   const [formCode, setFormCode] = useState("");
   const [formLabel, setFormLabel] = useState("");
@@ -144,6 +145,19 @@ export default function AdminSchoolUnitsPage() {
     }
   }
 
+  async function handleToggleActive(u: UnitItem) {
+    try {
+      await api.patch(`/api/admin/school-units/${u.ulid}`, {
+        code: u.code, label: u.label, jenjang_group: u.jenjang_group, sort_order: u.sort_order,
+        is_active: !u.is_active,
+      });
+      toast.success(u.is_active ? "Unit dinonaktifkan." : "Unit diaktifkan kembali.");
+      loadUnits();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengubah status unit.");
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -222,6 +236,16 @@ export default function AdminSchoolUnitsPage() {
                         <Button
                           size="sm"
                           variant="outline"
+                          onClick={() => handleToggleActive(u)}
+                          title={u.is_active ? "Nonaktifkan unit" : "Aktifkan unit"}
+                          className={`h-8 px-2.5 text-xs font-semibold gap-1 ${u.is_active ? "" : "text-good border-good/40"}`}
+                        >
+                          <Power className="size-3.5" />
+                          <span>{u.is_active ? "Nonaktifkan" : "Aktifkan"}</span>
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
                           onClick={() => openEdit(u)}
                           className="h-8 px-2.5 text-xs font-semibold gap-1"
                         >
@@ -231,7 +255,7 @@ export default function AdminSchoolUnitsPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => setDeletingUnit(u)}
+                          onClick={() => { setDeletingUnit(u); setDeleteConfirmInput(""); }}
                           className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
                         >
                           <Trash2 className="size-3.5" />
@@ -392,9 +416,28 @@ export default function AdminSchoolUnitsPage() {
               )}
             </p>
 
+            <div>
+              <Label className="text-xs">
+                Ketik <strong className="font-mono text-foreground">{deletingUnit.code}</strong> untuk konfirmasi
+              </Label>
+              <Input
+                value={deleteConfirmInput}
+                onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                placeholder={deletingUnit.code}
+                className="mt-1"
+                autoFocus
+              />
+            </div>
+
             <div className="flex justify-end gap-2 border-t border-border pt-4">
               <Button variant="ghost" size="sm" onClick={() => setDeletingUnit(null)} disabled={submitting}>Batal</Button>
-              <Button variant="destructive" size="sm" onClick={handleDelete} disabled={submitting} className="font-bold">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDelete}
+                disabled={submitting || deleteConfirmInput.trim() !== deletingUnit.code}
+                className="font-bold"
+              >
                 {submitting ? "Menghapus…" : "Ya, Hapus Unit"}
               </Button>
             </div>

@@ -103,6 +103,7 @@ export default function AdminStudentsPage() {
   // Edit/Delete (administrator only)
   const [editingStudent, setEditingStudent] = useState<StudentItem | null>(null);
   const [deletingStudent, setDeletingStudent] = useState<StudentItem | null>(null);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState("");
   const [formNamaLengkap, setFormNamaLengkap] = useState("");
   const [formNamaPanggilan, setFormNamaPanggilan] = useState("");
   const [formNis, setFormNis] = useState("");
@@ -573,7 +574,7 @@ export default function AdminStudentsPage() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => setDeletingStudent(s)}
+                              onClick={() => { setDeletingStudent(s); setDeleteConfirmInput(""); }}
                               className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
                             >
                               <Trash2 className="size-3.5" />
@@ -783,11 +784,30 @@ export default function AdminStudentsPage() {
               {deletingStudent.nis ? ` (NIS: ${deletingStudent.nis})` : ""}?
             </p>
 
+            <div>
+              <Label className="text-xs">
+                Ketik <strong className="font-mono text-foreground">{deletingStudent.nama_lengkap}</strong> untuk konfirmasi
+              </Label>
+              <Input
+                value={deleteConfirmInput}
+                onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                placeholder={deletingStudent.nama_lengkap}
+                className="mt-1"
+                autoFocus
+              />
+            </div>
+
             <div className="flex justify-end gap-2 border-t border-border pt-4">
               <Button variant="ghost" size="sm" onClick={() => setDeletingStudent(null)} disabled={submitting}>
                 Batal
               </Button>
-              <Button variant="destructive" size="sm" onClick={handleDelete} disabled={submitting} className="font-bold">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDelete}
+                disabled={submitting || deleteConfirmInput.trim() !== deletingStudent.nama_lengkap}
+                className="font-bold"
+              >
                 {submitting ? "Menghapus…" : "Ya, Hapus Siswa"}
               </Button>
             </div>

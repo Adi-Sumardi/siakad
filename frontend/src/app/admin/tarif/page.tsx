@@ -11,6 +11,7 @@ import {
   Filter,
   Layers,
   Plus,
+  Power,
   RefreshCw,
   Search,
   Sparkles,
@@ -106,6 +107,11 @@ export default function FeeRatesPage() {
   const [editTypeForm, setEditTypeForm] = useState({
     name: "", allow_installment: false, requires_selection: false, requires_roster_membership: false, is_active: true,
   });
+
+  // Only one delete modal (rate or type) is ever open at once, so one shared
+  // "type to confirm" field is enough - a second, deliberate step beyond the
+  // modal itself before the delete button will actually do anything.
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState("");
 
   // Forms
   const [rateForm, setRateForm] = useState({
@@ -320,6 +326,16 @@ export default function FeeRatesPage() {
     }
   }
 
+  async function handleToggleRateActive(r: Rate) {
+    try {
+      await api.patch(`/api/admin/fee-rates/${r.ulid}`, { is_active: !r.is_active });
+      toast.success(r.is_active ? "Tarif dinonaktifkan." : "Tarif diaktifkan kembali.");
+      loadData();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengubah status tarif.");
+    }
+  }
+
   function openEditType(t: FeeType) {
     setEditingType(t);
     setEditTypeForm({
@@ -359,6 +375,16 @@ export default function FeeRatesPage() {
       toast.error(err instanceof ApiError ? err.message : "Gagal menghapus jenis biaya.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleToggleTypeActive(t: FeeType) {
+    try {
+      await api.patch(`/api/admin/fee-types/${t.ulid}`, { is_active: !t.is_active });
+      toast.success(t.is_active ? "Jenis biaya dinonaktifkan." : "Jenis biaya diaktifkan kembali.");
+      loadData();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengubah status jenis biaya.");
     }
   }
 
@@ -616,11 +642,21 @@ export default function FeeRatesPage() {
                       {isCentral && (
                         <td className="px-5 py-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleToggleRateActive(r)}
+                              title={r.is_active ? "Nonaktifkan tarif" : "Aktifkan tarif"}
+                              className={`h-8 px-2.5 text-xs font-semibold gap-1 ${r.is_active ? "" : "text-good border-good/40"}`}
+                            >
+                              <Power className="size-3.5" />
+                              <span>{r.is_active ? "Nonaktifkan" : "Aktifkan"}</span>
+                            </Button>
                             <Button size="sm" variant="outline" onClick={() => openEditRate(r)} className="h-8 px-2.5 text-xs font-semibold gap-1">
                               <Edit2 className="size-3.5" />
                               <span>Edit</span>
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setDeletingRate(r)} className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
+                            <Button size="sm" variant="ghost" onClick={() => { setDeletingRate(r); setDeleteConfirmInput(""); }} className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
                               <Trash2 className="size-3.5" />
                             </Button>
                           </div>
@@ -681,11 +717,21 @@ export default function FeeRatesPage() {
                     {isCentral && (
                       <td className="px-5 py-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleToggleTypeActive(t)}
+                            title={t.is_active ? "Nonaktifkan jenis biaya" : "Aktifkan jenis biaya"}
+                            className={`h-8 px-2.5 text-xs font-semibold gap-1 ${t.is_active ? "" : "text-good border-good/40"}`}
+                          >
+                            <Power className="size-3.5" />
+                            <span>{t.is_active ? "Nonaktifkan" : "Aktifkan"}</span>
+                          </Button>
                           <Button size="sm" variant="outline" onClick={() => openEditType(t)} className="h-8 px-2.5 text-xs font-semibold gap-1">
                             <Edit2 className="size-3.5" />
                             <span>Edit</span>
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setDeletingType(t)} className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
+                          <Button size="sm" variant="ghost" onClick={() => { setDeletingType(t); setDeleteConfirmInput(""); }} className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
                             <Trash2 className="size-3.5" />
                           </Button>
                         </div>
@@ -1262,9 +1308,27 @@ export default function FeeRatesPage() {
               Hapus tarif <strong className="text-foreground">{deletingRate.fee_type.name}</strong> untuk{" "}
               <strong className="text-foreground">{deletingRate.unit.label}</strong> ({deletingRate.academic_year})?
             </p>
+            <div>
+              <Label className="text-xs">
+                Ketik <strong className="font-mono text-foreground">{deletingRate.fee_type.name}</strong> untuk konfirmasi
+              </Label>
+              <Input
+                value={deleteConfirmInput}
+                onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                placeholder={deletingRate.fee_type.name}
+                className="mt-1"
+                autoFocus
+              />
+            </div>
             <div className="flex justify-end gap-2 border-t border-border pt-4">
               <Button variant="ghost" size="sm" onClick={() => setDeletingRate(null)} disabled={submitting}>Batal</Button>
-              <Button variant="destructive" size="sm" onClick={handleDeleteRate} disabled={submitting} className="font-bold">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDeleteRate}
+                disabled={submitting || deleteConfirmInput.trim() !== deletingRate.fee_type.name}
+                className="font-bold"
+              >
                 {submitting ? "Menghapus…" : "Ya, Hapus Tarif"}
               </Button>
             </div>
@@ -1346,9 +1410,27 @@ export default function FeeRatesPage() {
                 </span>
               )}
             </p>
+            <div>
+              <Label className="text-xs">
+                Ketik <strong className="font-mono text-foreground">{deletingType.code}</strong> untuk konfirmasi
+              </Label>
+              <Input
+                value={deleteConfirmInput}
+                onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                placeholder={deletingType.code}
+                className="mt-1"
+                autoFocus
+              />
+            </div>
             <div className="flex justify-end gap-2 border-t border-border pt-4">
               <Button variant="ghost" size="sm" onClick={() => setDeletingType(null)} disabled={submitting}>Batal</Button>
-              <Button variant="destructive" size="sm" onClick={handleDeleteType} disabled={submitting} className="font-bold">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDeleteType}
+                disabled={submitting || deleteConfirmInput.trim() !== deletingType.code}
+                className="font-bold"
+              >
                 {submitting ? "Menghapus…" : "Ya, Hapus Jenis Biaya"}
               </Button>
             </div>

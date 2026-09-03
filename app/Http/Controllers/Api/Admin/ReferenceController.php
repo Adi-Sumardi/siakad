@@ -121,6 +121,7 @@ class ReferenceController extends Controller
                 'academic_year' => $c->academicYear?->year,
                 'capacity' => $c->capacity,
                 'homeroom_teacher' => $c->homeroomTeacher?->name,
+                'homeroom_teacher_ulid' => $c->homeroomTeacher?->ulid,
                 'is_active' => $c->is_active,
             ]),
         ]);

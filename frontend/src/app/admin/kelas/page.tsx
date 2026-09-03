@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { Edit2, Power, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -23,6 +24,7 @@ type ClassroomRow = {
   academic_year: string | null;
   capacity: number | null;
   homeroom_teacher: string | null;
+  homeroom_teacher_ulid: string | null;
   is_active: boolean;
 };
 
@@ -122,6 +124,12 @@ export default function KelasPage() {
   const [yearFilter, setYearFilter] = useState<string>("");
   const [classrooms, setClassrooms] = useState<ClassroomRow[] | null>(null);
 
+  const [editingClassroom, setEditingClassroom] = useState<ClassroomRow | null>(null);
+  const [deletingClassroom, setDeletingClassroom] = useState<ClassroomRow | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", tingkat: "1", capacity: "", teacherUlid: "", isActive: true });
+  const [submitting, setSubmitting] = useState(false);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState("");
+
   useEffect(() => {
     api.get<{ school_units: SchoolUnitOption[] }>("/api/admin/school-units").then((d) => setUnits(d.school_units));
     api.get<{ academic_years: AcademicYearOption[] }>("/api/admin/academic-years").then((d) => {
@@ -143,6 +151,64 @@ export default function KelasPage() {
   useEffect(() => {
     if (yearFilter) loadClassrooms(yearFilter);
   }, [yearFilter]);
+
+  function openEdit(c: ClassroomRow) {
+    setEditingClassroom(c);
+    setEditForm({
+      name: c.name,
+      tingkat: String(c.tingkat),
+      capacity: c.capacity ? String(c.capacity) : "",
+      teacherUlid: c.homeroom_teacher_ulid ?? "",
+      isActive: c.is_active,
+    });
+  }
+
+  async function handleUpdate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingClassroom) return;
+    setSubmitting(true);
+    try {
+      await api.patch(`/api/admin/classrooms/${editingClassroom.ulid}`, {
+        name: editForm.name,
+        tingkat: Number(editForm.tingkat),
+        capacity: editForm.capacity ? Number(editForm.capacity) : null,
+        homeroom_teacher_ulid: editForm.teacherUlid || null,
+        is_active: editForm.isActive,
+      });
+      toast.success("Kelas berhasil diperbarui.");
+      setEditingClassroom(null);
+      loadClassrooms(yearFilter);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal memperbarui kelas.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleToggleActive(c: ClassroomRow) {
+    try {
+      await api.patch(`/api/admin/classrooms/${c.ulid}`, { is_active: !c.is_active });
+      toast.success(c.is_active ? "Kelas dinonaktifkan." : "Kelas diaktifkan kembali.");
+      loadClassrooms(yearFilter);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengubah status kelas.");
+    }
+  }
+
+  async function handleDelete() {
+    if (!deletingClassroom) return;
+    setSubmitting(true);
+    try {
+      await api.delete(`/api/admin/classrooms/${deletingClassroom.ulid}`);
+      toast.success("Kelas berhasil dihapus.");
+      setDeletingClassroom(null);
+      loadClassrooms(yearFilter);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal menghapus kelas.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -198,9 +264,138 @@ export default function KelasPage() {
                 {c.capacity ? ` · Kapasitas ${c.capacity}` : ""}
               </p>
             </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleToggleActive(c)}
+                title={c.is_active ? "Nonaktifkan kelas" : "Aktifkan kelas"}
+                className={`h-8 px-2.5 text-xs font-semibold gap-1 ${c.is_active ? "" : "text-good border-good/40"}`}
+              >
+                <Power className="size-3.5" />
+                <span>{c.is_active ? "Nonaktifkan" : "Aktifkan"}</span>
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => openEdit(c)} className="h-8 px-2.5 text-xs font-semibold gap-1">
+                <Edit2 className="size-3.5" />
+                <span>Edit</span>
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setDeletingClassroom(c); setDeleteConfirmInput(""); }} className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
           </Card>
         ))}
       </div>
+
+      {/* MODAL: EDIT KELAS */}
+      {editingClassroom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-lg p-6 border-border shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <Edit2 className="size-5 text-primary" />
+                <span>Edit Kelas</span>
+              </h2>
+              <button onClick={() => setEditingClassroom(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              {editingClassroom.school_unit.label} · Tahun Ajaran {editingClassroom.academic_year ?? "-"}
+              <span className="block italic mt-0.5">Unit dan tahun ajaran tidak bisa diubah - buat kelas baru bila perlu berbeda.</span>
+            </p>
+
+            <form onSubmit={handleUpdate} className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Nama Kelas</Label>
+                  <Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} required className="mt-1" />
+                </div>
+                <div>
+                  <Label className="text-xs">Tingkat</Label>
+                  <Input type="number" min={1} max={12} value={editForm.tingkat} onChange={(e) => setEditForm((f) => ({ ...f, tingkat: e.target.value }))} required className="mt-1" />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">Kapasitas</Label>
+                <Input type="number" min={1} max={100} value={editForm.capacity} onChange={(e) => setEditForm((f) => ({ ...f, capacity: e.target.value }))} className="mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Wali Kelas</Label>
+                <select
+                  value={editForm.teacherUlid}
+                  onChange={(e) => setEditForm((f) => ({ ...f, teacherUlid: e.target.value }))}
+                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                >
+                  <option value="">Belum ditentukan</option>
+                  {teachers.map((t) => <option key={t.ulid} value={t.ulid}>{t.name}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="classroom_is_active"
+                  checked={editForm.isActive}
+                  onChange={(e) => setEditForm((f) => ({ ...f, isActive: e.target.checked }))}
+                  className="size-4 rounded border-input"
+                />
+                <Label htmlFor="classroom_is_active" className="text-xs font-semibold cursor-pointer">Kelas Aktif</Label>
+              </div>
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="ghost" onClick={() => setEditingClassroom(null)} disabled={submitting}>Batal</Button>
+                <Button type="submit" disabled={submitting} className="font-bold shadow-xs">
+                  {submitting ? "Menyimpan…" : "Simpan Perubahan"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL: KONFIRMASI HAPUS KELAS */}
+      {deletingClassroom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <Card className="w-full max-w-md p-6 border-border shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-destructive">
+              <div className="size-10 rounded-full bg-destructive/10 grid place-items-center">
+                <Trash2 className="size-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-foreground">Hapus Kelas</h3>
+                <p className="text-xs text-muted-foreground">Ditolak otomatis bila kelas ini masih punya riwayat siswa.</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Hapus kelas <strong className="text-foreground">{deletingClassroom.school_unit.label} · {deletingClassroom.name}</strong>?
+            </p>
+            <div>
+              <Label className="text-xs">
+                Ketik <strong className="font-mono text-foreground">{deletingClassroom.name}</strong> untuk konfirmasi
+              </Label>
+              <Input
+                value={deleteConfirmInput}
+                onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                placeholder={deletingClassroom.name}
+                className="mt-1"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border pt-4">
+              <Button variant="ghost" size="sm" onClick={() => setDeletingClassroom(null)} disabled={submitting}>Batal</Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDelete}
+                disabled={submitting || deleteConfirmInput.trim() !== deletingClassroom.name}
+                className="font-bold"
+              >
+                {submitting ? "Menghapus…" : "Ya, Hapus Kelas"}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

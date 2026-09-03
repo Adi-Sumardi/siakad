@@ -90,6 +90,36 @@ class ClassroomController extends Controller
         return response()->json(['classroom' => $classroom->fresh('schoolUnit')]);
     }
 
+    /**
+     * enrollments/announcements/class_schedules/attendance_records/grades
+     * all cascade-delete off a classroom - unlike students or fee types,
+     * nothing here is protected by the database's own foreign keys, so a
+     * classroom still holding real enrollment, attendance, or grade history
+     * would be silently wiped along with it. Refused at the application
+     * layer instead: a classroom with zero enrollments ever (past or
+     * present) is safe to remove outright, anything else needs to be
+     * deactivated (is_active) rather than deleted.
+     */
+    public function destroy(Request $request, string $ulid): JsonResponse
+    {
+        $classroom = Classroom::where('ulid', $ulid)->firstOrFail();
+        $this->authoriseScope($request, $classroom);
+
+        if ($classroom->enrollments()->exists()) {
+            return response()->json([
+                'message' => "Kelas \"{$classroom->name}\" masih punya riwayat siswa (aktif atau lulus) - nonaktifkan saja kelas ini, jangan dihapus.",
+            ], 422);
+        }
+
+        ActivityLog::record($request->user(), 'classroom.deleted', $classroom, [
+            'unit' => $classroom->schoolUnit->label, 'name' => $classroom->name,
+        ]);
+
+        $classroom->delete();
+
+        return response()->json(['message' => 'Kelas berhasil dihapus.']);
+    }
+
     private function resolveUnit(Request $request, ?string $code): ?SchoolUnit
     {
         if ($request->user()->isUnitScoped()) {
