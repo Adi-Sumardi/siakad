@@ -139,4 +139,47 @@ class AdminDiscountTest extends TestCase
         $this->assertTrue($names->contains('Anak SD'));
         $this->assertFalse($names->contains('Anak SMP'));
     }
+
+    public function test_deleting_a_scheme_still_assigned_to_a_student_is_refused_instead_of_silently_unassigning_it(): void
+    {
+        $scheme = DiscountScheme::create(['code' => 'aktif_dipakai', 'name' => 'Beasiswa Aktif', 'type' => 'percent', 'value' => 30, 'is_active' => true]);
+        $student = Student::create(['nama_lengkap' => 'Anak Beasiswa', 'jenis_kelamin' => 'L', 'school_unit_id' => $this->unit->id, 'status' => 'active']);
+
+        StudentDiscount::create([
+            'student_id' => $student->id, 'discount_scheme_id' => $scheme->id, 'academic_year_id' => $this->year->id,
+            'effective_from' => '2026-07-01', 'effective_to' => '2027-06-30', 'reason' => 'Masih berlaku',
+        ]);
+
+        $response = $this->actingAs($this->admin)->deleteJson("/api/admin/discount-schemes/{$scheme->ulid}");
+
+        $response->assertStatus(422);
+        $this->assertDatabaseHas('discount_schemes', ['id' => $scheme->id]);
+        $this->assertDatabaseHas('student_discounts', ['student_id' => $student->id, 'discount_scheme_id' => $scheme->id]);
+    }
+
+    public function test_deleting_a_scheme_with_no_active_assignments_still_works(): void
+    {
+        $scheme = DiscountScheme::create(['code' => 'tak_dipakai', 'name' => 'Beasiswa Kosong', 'type' => 'percent', 'value' => 10, 'is_active' => true]);
+
+        $response = $this->actingAs($this->admin)->deleteJson("/api/admin/discount-schemes/{$scheme->ulid}");
+
+        $response->assertStatus(200);
+        $this->assertDatabaseMissing('discount_schemes', ['id' => $scheme->id]);
+    }
+
+    public function test_deleting_a_scheme_whose_assignment_already_expired_still_works(): void
+    {
+        $scheme = DiscountScheme::create(['code' => 'kadaluarsa', 'name' => 'Beasiswa Lalu', 'type' => 'percent', 'value' => 15, 'is_active' => true]);
+        $student = Student::create(['nama_lengkap' => 'Anak Lulus', 'jenis_kelamin' => 'P', 'school_unit_id' => $this->unit->id, 'status' => 'active']);
+
+        StudentDiscount::create([
+            'student_id' => $student->id, 'discount_scheme_id' => $scheme->id, 'academic_year_id' => $this->year->id,
+            'effective_from' => '2020-07-01', 'effective_to' => '2021-06-30', 'reason' => 'Sudah lewat',
+        ]);
+
+        $response = $this->actingAs($this->admin)->deleteJson("/api/admin/discount-schemes/{$scheme->ulid}");
+
+        $response->assertStatus(200);
+        $this->assertDatabaseMissing('discount_schemes', ['id' => $scheme->id]);
+    }
 }

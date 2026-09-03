@@ -243,7 +243,19 @@ class ImportController extends Controller
                     $rawRel = strtolower(trim($data['hubungan_wali'] ?? 'ayah'));
                     $relationship = in_array($rawRel, ['ayah', 'ibu', 'wali'], true) ? $rawRel : 'ayah';
 
-                    // Link student & guardian pivot
+                    // Exactly one primary/billing guardian per student is an
+                    // invariant the rest of the app relies on (see
+                    // PmbHandoffProcessor's own comment on the same rule, and
+                    // every firstWhere('pivot.is_primary', true) that picks
+                    // "the" guardian to bill or notify) - always marking this
+                    // row's guardian primary without clearing any other would
+                    // silently give a student two primaries the moment the
+                    // same student is re-imported naming a different wali.
+                    $student->guardians()->updateExistingPivot(
+                        $student->guardians->pluck('id')->reject(fn ($id) => $id === $guardian->id)->all(),
+                        ['is_primary' => false, 'is_billing_contact' => false],
+                    );
+
                     $student->guardians()->syncWithoutDetaching([
                         $guardian->id => [
                             'relationship' => $relationship,
@@ -325,6 +337,10 @@ class ImportController extends Controller
         $updatedCount = 0;
         $errors = [];
         $rowNum = 1;
+        // Distinct unit codes actually touched - a CSV commonly spans several
+        // units, so there is no single row's $unit that correctly represents
+        // the whole import for the activity log below.
+        $unitsTouched = [];
 
         DB::beginTransaction();
         try {
@@ -368,6 +384,8 @@ class ImportController extends Controller
                     $errors[] = "Baris {$rowNum}: Unit sekolah '{$data['unit_code']}' tidak ditemukan.";
                     continue;
                 }
+
+                $unitsTouched[$unit->code] = true;
 
                 // Match Academic Year
                 $yearName = $data['academic_year'] ?? '2027/2028';
@@ -419,9 +437,10 @@ class ImportController extends Controller
             DB::commit();
             fclose($handle);
 
-            ActivityLog::record($request->user(), 'fee_rates.imported', $unit, [
+            ActivityLog::record($request->user(), 'fee_rates.imported', null, [
                 'imported' => $importedCount,
                 'updated' => $updatedCount,
+                'units' => array_keys($unitsTouched),
             ]);
 
             return response()->json([

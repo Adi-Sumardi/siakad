@@ -117,9 +117,24 @@ class DiscountController extends Controller
 
     /**
      * Delete a discount scheme.
+     *
+     * student_discounts.discount_scheme_id cascades on delete - bills already
+     * issued keep their own copy of discount_amount (see updateRate()'s
+     * comment on the same pattern for fee rates), so past bills are safe, but
+     * nothing stopped this from silently un-assigning the scheme from every
+     * student who currently has it. The next billing run would then charge
+     * those families in full with no warning that anything had changed.
      */
     public function destroyScheme(Request $request, DiscountScheme $discountScheme): JsonResponse
     {
+        $assigned = $discountScheme->studentDiscounts()->effectiveOn(now())->count();
+
+        if ($assigned > 0) {
+            return response()->json([
+                'message' => "Skema diskon \"{$discountScheme->name}\" masih diterapkan pada {$assigned} siswa - cabut dulu diskonnya dari siswa terkait, atau nonaktifkan saja skema ini.",
+            ], 422);
+        }
+
         ActivityLog::record($request->user(), 'discount_scheme.deleted', $discountScheme, ['code' => $discountScheme->code]);
         $discountScheme->delete();
 

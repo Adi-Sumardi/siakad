@@ -417,7 +417,13 @@ export default function AdminHomePage() {
           </div>
 
           {/* Filter Siswa vs Guru & Date */}
-          <div className="flex flex-wrap items-center gap-2 text-xs">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              loadAchievementChart();
+            }}
+            className="flex flex-wrap items-center gap-2 text-xs"
+          >
             <div className="flex items-center bg-muted/60 p-1 rounded-xl border border-border">
               <button
                 type="button"
@@ -447,7 +453,47 @@ export default function AdminHomePage() {
                 Prestasi Guru ({achievementData?.summary.total_guru ?? 0})
               </button>
             </div>
-          </div>
+
+            <div className="flex items-center gap-1.5 bg-muted/40 p-1 rounded-lg border border-border">
+              <Calendar className="size-3.5 text-muted-foreground ml-1" />
+              <Input
+                type="date"
+                value={achieveStartDate}
+                onChange={(e) => setAchieveStartDate(e.target.value)}
+                className="h-7 text-xs w-32 bg-card"
+                placeholder="Tgl Mulai"
+              />
+              <span className="text-muted-foreground font-bold">s/d</span>
+              <Input
+                type="date"
+                value={achieveEndDate}
+                onChange={(e) => setAchieveEndDate(e.target.value)}
+                className="h-7 text-xs w-32 bg-card"
+                placeholder="Tgl Selesai"
+              />
+            </div>
+
+            <Button type="submit" size="sm" className="h-8.5 text-xs font-semibold gap-1 shadow-xs">
+              <Filter className="size-3" />
+              <span>Terapkan</span>
+            </Button>
+
+            {(achieveStartDate || achieveEndDate) && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setAchieveStartDate("");
+                  setAchieveEndDate("");
+                  loadAchievementChart();
+                }}
+                className="h-8.5 text-xs"
+              >
+                Reset
+              </Button>
+            )}
+          </form>
         </div>
 
         {/* Visual Achievements Grid */}
