@@ -295,6 +295,11 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::patch('/students/{student}', [\App\Http\Controllers\Api\Admin\StudentController::class, 'update']);
     Route::delete('/students/{student}', [\App\Http\Controllers\Api\Admin\StudentController::class, 'destroy']);
 
+    Route::get('/school-units/manage', [\App\Http\Controllers\Api\Admin\SchoolUnitController::class, 'index']);
+    Route::post('/school-units', [\App\Http\Controllers\Api\Admin\SchoolUnitController::class, 'store']);
+    Route::patch('/school-units/{schoolUnit}', [\App\Http\Controllers\Api\Admin\SchoolUnitController::class, 'update']);
+    Route::delete('/school-units/{schoolUnit}', [\App\Http\Controllers\Api\Admin\SchoolUnitController::class, 'destroy']);
+
     // Academic year management
     Route::post('/academic-years', [ReferenceController::class, 'storeAcademicYear']);
     Route::post('/academic-years/{academicYear}/activate', [ReferenceController::class, 'activateAcademicYear']);

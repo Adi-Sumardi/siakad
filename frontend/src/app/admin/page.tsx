@@ -180,27 +180,29 @@ export default function AdminHomePage() {
 
   return (
     <div className="space-y-8">
-      {/* Welcome Banner */}
-      <div className="rounded-3xl bg-linear-to-r from-primary/15 via-primary/5 to-accent/30 p-6 sm:p-8 border border-primary/20 shadow-xs">
+      {/* Welcome Banner - same blue gradient as the parent (wali) dashboard,
+          so the executive portal reads as the same product instead of a
+          different app with a lavender tint. */}
+      <div className="rounded-3xl bg-linear-to-br from-[#13286B] to-[#2856E0] p-6 sm:p-8 text-white shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <Badge variant="primary" className="mb-2">Portal Eksekutif & Administrasi Yayasan YAPI</Badge>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground">
+            <Badge className="mb-2 bg-white/15 text-white border border-white/20">Portal Eksekutif & Administrasi Yayasan YAPI</Badge>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
               Assalamu&apos;alaikum, {user?.name}
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-sm text-white/80 mt-1">
               Pantau arus kas tagihan/piutang per unit sekolah dan grafik apresiasi prestasi siswa & guru secara real-time.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
             <Link href="/admin/siswa">
-              <Button variant="outline" className="gap-2 font-bold text-xs shadow-xs">
+              <Button variant="ghost" className="gap-2 font-bold text-xs bg-white/15 text-white border border-white/20 hover:bg-white/25">
                 <GraduationCap className="size-4" />
                 <span>Data Siswa & SPP</span>
               </Button>
             </Link>
             <Link href="/admin/generate">
-              <Button className="gap-2 font-bold text-xs shadow-md">
+              <Button className="gap-2 font-bold text-xs bg-white text-[#13286B] hover:bg-white/90 shadow-md">
                 <Wallet className="size-4" />
                 <span>Terbitkan SPP Massal</span>
               </Button>
