@@ -163,6 +163,50 @@ class AchievementTest extends TestCase
         $this->assertSame(1, PointRecord::where('related_achievement_id', $achievement->id)->count());
     }
 
+    public function test_verifying_with_points_is_refused_rather_than_silently_skipped_when_no_term_is_active(): void
+    {
+        // Term::current() reads an admin-managed is_active flag, not a date
+        // range - routinely null right after a semester ends until someone
+        // activates the next term. Awarding points here used to fail silently
+        // (achievement verified, no points recorded, response still 200) -
+        // the whole request must now fail instead, so an admin who typed a
+        // point value is never told "verified" for a request that quietly
+        // dropped what they asked for.
+        $this->term->update(['is_active' => false]);
+
+        $student = $this->student();
+        $user = $this->guardianFor($student);
+        $this->actingAs($user)->postJson("/api/wali/students/{$student->ulid}/achievements", $this->payload());
+
+        $achievement = Achievement::first();
+        $admin = $this->staff('admin_unit');
+
+        $this->actingAs($admin)
+            ->postJson("/api/admin/achievements/{$achievement->ulid}/verify", ['points_awarded' => 20])
+            ->assertStatus(422);
+
+        $achievement->refresh();
+        $this->assertTrue($achievement->isPending(), 'The achievement must stay pending, not half-verified with no points.');
+        $this->assertDatabaseCount('point_records', 0);
+    }
+
+    public function test_verifying_with_no_points_requested_still_works_with_no_active_term(): void
+    {
+        $this->term->update(['is_active' => false]);
+
+        $student = $this->student();
+        $user = $this->guardianFor($student);
+        $this->actingAs($user)->postJson("/api/wali/students/{$student->ulid}/achievements", $this->payload());
+
+        $achievement = Achievement::first();
+        $admin = $this->staff('admin_unit');
+
+        $this->actingAs($admin)
+            ->postJson("/api/admin/achievements/{$achievement->ulid}/verify", [])
+            ->assertOk()
+            ->assertJsonPath('achievement.status', 'verified');
+    }
+
     public function test_admin_rejects_a_pending_submission_with_a_reason(): void
     {
         $student = $this->student();

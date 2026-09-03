@@ -10,6 +10,7 @@ use App\Models\Term;
 use App\Services\Points\PointLedger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 class AchievementController extends Controller
@@ -43,23 +44,38 @@ class AchievementController extends Controller
             return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
         }
 
-        $achievement->forceFill([
-            'status' => 'verified',
-            'verified_by' => $request->user()->id,
-            'verified_at' => now(),
-        ])->save();
+        // Term::current() depends on an admin-managed is_active flag, not a
+        // date range - right after a semester ends this is routinely null
+        // until someone activates the next term. Silently verifying without
+        // the points an admin explicitly asked for used to report success
+        // regardless (the frontend's toast unconditionally said "poin
+        // ditambahkan"), so the request never surfaced that nothing was
+        // actually credited.
+        if (! empty($validated['points_awarded']) && ! Term::current()) {
+            return response()->json([
+                'message' => 'Tidak ada semester (term) yang sedang aktif, jadi poin tidak dapat dicatat. Aktifkan term terlebih dahulu, atau verifikasi tanpa poin.',
+            ], 422);
+        }
 
-        if (! empty($validated['points_awarded'])) {
-            $term = Term::current();
+        // One transaction: a point-award failure must not leave the
+        // achievement marked verified with nothing to show for it - the
+        // admin would see an error, retry, and be told "sudah diputuskan
+        // sebelumnya" for a request that never actually succeeded.
+        try {
+            DB::transaction(function () use ($achievement, $validated, $request, $ledger) {
+                $achievement->forceFill([
+                    'status' => 'verified',
+                    'verified_by' => $request->user()->id,
+                    'verified_at' => now(),
+                ])->save();
 
-            if ($term) {
-                try {
-                    $ledger->awardForAchievement($achievement, $term, $request->user(), (int) $validated['points_awarded']);
+                if (! empty($validated['points_awarded'])) {
+                    $ledger->awardForAchievement($achievement, Term::current(), $request->user(), (int) $validated['points_awarded']);
                     $achievement->forceFill(['point_awarded' => $validated['points_awarded']])->save();
-                } catch (RuntimeException $e) {
-                    return response()->json(['message' => $e->getMessage()], 422);
                 }
-            }
+            });
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         ActivityLog::record($request->user(), 'achievement.verified', $achievement, [
