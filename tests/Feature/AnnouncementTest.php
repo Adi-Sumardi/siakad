@@ -11,6 +11,8 @@ use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 /**
@@ -210,5 +212,47 @@ class AnnouncementTest extends TestCase
 
         $this->actingAs($user)->postJson('/api/admin/announcements', ['title' => 'X', 'body' => 'X'])
             ->assertStatus(403);
+    }
+
+    public function test_a_guardian_cannot_download_another_units_announcement_attachment(): void
+    {
+        // announcementFile() used to check only that the announcement was
+        // published, not who it was for - any signed-in user could pull an
+        // attachment meant for a different unit's families by guessing its
+        // ulid, the same visibleTo() gate every other file this controller
+        // serves already enforces.
+        Storage::fake('local');
+        $sdStudent = $this->studentInClassroom($this->sd, '1A');
+        $smpStudent = $this->studentInClassroom($this->smp, '7A');
+
+        $file = UploadedFile::fake()->create('edaran.pdf', 50, 'application/pdf');
+        $announcement = $this->announcement([
+            'school_unit_id' => $this->smp->id,
+            'file_path' => $file->store('announcements', 'local'),
+            'file_name' => 'edaran.pdf',
+        ]);
+
+        $this->actingAs($this->guardianFor($sdStudent))
+            ->get("/api/files/announcements/{$announcement->ulid}/file")
+            ->assertStatus(404);
+
+        $this->actingAs($this->guardianFor($smpStudent))
+            ->get("/api/files/announcements/{$announcement->ulid}/file")
+            ->assertOk();
+    }
+
+    public function test_a_unit_admin_cannot_download_another_units_announcement_attachment(): void
+    {
+        Storage::fake('local');
+        $file = UploadedFile::fake()->create('edaran.pdf', 50, 'application/pdf');
+        $announcement = $this->announcement([
+            'school_unit_id' => $this->smp->id,
+            'file_path' => $file->store('announcements', 'local'),
+            'file_name' => 'edaran.pdf',
+        ]);
+
+        $this->actingAs($this->staff('admin_unit', $this->sd))
+            ->get("/api/files/announcements/{$announcement->ulid}/file")
+            ->assertStatus(404);
     }
 }

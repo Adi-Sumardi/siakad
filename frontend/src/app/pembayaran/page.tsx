@@ -92,7 +92,7 @@ function PaymentsContent() {
     setSimulating(true);
     try {
       const res = await api.post<{ message: string; payment: Payment }>(
-        `/api/wali/bills/payments/${payment.ulid}/simulate-settle`,
+        `/api/wali/payments/${payment.ulid}/simulate-settle`,
         {}
       );
       toast.success(res.message);

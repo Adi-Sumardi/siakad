@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Achievement;
 use App\Models\Announcement;
 use App\Models\PointRecord;
+use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -43,13 +44,23 @@ class FileController extends Controller
     }
 
     /**
-     * An announcement's attachment has no per-row owner the way a bill or an
-     * achievement does - anyone signed in who can see the notice in their feed
-     * can open what came with it.
+     * Same rule as everything else this controller serves: visible in the
+     * feed, or not opened at all. Announcement::scopeVisibleTo() only covers
+     * staff (a guardian falls through it to whereRaw('1 = 0')) - a guardian's
+     * visibility depends on which of their children the notice targets, the
+     * same aggregation WaliAnnouncementController::index() does per child.
      */
     public function announcementFile(Request $request, string $ulid): StreamedResponse
     {
         $announcement = Announcement::where('ulid', $ulid)->live()->firstOrFail();
+        $user = $request->user();
+
+        $visible = $user?->isGuardian()
+            ? Student::visibleTo($user)->get()
+                ->contains(fn ($student) => Announcement::whereKey($announcement->id)->forStudent($student)->exists())
+            : Announcement::whereKey($announcement->id)->visibleTo($user)->exists();
+
+        abort_unless($visible, 404);
 
         return $this->stream($announcement->file_path, $announcement->file_name);
     }
