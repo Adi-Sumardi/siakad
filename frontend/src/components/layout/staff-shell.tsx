@@ -107,44 +107,45 @@ export function StaffShell({
         </div>
       </aside>
 
-      {/* Desktop Fixed Sidebar */}
-      <aside className="hidden border-r border-border bg-card md:flex md:w-64 md:shrink-0 md:flex-col md:justify-between">
-        <div>
-          <div className="border-b border-border/70 px-5 py-4.5">
-            <BrandMark />
-          </div>
+      {/* Desktop Fixed Sidebar - sticky at full viewport height so it stays
+          put while the (possibly much taller) main content scrolls; only the
+          nav list itself scrolls internally if it ever overflows, the brand
+          header and user card stay pinned. */}
+      <aside className="hidden border-r border-border bg-card md:flex md:h-dvh md:sticky md:top-0 md:w-64 md:shrink-0 md:flex-col">
+        <div className="border-b border-border/70 px-5 py-4.5 shrink-0">
+          <BrandMark />
+        </div>
 
-          <div className="px-3 py-4">
-            <div className="mb-2 px-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Menu Navigasi</p>
-            </div>
-            <nav className="flex flex-col gap-1">
-              {visibleNav.map((item) => {
-                const active = pathname === item.href || (item.href !== "/admin" && item.href !== "/guru" && pathname.startsWith(`${item.href}/`));
-                const Icon = item.icon;
-
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all",
-                      active
-                        ? "bg-primary text-primary-foreground shadow-sm font-semibold"
-                        : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="size-4.5 shrink-0" />
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              })}
-            </nav>
+        <div className="flex-1 overflow-y-auto px-3 py-4">
+          <div className="mb-2 px-3">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Menu Navigasi</p>
           </div>
+          <nav className="flex flex-col gap-1">
+            {visibleNav.map((item) => {
+              const active = pathname === item.href || (item.href !== "/admin" && item.href !== "/guru" && pathname.startsWith(`${item.href}/`));
+              const Icon = item.icon;
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all",
+                    active
+                      ? "bg-primary text-primary-foreground shadow-sm font-semibold"
+                      : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-4.5 shrink-0" />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
         </div>
 
         {/* User Card in Desktop Sidebar */}
-        <div className="border-t border-border bg-card/40 p-4">
+        <div className="border-t border-border bg-card/40 p-4 shrink-0">
           <div className="flex items-center gap-3">
             <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary font-bold text-sm shadow-2xs">
               {user?.name?.charAt(0) ?? "U"}
