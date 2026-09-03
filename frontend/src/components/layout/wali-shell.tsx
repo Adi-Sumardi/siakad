@@ -7,7 +7,6 @@ import {
   Award,
   CreditCard,
   Home,
-  LogOut,
   Megaphone,
   Menu,
   Receipt,
@@ -16,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
-import { Button } from "@/components/ui/button";
+import { UserMenu } from "@/components/layout/user-menu";
 import { useAuth } from "@/lib/auth/auth-context";
 import { cn } from "@/lib/utils";
 
@@ -34,7 +33,7 @@ export function WaliShell({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -107,18 +106,6 @@ export function WaliShell({
             })}
           </nav>
         </div>
-
-        <div className="border-t border-border p-4 bg-card/60">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={logout}
-            className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          >
-            <LogOut className="size-4" />
-            <span>Keluar dari Akun</span>
-          </Button>
-        </div>
       </aside>
 
       {/* Desktop Fixed Sidebar - sticky at full viewport height so it stays
@@ -169,15 +156,6 @@ export function WaliShell({
               <p className="truncate text-xs text-muted-foreground">Wali Murid YAPI</p>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={logout}
-            className="mt-3 w-full justify-start gap-2 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-          >
-            <LogOut className="size-4" />
-            <span>Keluar</span>
-          </Button>
         </div>
       </aside>
 
@@ -193,9 +171,12 @@ export function WaliShell({
             <Menu className="size-5" />
           </button>
           <BrandMark />
-          <div className="size-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
-            {user?.name?.charAt(0) ?? "W"}
-          </div>
+          <UserMenu subtitle="Wali Murid YAPI" />
+        </header>
+
+        {/* Desktop Navbar - Profil/Keluar live here, same as PMB's AppTopbar. */}
+        <header className="hidden md:flex sticky top-0 z-30 items-center justify-end border-b border-border bg-card/95 backdrop-blur px-6 py-3">
+          <UserMenu subtitle="Wali Murid YAPI" />
         </header>
 
         {/* Responsive Content Area */}

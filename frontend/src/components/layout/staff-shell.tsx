@@ -3,9 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut, Menu, ShieldCheck, X } from "lucide-react";
+import { Menu, ShieldCheck, X } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
-import { Button } from "@/components/ui/button";
+import { UserMenu } from "@/components/layout/user-menu";
 import { useAuth } from "@/lib/auth/auth-context";
 import { cn } from "@/lib/utils";
 
@@ -25,9 +25,10 @@ export function StaffShell({
   unitLabel?: string;
   children: React.ReactNode;
 }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const identitySubtitle = unitLabel ?? (user?.role === "admin" ? "Admin Pusat" : user?.role);
 
   const visibleNav = nav.filter((item) => !item.centralOnly || user?.role === "admin");
 
@@ -95,15 +96,9 @@ export function StaffShell({
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{user?.name}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {unitLabel ?? (user?.role === "admin" ? "Admin Pusat" : user?.role)}
-              </p>
+              <p className="truncate text-xs text-muted-foreground">{identitySubtitle}</p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={logout} className="mt-3 w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
-            <LogOut className="size-4" />
-            Keluar dari Akun
-          </Button>
         </div>
       </aside>
 
@@ -144,7 +139,8 @@ export function StaffShell({
           </nav>
         </div>
 
-        {/* User Card in Desktop Sidebar */}
+        {/* User Card in Desktop Sidebar - identity only; Profil/Keluar live
+            in the navbar's UserMenu, not duplicated here. */}
         <div className="border-t border-border bg-card/40 p-4 shrink-0">
           <div className="flex items-center gap-3">
             <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary font-bold text-sm shadow-2xs">
@@ -154,19 +150,10 @@ export function StaffShell({
               <p className="truncate text-sm font-semibold text-foreground">{user?.name}</p>
               <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
                 <ShieldCheck className="size-3 text-primary shrink-0" />
-                <span className="truncate">{unitLabel ?? (user?.role === "admin" ? "Admin Pusat" : user?.role)}</span>
+                <span className="truncate">{identitySubtitle}</span>
               </div>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={logout}
-            className="mt-3 w-full justify-start gap-2 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-          >
-            <LogOut className="size-4" />
-            <span>Keluar</span>
-          </Button>
         </div>
       </aside>
 
@@ -182,9 +169,12 @@ export function StaffShell({
             <Menu className="size-5" />
           </button>
           <BrandMark />
-          <div className="size-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
-            {user?.name?.charAt(0) ?? "U"}
-          </div>
+          <UserMenu subtitle={identitySubtitle} />
+        </header>
+
+        {/* Desktop Navbar - Profil/Keluar live here, same as PMB's AppTopbar. */}
+        <header className="hidden md:flex sticky top-0 z-30 items-center justify-end border-b border-border bg-card/95 backdrop-blur px-6 py-3">
+          <UserMenu subtitle={identitySubtitle} />
         </header>
 
         {/* Fullspan Content Container */}
