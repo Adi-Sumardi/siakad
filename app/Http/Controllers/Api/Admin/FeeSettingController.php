@@ -8,6 +8,7 @@ use App\Models\FeeComponent;
 use App\Models\FeeRate;
 use App\Models\FeeType;
 use App\Models\SchoolUnit;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -86,6 +87,26 @@ class FeeSettingController extends Controller
         ActivityLog::record($request->user(), 'fee_type.updated', $feeType, $validated);
 
         return response()->json(['fee_type' => $feeType]);
+    }
+
+    /** bills.fee_type_id is ON DELETE RESTRICT - once anything has ever been billed under this type, the database itself refuses. */
+    public function destroyType(Request $request, FeeType $feeType): JsonResponse
+    {
+        try {
+            $feeType->delete();
+        } catch (QueryException $e) {
+            if (in_array($e->getCode(), ['23000', '23503'], true)) {
+                return response()->json([
+                    'message' => "Jenis biaya \"{$feeType->name}\" sudah pernah ditagihkan ke siswa - tidak bisa dihapus, nonaktifkan saja.",
+                ], 422);
+            }
+
+            throw $e;
+        }
+
+        ActivityLog::record($request->user(), 'fee_type.deleted', $feeType, ['code' => $feeType->code, 'name' => $feeType->name]);
+
+        return response()->json(['message' => 'Jenis biaya berhasil dihapus.']);
     }
 
     public function rates(Request $request): JsonResponse
@@ -217,5 +238,23 @@ class FeeSettingController extends Controller
         ]);
 
         return response()->json(['rate' => $feeRate->fresh('components')]);
+    }
+
+    /**
+     * bills.fee_rate_id is ON DELETE SET NULL, not RESTRICT - a bill already
+     * issued keeps its own copy of the amount (see updateRate's comment), so
+     * deleting the rate it was issued under never needs blocking.
+     */
+    public function destroyRate(Request $request, FeeRate $feeRate): JsonResponse
+    {
+        ActivityLog::record($request->user(), 'fee_rate.deleted', $feeRate, [
+            'type' => $feeRate->feeType->code,
+            'unit' => $feeRate->schoolUnit->code,
+            'amount' => (float) $feeRate->amount,
+        ]);
+
+        $feeRate->delete();
+
+        return response()->json(['message' => 'Tarif berhasil dihapus.']);
     }
 }

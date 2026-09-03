@@ -277,9 +277,11 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
     Route::post('/fee-types', [FeeSettingController::class, 'storeType']);
     Route::patch('/fee-types/{feeType}', [FeeSettingController::class, 'updateType']);
+    Route::delete('/fee-types/{feeType}', [FeeSettingController::class, 'destroyType']);
 
     Route::post('/fee-rates', [FeeSettingController::class, 'storeRate']);
     Route::patch('/fee-rates/{feeRate}', [FeeSettingController::class, 'updateRate']);
+    Route::delete('/fee-rates/{feeRate}', [FeeSettingController::class, 'destroyRate']);
 
     Route::post('/discount-schemes', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'storeScheme']);
     Route::patch('/discount-schemes/{discountScheme}', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'updateScheme']);

@@ -7,6 +7,7 @@ import {
   Calendar,
   CheckCircle2,
   Download,
+  Edit2,
   Filter,
   Layers,
   Plus,
@@ -58,6 +59,7 @@ type Rate = {
   amount: number;
   due_day: number | null;
   late_fee_amount: number;
+  late_fee_grace_days: number;
   is_active: boolean;
   components: Component[];
 };
@@ -91,6 +93,19 @@ export default function FeeRatesPage() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [showYearModal, setShowYearModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Edit/Delete (administrator only)
+  const [editingRate, setEditingRate] = useState<Rate | null>(null);
+  const [deletingRate, setDeletingRate] = useState<Rate | null>(null);
+  const [editRateForm, setEditRateForm] = useState({
+    amount: "", due_day: "", late_fee_amount: "0", late_fee_grace_days: "0", is_active: true,
+  });
+
+  const [editingType, setEditingType] = useState<FeeType | null>(null);
+  const [deletingType, setDeletingType] = useState<FeeType | null>(null);
+  const [editTypeForm, setEditTypeForm] = useState({
+    name: "", allow_installment: false, requires_selection: false, requires_roster_membership: false, is_active: true,
+  });
 
   // Forms
   const [rateForm, setRateForm] = useState({
@@ -254,6 +269,96 @@ export default function FeeRatesPage() {
       loadData();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal mengaktifkan tahun ajaran.");
+    }
+  }
+
+  function openEditRate(r: Rate) {
+    setEditingRate(r);
+    setEditRateForm({
+      amount: String(r.amount),
+      due_day: r.due_day ? String(r.due_day) : "",
+      late_fee_amount: String(r.late_fee_amount ?? 0),
+      late_fee_grace_days: String(r.late_fee_grace_days ?? 0),
+      is_active: r.is_active,
+    });
+  }
+
+  async function handleUpdateRate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingRate) return;
+    setSubmitting(true);
+    try {
+      await api.patch(`/api/admin/fee-rates/${editingRate.ulid}`, {
+        amount: parseFloat(editRateForm.amount || "0"),
+        due_day: editRateForm.due_day ? parseInt(editRateForm.due_day) : null,
+        late_fee_amount: parseFloat(editRateForm.late_fee_amount || "0"),
+        late_fee_grace_days: parseInt(editRateForm.late_fee_grace_days || "0"),
+        is_active: editRateForm.is_active,
+      });
+      toast.success("Tarif berhasil diperbarui.");
+      setEditingRate(null);
+      loadData();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal memperbarui tarif.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteRate() {
+    if (!deletingRate) return;
+    setSubmitting(true);
+    try {
+      await api.delete(`/api/admin/fee-rates/${deletingRate.ulid}`);
+      toast.success("Tarif berhasil dihapus.");
+      setDeletingRate(null);
+      loadData();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal menghapus tarif.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function openEditType(t: FeeType) {
+    setEditingType(t);
+    setEditTypeForm({
+      name: t.name,
+      allow_installment: t.allow_installment,
+      requires_selection: t.requires_selection,
+      requires_roster_membership: t.requires_roster_membership,
+      is_active: t.is_active,
+    });
+  }
+
+  async function handleUpdateType(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingType) return;
+    setSubmitting(true);
+    try {
+      await api.patch(`/api/admin/fee-types/${editingType.ulid}`, editTypeForm);
+      toast.success("Jenis biaya berhasil diperbarui.");
+      setEditingType(null);
+      loadData();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal memperbarui jenis biaya.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteType() {
+    if (!deletingType) return;
+    setSubmitting(true);
+    try {
+      await api.delete(`/api/admin/fee-types/${deletingType.ulid}`);
+      toast.success("Jenis biaya berhasil dihapus.");
+      setDeletingType(null);
+      loadData();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal menghapus jenis biaya.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -471,19 +576,20 @@ export default function FeeRatesPage() {
                     <th className="px-5 py-3.5">Tahun Ajaran</th>
                     <th className="px-5 py-3.5">Jatuh Tempo</th>
                     <th className="px-5 py-3.5 text-right">Nominal Tagihan</th>
+                    {isCentral && <th className="px-5 py-3.5 text-right">Aksi</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {rates === null && (
                     <tr>
-                      <td colSpan={6} className="p-6 text-center text-muted-foreground">
+                      <td colSpan={isCentral ? 7 : 6} className="p-6 text-center text-muted-foreground">
                         Memuat data tarif...
                       </td>
                     </tr>
                   )}
                   {filteredRates?.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                      <td colSpan={isCentral ? 7 : 6} className="p-8 text-center text-muted-foreground">
                         Tidak ada tarif yang sesuai filter.
                       </td>
                     </tr>
@@ -507,6 +613,19 @@ export default function FeeRatesPage() {
                       <td className="px-5 py-4 text-right">
                         <span className="font-bold text-primary text-sm font-mono">{rupiah(r.amount)}</span>
                       </td>
+                      {isCentral && (
+                        <td className="px-5 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button size="sm" variant="outline" onClick={() => openEditRate(r)} className="h-8 px-2.5 text-xs font-semibold gap-1">
+                              <Edit2 className="size-3.5" />
+                              <span>Edit</span>
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setDeletingRate(r)} className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -529,6 +648,7 @@ export default function FeeRatesPage() {
                   <th className="px-5 py-3.5">Dapat Dicicil</th>
                   <th className="px-5 py-3.5">Jumlah Tarif Dibuat</th>
                   <th className="px-5 py-3.5">Status</th>
+                  {isCentral && <th className="px-5 py-3.5 text-right">Aksi</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -558,6 +678,19 @@ export default function FeeRatesPage() {
                         {t.is_active ? "Aktif" : "Non-aktif"}
                       </Badge>
                     </td>
+                    {isCentral && (
+                      <td className="px-5 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Button size="sm" variant="outline" onClick={() => openEditType(t)} className="h-8 px-2.5 text-xs font-semibold gap-1">
+                            <Edit2 className="size-3.5" />
+                            <span>Edit</span>
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setDeletingType(t)} className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -1047,6 +1180,178 @@ export default function FeeRatesPage() {
                 </Button>
               </div>
             </form>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL: EDIT TARIF */}
+      {editingRate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-lg p-6 border-border shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <Edit2 className="size-5 text-primary" />
+                <span>Edit Tarif</span>
+              </h2>
+              <button onClick={() => setEditingRate(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="rounded-lg bg-muted/40 p-3 text-xs space-y-1">
+              <p><span className="text-muted-foreground">Jenis:</span> <strong>{editingRate.fee_type.name}</strong></p>
+              <p><span className="text-muted-foreground">Unit:</span> <strong>{editingRate.unit.label}</strong> · <span className="text-muted-foreground">Tingkat:</span> <strong>{editingRate.tingkat ? `Kelas ${editingRate.tingkat}` : "Semua Tingkat"}</strong></p>
+              <p><span className="text-muted-foreground">Tahun Ajaran:</span> <strong>{editingRate.academic_year}</strong></p>
+              <p className="text-muted-foreground italic">Jenis biaya, unit, tingkat, dan tahun ajaran tidak bisa diubah - buat tarif baru bila kombinasinya perlu berbeda.</p>
+            </div>
+
+            <form onSubmit={handleUpdateRate} className="space-y-3.5 text-xs">
+              <div>
+                <Label className="text-xs">Nominal Tagihan (Rp)</Label>
+                <Input type="number" min={0} value={editRateForm.amount} onChange={(e) => setEditRateForm((f) => ({ ...f, amount: e.target.value }))} required className="mt-1" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Tanggal Jatuh Tempo</Label>
+                  <Input type="number" min={1} max={28} value={editRateForm.due_day} onChange={(e) => setEditRateForm((f) => ({ ...f, due_day: e.target.value }))} className="mt-1" />
+                </div>
+                <div>
+                  <Label className="text-xs">Denda Keterlambatan (Rp)</Label>
+                  <Input type="number" min={0} value={editRateForm.late_fee_amount} onChange={(e) => setEditRateForm((f) => ({ ...f, late_fee_amount: e.target.value }))} className="mt-1" />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">Masa Tenggang Sebelum Denda (hari)</Label>
+                <Input type="number" min={0} value={editRateForm.late_fee_grace_days} onChange={(e) => setEditRateForm((f) => ({ ...f, late_fee_grace_days: e.target.value }))} className="mt-1" />
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="rate_is_active_edit"
+                  checked={editRateForm.is_active}
+                  onChange={(e) => setEditRateForm((f) => ({ ...f, is_active: e.target.checked }))}
+                  className="size-4 rounded border-input"
+                />
+                <Label htmlFor="rate_is_active_edit" className="text-xs font-semibold cursor-pointer">Tarif Aktif</Label>
+              </div>
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="ghost" onClick={() => setEditingRate(null)} disabled={submitting}>Batal</Button>
+                <Button type="submit" disabled={submitting} className="font-bold shadow-xs">
+                  {submitting ? "Menyimpan…" : "Simpan Perubahan"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL: KONFIRMASI HAPUS TARIF */}
+      {deletingRate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <Card className="w-full max-w-md p-6 border-border shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-destructive">
+              <div className="size-10 rounded-full bg-destructive/10 grid place-items-center">
+                <Trash2 className="size-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-foreground">Hapus Tarif</h3>
+                <p className="text-xs text-muted-foreground">Tagihan yang sudah terbit tidak ikut terhapus.</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Hapus tarif <strong className="text-foreground">{deletingRate.fee_type.name}</strong> untuk{" "}
+              <strong className="text-foreground">{deletingRate.unit.label}</strong> ({deletingRate.academic_year})?
+            </p>
+            <div className="flex justify-end gap-2 border-t border-border pt-4">
+              <Button variant="ghost" size="sm" onClick={() => setDeletingRate(null)} disabled={submitting}>Batal</Button>
+              <Button variant="destructive" size="sm" onClick={handleDeleteRate} disabled={submitting} className="font-bold">
+                {submitting ? "Menghapus…" : "Ya, Hapus Tarif"}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL: EDIT JENIS BIAYA */}
+      {editingType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-lg p-6 border-border shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <Edit2 className="size-5 text-primary" />
+                <span>Edit Jenis Biaya</span>
+              </h2>
+              <button onClick={() => setEditingType(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateType} className="space-y-3.5 text-xs">
+              <div>
+                <Label className="text-xs">Kode</Label>
+                <Input value={editingType.code} disabled className="mt-1 opacity-60" />
+                <p className="text-[11px] text-muted-foreground mt-1">Kode tidak bisa diubah - dipakai di nomor tagihan yang sudah terbit.</p>
+              </div>
+              <div>
+                <Label className="text-xs">Nama Tagihan</Label>
+                <Input value={editTypeForm.name} onChange={(e) => setEditTypeForm((f) => ({ ...f, name: e.target.value }))} required className="mt-1" />
+              </div>
+              <div className="flex flex-col gap-2 pt-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editTypeForm.allow_installment} onChange={(e) => setEditTypeForm((f) => ({ ...f, allow_installment: e.target.checked }))} className="size-4 rounded border-input" />
+                  <span className="text-xs font-semibold">Dapat Dicicil / Custom</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editTypeForm.requires_selection} onChange={(e) => setEditTypeForm((f) => ({ ...f, requires_selection: e.target.checked }))} className="size-4 rounded border-input" />
+                  <span className="text-xs font-semibold">Butuh Pemilihan Ukuran (Seragam)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editTypeForm.requires_roster_membership} onChange={(e) => setEditTypeForm((f) => ({ ...f, requires_roster_membership: e.target.checked }))} className="size-4 rounded border-input" />
+                  <span className="text-xs font-semibold">Hanya Ditagih ke Siswa Terdaftar Ekskul</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editTypeForm.is_active} onChange={(e) => setEditTypeForm((f) => ({ ...f, is_active: e.target.checked }))} className="size-4 rounded border-input" />
+                  <span className="text-xs font-semibold">Jenis Biaya Aktif</span>
+                </label>
+              </div>
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="ghost" onClick={() => setEditingType(null)} disabled={submitting}>Batal</Button>
+                <Button type="submit" disabled={submitting} className="font-bold shadow-xs">
+                  {submitting ? "Menyimpan…" : "Simpan Perubahan"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL: KONFIRMASI HAPUS JENIS BIAYA */}
+      {deletingType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <Card className="w-full max-w-md p-6 border-border shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-destructive">
+              <div className="size-10 rounded-full bg-destructive/10 grid place-items-center">
+                <Trash2 className="size-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-foreground">Hapus Jenis Biaya</h3>
+                <p className="text-xs text-muted-foreground">Ditolak otomatis bila sudah pernah ditagihkan.</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Hapus jenis biaya <strong className="text-foreground">{deletingType.name}</strong> ({deletingType.code})?
+              {deletingType.rate_count > 0 && (
+                <span className="block mt-1.5 text-destructive font-semibold">
+                  {deletingType.rate_count} tarif unit di bawah jenis ini akan ikut terhapus.
+                </span>
+              )}
+            </p>
+            <div className="flex justify-end gap-2 border-t border-border pt-4">
+              <Button variant="ghost" size="sm" onClick={() => setDeletingType(null)} disabled={submitting}>Batal</Button>
+              <Button variant="destructive" size="sm" onClick={handleDeleteType} disabled={submitting} className="font-bold">
+                {submitting ? "Menghapus…" : "Ya, Hapus Jenis Biaya"}
+              </Button>
+            </div>
           </Card>
         </div>
       )}
