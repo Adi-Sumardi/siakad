@@ -6,6 +6,7 @@ use App\Models\Payment;
 use App\Services\Billing\BillingApiClient;
 use App\Services\Billing\BillingApiException;
 use App\Services\Billing\PaymentAllocator;
+use App\Services\Payment\BillingApiGateway;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
@@ -18,7 +19,7 @@ class PollBillingVaPayments extends Command
 
     protected $description = 'Poll the e-SPP Billing API for settled Virtual Account payments';
 
-    public function handle(BillingApiClient $client, PaymentAllocator $allocator): int
+    public function handle(BillingApiClient $client, PaymentAllocator $allocator, BillingApiGateway $gateway): int
     {
         $payments = Payment::query()
             ->whereIn('status', ['processing', 'pending'])
@@ -74,7 +75,29 @@ class PollBillingVaPayments extends Command
             }
         }
 
-        $this->info("Done. {$settledCount} payment(s) settled.");
+        // A superseded VA (a bank-switch's or a re-checkout's abandoned one)
+        // stays payable at e-SPP until its own original due date, since
+        // expireVa() cannot actually close it there (see its docblock) - the
+        // query above only ever looks at pending/processing rows, so without
+        // this a late payment on an abandoned VA would go completely
+        // unnoticed. Bounded to the window the VA itself was still valid
+        // for; past that e-SPP's own date_end should have closed it
+        // regardless of our side.
+        $superseded = Payment::query()
+            ->whereIn('status', ['failed', 'cancelled'])
+            ->where(function ($q) {
+                $q->whereIn('gateway_response->provider', ['bank_muamalat', 'bank_bsi'])
+                    ->orWhereNotNull('gateway_response->va_number');
+            })
+            ->where('expires_at', '>', now()->subDays(7))
+            ->limit((int) $this->option('limit'))
+            ->get();
+
+        foreach ($superseded as $payment) {
+            $gateway->checkForSurpriseLatePayment($payment);
+        }
+
+        $this->info("Done. {$settledCount} payment(s) settled, {$superseded->count()} superseded VA(s) checked for a surprise late payment.");
 
         return self::SUCCESS;
     }

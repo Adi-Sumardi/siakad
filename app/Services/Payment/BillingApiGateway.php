@@ -192,6 +192,18 @@ class BillingApiGateway implements PaymentGateway
      * supersession, since that already stops OUR system from double-issuing
      * against this bill - it just means the old VA stays open a little
      * longer than it should.
+     *
+     * CONFIRMED BROKEN on e-SPP's side as of 2026-09-04 (found live in PMB,
+     * the sibling app against the same e-SPP account): PUT /api/billing/{uuid}
+     * returns a 500 "Undefined index: main_form" for every payload shape
+     * tried (wrapped main_form/bmi/bsm, flat fields, a POST+_method=PUT
+     * override) - their route handler cannot read a PUT body at all, so no
+     * client-side fix here can make this call succeed. Left in place because
+     * it is harmless and will start working the moment that's fixed on their
+     * end, but it is NOT a real safety net today - see
+     * PollBillingVaPayments::handle()'s cancelled-payment check for the
+     * actual one (watching failed/cancelled VAs for a surprise late payment
+     * instead of relying on this ever closing them).
      */
     public function expireVa(Payment $payment): void
     {
@@ -214,6 +226,52 @@ class BillingApiGateway implements PaymentGateway
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * The actual safety net for a superseded VA: since expireVa() cannot
+     * reliably close it at e-SPP (its update endpoint is confirmed broken
+     * there - see expireVa()'s docblock), the old VA stays genuinely payable
+     * until its original due date. Nothing else in this app ever looks at a
+     * failed/cancelled Payment again - PollBillingVaPayments only queries
+     * pending/processing - so a late payment on it would otherwise vanish:
+     * money at the bank, no record of it here.
+     *
+     * Does not auto-apply the money - crediting a bill that may already be
+     * settled via the replacement VA needs a human to reconcile which
+     * payment is real, not a guess. Logs loudly so that reconciliation
+     * actually happens instead of the payment being silently lost.
+     */
+    public function checkForSurpriseLatePayment(Payment $payment): void
+    {
+        if (! in_array($payment->status, ['failed', 'cancelled'], true)) {
+            return;
+        }
+
+        $vaNumber = $payment->gateway_response['va_number'] ?? null;
+
+        if (! $vaNumber) {
+            return;
+        }
+
+        try {
+            $data = $this->client->getByVaNumber($vaNumber);
+        } catch (BillingApiException $e) {
+            return;
+        }
+
+        $sisa = $data['sisa'] ?? null;
+
+        if ($sisa === null || (float) $sisa > 0) {
+            return;
+        }
+
+        Log::critical('[BillingApiGateway] Money landed on a VA this app had already superseded and stopped watching - needs manual reconciliation', [
+            'payment' => $payment->payment_number,
+            'va_number' => $vaNumber,
+            'amount' => (float) $payment->amount,
+            'failed_at' => $payment->failed_at,
+        ]);
     }
 
     private function describe(Collection $bills, ?\App\Models\Student $student): string

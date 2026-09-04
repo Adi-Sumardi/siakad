@@ -15,6 +15,7 @@ use App\Services\Billing\PaymentAllocator;
 use App\Services\Payment\BillingApiGateway;
 use App\Services\Payment\PaymentGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Mockery;
 use Tests\TestCase;
 
@@ -823,5 +824,71 @@ class BillingApiVirtualAccountTest extends TestCase
         // exact date_end) are verified automatically on tearDown - reaching
         // here without a Mockery exception is the assertion.
         $this->assertTrue(true);
+    }
+
+    /**
+     * expireVa()'s remote call is confirmed non-functional against the real
+     * e-SPP API (its PUT endpoint 500s on every payload shape, verified live
+     * in PMB, the sibling app against the same e-SPP account, 2026-09-04) -
+     * this is the actual safety net: nothing else in this app ever looks at
+     * a failed/cancelled Payment again, so a late payment on the still-open
+     * superseded VA needs to be caught here or it is lost without a trace.
+     */
+    public function test_it_logs_a_critical_alert_when_a_superseded_va_is_paid_anyway(): void
+    {
+        $payment = Payment::create([
+            'payment_number' => 'SPP-SUPERSEDED-001',
+            'amount' => 650000,
+            'method' => 'virtual_account',
+            'status' => 'failed',
+            'gateway_response' => ['provider' => 'bank_muamalat', 'va_number' => '8020042728000077'],
+            'expires_at' => now()->addDays(2),
+            'failed_at' => now(),
+        ]);
+
+        $mockClient = Mockery::mock(BillingApiClient::class);
+        $mockClient->shouldReceive('getByVaNumber')
+            ->once()
+            ->with('8020042728000077')
+            ->andReturn(['sisa' => 0, 'jumlah_tagihan' => 650000]);
+        $this->app->instance(BillingApiClient::class, $mockClient);
+
+        Log::spy();
+
+        app(BillingApiGateway::class)->checkForSurpriseLatePayment($payment->fresh());
+
+        Log::shouldHaveReceived('critical')
+            ->withArgs(fn ($message, $context) => str_contains($message, 'already superseded')
+                && $context['payment'] === 'SPP-SUPERSEDED-001')
+            ->once();
+
+        // Not auto-applied - status stays exactly as it was, a human decides.
+        $this->assertSame('failed', $payment->fresh()->status);
+    }
+
+    public function test_it_says_nothing_when_a_superseded_va_is_still_unpaid(): void
+    {
+        $payment = Payment::create([
+            'payment_number' => 'SPP-SUPERSEDED-002',
+            'amount' => 650000,
+            'method' => 'virtual_account',
+            'status' => 'failed',
+            'gateway_response' => ['provider' => 'bank_muamalat', 'va_number' => '8020042728000078'],
+            'expires_at' => now()->addDays(2),
+            'failed_at' => now(),
+        ]);
+
+        $mockClient = Mockery::mock(BillingApiClient::class);
+        $mockClient->shouldReceive('getByVaNumber')
+            ->once()
+            ->with('8020042728000078')
+            ->andReturn(['sisa' => 650000, 'jumlah_tagihan' => 650000]);
+        $this->app->instance(BillingApiClient::class, $mockClient);
+
+        Log::spy();
+
+        app(BillingApiGateway::class)->checkForSurpriseLatePayment($payment->fresh());
+
+        Log::shouldNotHaveReceived('critical');
     }
 }
