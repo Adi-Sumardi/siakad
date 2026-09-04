@@ -54,17 +54,11 @@ function handleExpiredSession() {
   window.location.href = "/login";
 }
 
-export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const method = (options.method ?? "GET").toUpperCase();
-
-  if (UNSAFE_METHODS.has(method) && !getCookie("XSRF-TOKEN")) {
-    await ensureCsrfCookie();
-  }
-
+async function performFetch(path: string, method: string, options: RequestInit): Promise<Response> {
   const xsrfToken = getCookie("XSRF-TOKEN");
   const isFormData = options.body instanceof FormData;
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  return fetch(`${API_BASE}${path}`, {
     ...options,
     method,
     credentials: "include",
@@ -75,6 +69,30 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
       ...options.headers,
     },
   });
+}
+
+export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const method = (options.method ?? "GET").toUpperCase();
+  const isUnsafe = UNSAFE_METHODS.has(method);
+
+  if (isUnsafe && !getCookie("XSRF-TOKEN")) {
+    await ensureCsrfCookie();
+  }
+
+  let response = await performFetch(path, method, options);
+
+  // XSRF-TOKEN can go stale without disappearing - another tab signing in
+  // regenerates the session (and its CSRF token) under the same cookie
+  // name, or a tab is simply left open long enough for that to happen
+  // elsewhere. Since the cookie is still present, the check above never
+  // re-fetches it, and every mutating request in that tab then failed the
+  // same way until a full page reload happened to trigger a fresh
+  // /sanctum/csrf-cookie call. One transparent retry after a real refresh
+  // covers that without the user needing to notice or do anything.
+  if (response.status === 419 && isUnsafe) {
+    await ensureCsrfCookie();
+    response = await performFetch(path, method, options);
+  }
 
   if (response.status === 204) {
     return undefined as T;
