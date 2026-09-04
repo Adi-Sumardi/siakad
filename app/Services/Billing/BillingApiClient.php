@@ -303,6 +303,49 @@ class BillingApiClient
     }
 
     /**
+     * Updates an existing billing record on e-SPP by its uuid (docs 5.2.6).
+     * Used to shrink a superseded VA's date_end to today when a guardian
+     * switches bank or re-checks out - see BillingApiGateway::expireVa().
+     *
+     * @param array<string, mixed> $mainForm any of createBilling()'s main_form fields; only what is passed is changed. bank_id falls back to config('services.billing_api.bank_id') when omitted.
+     * @param array<string, mixed> $bmi
+     * @param array<string, mixed> $bsm
+     */
+    public function updateBilling(string $uuid, array $mainForm, array $bmi = [], array $bsm = []): array
+    {
+        $mainForm += ['bank_id' => (string) config('services.billing_api.bank_id', '1')];
+
+        $payload = [
+            'main_form' => $mainForm,
+            'bmi' => $bmi,
+            'bsm' => $bsm,
+        ];
+
+        $response = $this->client()->put('/api/billing/'.urlencode($uuid), $payload);
+
+        if ($response->status() === 401) {
+            Cache::forget(self::TOKEN_CACHE_KEY);
+            $response = $this->client()->put('/api/billing/'.urlencode($uuid), $payload);
+        }
+
+        if ($response->failed()) {
+            Log::error('[BillingApiClient] updateBilling failed', [
+                'uuid' => $uuid,
+                'status' => $response->status(),
+                'body' => $response->body(),
+                'payload' => $payload,
+            ]);
+
+            throw new BillingApiException(
+                'e-SPP updateBilling failed: '.$response->body(),
+                $response->status()
+            );
+        }
+
+        return $response->json() ?? [];
+    }
+
+    /**
      * Looks up an existing billing by its Bank Muamalat Virtual Account Number.
      */
     public function getByVaNumber(string $vaNumber): array

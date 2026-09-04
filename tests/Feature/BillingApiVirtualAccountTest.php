@@ -769,4 +769,59 @@ class BillingApiVirtualAccountTest extends TestCase
 
         $response->assertStatus(201);
     }
+
+    /**
+     * A superseded VA payment used to only get marked 'failed' locally -
+     * e-SPP's own bill for that VA kept its original date_end and stayed
+     * fully payable at the bank counter. PollBillingVaPayments only ever
+     * polls pending/processing payments, so a guardian who paid the
+     * abandoned VA anyway after switching banks would have had that money
+     * land at e-SPP against a bill our side had already stopped watching.
+     */
+    public function test_switching_bank_shrinks_the_abandoned_vas_validity_window_at_e_spp(): void
+    {
+        $user = User::create(['name' => 'Wali Ganti Bank', 'role' => 'orangtua', 'phone' => '081292709000', 'is_active' => true]);
+        $guardian = Guardian::create(['user_id' => $user->id, 'nama' => 'Wali Ganti Bank', 'hubungan' => 'ayah']);
+        $student = Student::create(['nama_lengkap' => 'Anak Ganti Bank', 'jenis_kelamin' => 'L', 'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'nis' => '703']);
+        $student->guardians()->attach($guardian->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+        $sppType = FeeType::create(['code' => 'spp', 'name' => 'SPP', 'recurrence' => 'monthly']);
+        $bill = Bill::create([
+            'bill_number' => 'SPP/2026/09/00030', 'dedup_key' => 'spp:2026:09:'.$student->id,
+            'description' => 'SPP September 2026', 'student_id' => $student->id,
+            'academic_year_id' => $this->year->id, 'fee_type_id' => $sppType->id,
+            'subtotal' => 650000, 'total_amount' => 650000, 'remaining_amount' => 650000,
+            'status' => 'unpaid', 'due_date' => now()->addDays(7)->toDateString(), 'issued_at' => now(),
+        ]);
+
+        $mockClient = Mockery::mock(BillingApiClient::class);
+        $mockClient->shouldReceive('createBilling')
+            ->twice()
+            ->andReturn(['uuid' => 'muamalat-uuid'], ['uuid' => 'bsi-uuid']);
+        $mockClient->shouldReceive('updateBilling')
+            ->once()
+            ->with('muamalat-uuid', Mockery::on(fn ($mainForm) => $mainForm['date_end'] === now()->toDateString()))
+            ->andReturn([]);
+        $this->app->instance(BillingApiClient::class, $mockClient);
+
+        $this->actingAs($user);
+
+        $this->postJson('/api/wali/checkout', [
+            'bill_ulids' => [$bill->ulid],
+            'method' => 'virtual_account',
+            'bank' => 'muamalat',
+        ])->assertStatus(201);
+
+        // Same bill, different bank - this is the "ganti bank" path.
+        $this->postJson('/api/wali/checkout', [
+            'bill_ulids' => [$bill->ulid],
+            'method' => 'virtual_account',
+            'bank' => 'bsi',
+        ])->assertStatus(201);
+
+        // Mockery's mock expectations above (->once(), the exact uuid, the
+        // exact date_end) are verified automatically on tearDown - reaching
+        // here without a Mockery exception is the assertion.
+        $this->assertTrue(true);
+    }
 }

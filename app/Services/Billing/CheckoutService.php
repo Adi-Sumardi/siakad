@@ -193,11 +193,29 @@ class CheckoutService
                     ->orWhereNotNull('gateway_response->va_number');
             })
             ->get()
-            ->each(fn (Payment $stale) => $this->allocator->fail(
+            ->each(fn (Payment $stale) => $this->failAndExpire(
                 $stale,
-                'failed',
                 'Digantikan oleh checkout baru untuk anak dan jenis biaya yang sama.',
             ));
+    }
+
+    /**
+     * Fails a superseded payment and, if it was a VA payment, also shrinks
+     * its e-SPP bill to today so the abandoned VA stops accepting money at
+     * the bank counter - see BillingApiGateway::expireVa() for why this
+     * matters. Resolved from the container rather than $this->gateway: the
+     * NEW checkout replacing this one may be on a different gateway
+     * entirely (Xendit, SendagoPay), but the STALE payment being failed here
+     * can still be the one still-open VA that needs closing.
+     */
+    private function failAndExpire(Payment $stale, string $reason): void
+    {
+        $this->allocator->fail($stale, 'failed', $reason);
+
+        $provider = $stale->gateway_response['provider'] ?? null;
+        if (in_array($provider, ['bank_muamalat', 'bank_bsi'], true)) {
+            app(BillingApiGateway::class)->expireVa($stale);
+        }
     }
 
     /**
@@ -215,9 +233,8 @@ class CheckoutService
         Payment::whereIn('id', $paymentIds)
             ->whereIn('status', ['pending', 'processing'])
             ->get()
-            ->each(fn (Payment $stale) => $this->allocator->fail(
+            ->each(fn (Payment $stale) => $this->failAndExpire(
                 $stale,
-                'failed',
                 'Digantikan oleh checkout baru untuk tagihan yang sama.',
             ));
     }

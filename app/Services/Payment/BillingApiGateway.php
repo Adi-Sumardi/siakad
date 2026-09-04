@@ -176,6 +176,46 @@ class BillingApiGateway implements PaymentGateway
         }
     }
 
+    /**
+     * Shrinks a superseded VA payment's e-SPP bill to today, so it stops
+     * accepting money at the bank counter.
+     *
+     * CheckoutService::supersedePendingPaymentsFor() and
+     * supersedeOtherVaPaymentsForSameGroup() (bank switch, or simply
+     * re-checking out) only ever flip the old Payment to 'failed' locally -
+     * e-SPP's own bill for that VA kept its original date_end and stayed
+     * fully payable there. Since PollBillingVaPayments only ever polls
+     * pending/processing payments, a guardian who paid the abandoned VA
+     * anyway after switching would have had that money land at e-SPP against
+     * a bill our side had already stopped watching, with nothing to notice
+     * it. Best-effort: e-SPP being unreachable must not block the local
+     * supersession, since that already stops OUR system from double-issuing
+     * against this bill - it just means the old VA stays open a little
+     * longer than it should.
+     */
+    public function expireVa(Payment $payment): void
+    {
+        $rawUuid = $payment->gateway_response['billing_uuid'] ?? null;
+        $billingUuid = is_array($rawUuid) ? ($rawUuid['string'] ?? null) : $rawUuid;
+
+        // 'sim_' uuids are the non-production fallback minted when e-SPP was
+        // unreachable at create time (see the catch block above) - nothing
+        // real was ever registered for them.
+        if (! $billingUuid || ! is_string($billingUuid) || str_starts_with($billingUuid, 'sim_')) {
+            return;
+        }
+
+        try {
+            $this->client->updateBilling($billingUuid, ['date_end' => now()->toDateString()]);
+        } catch (\Throwable $e) {
+            Log::warning('[BillingApiGateway] Failed to expire a superseded VA at e-SPP', [
+                'payment' => $payment->payment_number,
+                'va_number' => $payment->gateway_response['va_number'] ?? null,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     private function describe(Collection $bills, ?\App\Models\Student $student): string
     {
         if ($bills->count() === 1) {
