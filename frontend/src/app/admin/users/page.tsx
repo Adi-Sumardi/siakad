@@ -26,6 +26,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Pagination } from "@/components/pagination";
 import { api, ApiError } from "@/lib/api";
 import { tanggalWaktu } from "@/lib/format";
 
@@ -47,6 +48,7 @@ type SchoolUnit = { ulid: string; code: string; label: string };
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState<UserItem[] | null>(null);
+  const [meta, setMeta] = useState<{ current_page: number; last_page: number } | null>(null);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -55,6 +57,7 @@ export default function UserManagementPage() {
   const [roleFilter, setRoleFilter] = useState("");
   const [unitFilter, setUnitFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [page, setPage] = useState(1);
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -77,10 +80,13 @@ export default function UserManagementPage() {
     if (roleFilter) params.set("role", roleFilter);
     if (unitFilter) params.set("unit", unitFilter);
     if (statusFilter !== "") params.set("is_active", statusFilter);
+    if (page > 1) params.set("page", String(page));
 
     api
-      .get<{ users: { data: UserItem[] } }>(`/api/admin/users?${params.toString()}`)
-      .then((d) => setUsers(d.users.data))
+      .get<{ users: { data: UserItem[]; meta: { current_page: number; last_page: number } } }>(
+        `/api/admin/users?${params.toString()}`,
+      )
+      .then((d) => { setUsers(d.users.data); setMeta(d.users.meta); })
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat pengguna."))
       .finally(() => setLoading(false));
   }
@@ -91,10 +97,11 @@ export default function UserManagementPage() {
       .get<{ school_units: SchoolUnit[] }>("/api/admin/school-units")
       .then((d) => setUnits(d.school_units))
       .catch(() => {});
-  }, [roleFilter, unitFilter, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [roleFilter, unitFilter, statusFilter, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setPage(1);
     loadUsers();
   }
 
@@ -378,6 +385,14 @@ export default function UserManagementPage() {
                 ))}
             </tbody>
           </table>
+        </div>
+
+        <div className="px-4 pb-4">
+          <Pagination
+            currentPage={meta?.current_page ?? 1}
+            lastPage={meta?.last_page ?? 1}
+            onChange={setPage}
+          />
         </div>
       </Card>
 

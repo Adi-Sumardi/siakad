@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Pagination } from "@/components/pagination";
 import { api, ApiError } from "@/lib/api";
 import { dueLabel, rupiah, tanggal } from "@/lib/format";
 import { isOpen, type Bill } from "@/lib/types/billing";
@@ -40,6 +41,7 @@ export default function AdminBillsPage() {
   const [units, setUnits] = useState<Option[]>([]);
   const [years, setYears] = useState<{ ulid: string; year: string; is_active: boolean }[]>([]);
   const [action, setAction] = useState<Action | null>(null);
+  const [page, setPage] = useState(1);
 
   // Form states
   const [submitting, setSubmitting] = useState(false);
@@ -53,6 +55,7 @@ export default function AdminBillsPage() {
     if (q) params.set("q", q);
     if (unitCode) params.set("unit", unitCode);
     if (academicYear) params.set("year", academicYear);
+    if (page > 1) params.set("page", String(page));
 
     try {
       const d = await api.get<{ bills: Paginated<Bill> }>(`/api/admin/bills?${params}`);
@@ -60,7 +63,7 @@ export default function AdminBillsPage() {
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan.");
     }
-  }, [status, q, unitCode, academicYear]);
+  }, [status, q, unitCode, academicYear, page]);
 
   useEffect(() => {
     load();
@@ -143,7 +146,7 @@ export default function AdminBillsPage() {
           <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => { setQ(e.target.value); setPage(1); }}
             placeholder="Cari nama siswa atau no tagihan…"
             className="pl-9 bg-card text-xs shadow-2xs"
           />
@@ -157,7 +160,7 @@ export default function AdminBillsPage() {
 
           <select
             value={academicYear}
-            onChange={(e) => setAcademicYear(e.target.value)}
+            onChange={(e) => { setAcademicYear(e.target.value); setPage(1); }}
             className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
           >
             <option value="">Semua Tahun Ajaran</option>
@@ -170,7 +173,7 @@ export default function AdminBillsPage() {
 
           <select
             value={unitCode}
-            onChange={(e) => setUnitCode(e.target.value)}
+            onChange={(e) => { setUnitCode(e.target.value); setPage(1); }}
             className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
           >
             <option value="">Semua Unit Sekolah</option>
@@ -181,7 +184,7 @@ export default function AdminBillsPage() {
 
           <select
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={(e) => { setStatus(e.target.value); setPage(1); }}
             className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
           >
             <option value="open">Belum Lunas</option>
@@ -288,6 +291,12 @@ export default function AdminBillsPage() {
             Tidak ada tagihan yang sesuai kriteria pencarian.
           </Card>
         )}
+
+        <Pagination
+          currentPage={bills?.meta.current_page ?? 1}
+          lastPage={bills?.meta.last_page ?? 1}
+          onChange={setPage}
+        />
       </div>
 
       {/* ACTION MODAL */}

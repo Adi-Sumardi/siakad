@@ -31,6 +31,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Pagination } from "@/components/pagination";
 import { useAuth } from "@/lib/auth/auth-context";
 import { api, ApiError } from "@/lib/api";
 import { rupiah } from "@/lib/format";
@@ -82,6 +83,8 @@ export default function AdminStudentsPage() {
   const isAdministrator = user?.role === "admin";
 
   const [students, setStudents] = useState<StudentItem[] | null>(null);
+  const [meta, setMeta] = useState<{ current_page: number; last_page: number } | null>(null);
+  const [page, setPage] = useState(1);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [selectedYear, setSelectedYear] = useState<string>("");
@@ -121,13 +124,18 @@ export default function AdminStudentsPage() {
     if (jenjangFilter) params.set("jenjang", jenjangFilter);
     if (statusFilter) params.set("status", statusFilter);
     if (selectedYear) params.set("academic_year", selectedYear);
+    if (page > 1) params.set("page", String(page));
 
     api
-      .get<{ students: { data: StudentItem[]; meta: { selected_academic_year: string } } }>(
-        `/api/admin/students?${params.toString()}`,
-      )
+      .get<{
+        students: {
+          data: StudentItem[];
+          meta: { selected_academic_year: string; current_page: number; last_page: number };
+        };
+      }>(`/api/admin/students?${params.toString()}`)
       .then((d) => {
         setStudents(d.students.data);
+        setMeta(d.students.meta);
       })
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data siswa."))
       .finally(() => setLoading(false));
@@ -156,10 +164,11 @@ export default function AdminStudentsPage() {
     if (selectedYear) {
       loadStudents();
     }
-  }, [selectedYear, unitFilter, jenjangFilter, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedYear, unitFilter, jenjangFilter, statusFilter, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setPage(1);
     loadStudents();
   }
 
@@ -274,7 +283,7 @@ export default function AdminStudentsPage() {
             <span className="text-xs font-semibold text-muted-foreground">Tahun:</span>
             <select
               value={selectedYear}
-              onChange={(e) => setSelectedYear(e.target.value)}
+              onChange={(e) => { setSelectedYear(e.target.value); setPage(1); }}
               className="bg-transparent text-xs font-bold text-foreground focus:outline-hidden"
             >
               {years.map((y) => (
@@ -384,7 +393,7 @@ export default function AdminStudentsPage() {
             <Label className="text-xs">Jenjang Sekolah</Label>
             <select
               value={jenjangFilter}
-              onChange={(e) => setJenjangFilter(e.target.value)}
+              onChange={(e) => { setJenjangFilter(e.target.value); setPage(1); }}
               className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
             >
               <option value="">Semua Jenjang</option>
@@ -399,7 +408,7 @@ export default function AdminStudentsPage() {
             <Label className="text-xs">Unit Sekolah</Label>
             <select
               value={unitFilter}
-              onChange={(e) => setUnitFilter(e.target.value)}
+              onChange={(e) => { setUnitFilter(e.target.value); setPage(1); }}
               className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
             >
               <option value="">Semua Unit</option>
@@ -416,7 +425,7 @@ export default function AdminStudentsPage() {
               <Label className="text-xs">Status Siswa</Label>
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
               >
                 <option value="">Semua Status</option>
@@ -587,6 +596,14 @@ export default function AdminStudentsPage() {
                 })}
             </tbody>
           </table>
+        </div>
+
+        <div className="px-4 pb-4">
+          <Pagination
+            currentPage={meta?.current_page ?? 1}
+            lastPage={meta?.last_page ?? 1}
+            onChange={setPage}
+          />
         </div>
       </Card>
 
