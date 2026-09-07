@@ -25,7 +25,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, API_BASE } from "@/lib/api";
 import { rupiah } from "@/lib/format";
 import { useAuth } from "@/lib/auth/auth-context";
 
@@ -385,6 +385,32 @@ export default function FeeRatesPage() {
       loadData();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal mengubah status jenis biaya.");
+    }
+  }
+
+  // Download endpoints live on the API origin, so a plain <a href="/api/...">
+  // would hit Next.js itself and 404 in development. Fetch with the Sanctum
+  // session cookie and hand the browser a blob instead - same pattern as the
+  // bill PDF downloads.
+  async function downloadApiFile(path: string, filename: string) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+
+      if (!res.ok) {
+        throw new Error("Gagal mengunduh file. Pastikan sesi Anda masih aktif.");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh file.");
     }
   }
 
@@ -1182,14 +1208,14 @@ export default function FeeRatesPage() {
               <p>
                 File .CSV dengan kolom: <code>fee_type_code</code> (contoh: <code>spp</code>, <code>uang_gedung</code>), <code>unit_code</code> (contoh: <code>sd</code>, <code>smp</code>), <code>tingkat</code> (1-12 atau kosong untuk semua tingkat), <code>academic_year</code> (contoh: <code>2027/2028</code>), <code>amount</code> (nominal angka), <code>due_day</code> (tgl jatuh tempo).
               </p>
-              <a
-                href="/api/admin/import/fee-rates/template"
-                download
+              <button
+                type="button"
+                onClick={() => downloadApiFile("/api/admin/import/fee-rates/template", "template_import_tarif_siakad.csv")}
                 className="inline-flex items-center gap-1.5 font-bold text-primary hover:underline pt-1"
               >
                 <Download className="size-3.5" />
                 <span>Unduh Format Template CSV Tarif SPP</span>
-              </a>
+              </button>
             </div>
 
             <form onSubmit={handleImportTariff} className="space-y-4 text-xs">
