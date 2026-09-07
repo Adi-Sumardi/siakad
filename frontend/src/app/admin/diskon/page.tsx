@@ -283,7 +283,7 @@ export default function AdminDiscountPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Skema</span>
             <BadgePercent className="size-5 text-primary" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{schemes?.length ?? <Skeleton className="h-8 w-16" />}</p>
+          <div className="mt-2 text-2xl font-bold">{schemes?.length ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Kategori beasiswa & potongan</p>
         </Card>
 
@@ -292,9 +292,9 @@ export default function AdminDiscountPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Skema Aktif</span>
             <CheckCircle2 className="size-5 text-emerald-600" />
           </div>
-          <p className="mt-2 text-2xl font-bold">
+          <div className="mt-2 text-2xl font-bold">
             {schemes?.filter((s) => s.is_active).length ?? <Skeleton className="h-8 w-16" />}
-          </p>
+          </div>
           <p className="mt-1 text-xs text-muted-foreground">Dapat diterapkan pada tagihan</p>
         </Card>
 
@@ -303,7 +303,7 @@ export default function AdminDiscountPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Siswa Penerima</span>
             <Users className="size-5 text-amber-600" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{studentDiscounts?.length ?? <Skeleton className="h-8 w-16" />}</p>
+          <div className="mt-2 text-2xl font-bold">{studentDiscounts?.length ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Siswa aktif penerima beasiswa</p>
         </Card>
       </div>

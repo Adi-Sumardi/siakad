@@ -218,9 +218,9 @@ export default function AdminHomePage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Siswa Terdaftar</span>
             <GraduationCap className="size-5 text-primary" />
           </div>
-          <p className="mt-2 text-2xl font-black text-foreground">
+          <div className="mt-2 text-2xl font-black text-foreground">
             {studentCount !== null ? `${studentCount} Siswa` : <Skeleton className="h-8 w-28" />}
-          </p>
+          </div>
           <p className="mt-1 text-xs text-muted-foreground">Aktif di 8 unit sekolah</p>
         </Card>
 
@@ -229,9 +229,9 @@ export default function AdminHomePage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Penerimaan Kas (Terbayar)</span>
             <TrendingUp className="size-5 text-good" />
           </div>
-          <p className="mt-2 text-2xl font-black text-good">
+          <div className="mt-2 text-2xl font-black text-good">
             {billingData ? rupiah(billingData.summary.total_paid) : <Skeleton className="h-8 w-32" />}
-          </p>
+          </div>
           <p className="mt-1 text-xs text-muted-foreground">
             {billingData ? `Tingkat Pelunasan: ${billingData.summary.collection_rate}%` : "Memuat..."}
           </p>
@@ -242,9 +242,9 @@ export default function AdminHomePage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sisa Piutang / Tunggakan</span>
             <TrendingDown className="size-5 text-destructive" />
           </div>
-          <p className="mt-2 text-2xl font-black text-destructive">
+          <div className="mt-2 text-2xl font-black text-destructive">
             {billingData ? rupiah(billingData.summary.total_outstanding) : <Skeleton className="h-8 w-32" />}
-          </p>
+          </div>
           <p className="mt-1 text-xs text-muted-foreground">Perlu pemantauan & tindak lanjut</p>
         </Card>
 
@@ -253,9 +253,9 @@ export default function AdminHomePage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Prestasi Terverifikasi</span>
             <Trophy className="size-5 text-amber-500" />
           </div>
-          <p className="mt-2 text-2xl font-black text-foreground">
+          <div className="mt-2 text-2xl font-black text-foreground">
             {achievementData ? `${achievementData.summary.total_achievements} Prestasi` : <Skeleton className="h-8 w-24" />}
-          </p>
+          </div>
           <p className="mt-1 text-xs text-muted-foreground">
             {achievementData ? `${achievementData.summary.total_siswa} Siswa · ${achievementData.summary.total_guru} Guru` : "Memuat..."}
           </p>

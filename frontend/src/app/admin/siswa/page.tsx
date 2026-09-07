@@ -33,7 +33,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pagination } from "@/components/pagination";
 import { useAuth } from "@/lib/auth/auth-context";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, API_BASE } from "@/lib/api";
 import { rupiah } from "@/lib/format";
 
 type StudentItem = {
@@ -172,6 +172,32 @@ export default function AdminStudentsPage() {
     loadStudents();
   }
 
+  // Download endpoints live on the API origin, so a plain <a href="/api/...">
+  // would hit Next.js itself and 404 in development. Fetch with the Sanctum
+  // session cookie and hand the browser a blob instead - same pattern as the
+  // bill PDF downloads.
+  async function downloadApiFile(path: string, filename: string) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+
+      if (!res.ok) {
+        throw new Error("Gagal mengunduh file. Pastikan sesi Anda masih aktif.");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh file.");
+    }
+  }
+
   async function handleImportSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!importFile) {
@@ -308,12 +334,16 @@ export default function AdminStudentsPage() {
             <span>Import Siswa (CSV/Excel)</span>
           </Button>
 
-          <a href="/api/admin/students/dapodik-export" download title="Unduh CSV Formulir Peserta Didik (Dapodik) - untuk mempercepat entry manual, bukan impor otomatis ke Dapodik.">
-            <Button variant="outline" size="sm" className="gap-1.5 font-semibold text-xs h-9">
-              <FileSpreadsheet className="size-4 text-primary" />
-              <span>Ekspor Dapodik</span>
-            </Button>
-          </a>
+          <Button
+            onClick={() => downloadApiFile("/api/admin/students/dapodik-export", "formulir_peserta_didik_dapodik.csv")}
+            variant="outline"
+            size="sm"
+            className="gap-1.5 font-semibold text-xs h-9"
+            title="Unduh CSV Formulir Peserta Didik (Dapodik) - untuk mempercepat entry manual, bukan impor otomatis ke Dapodik."
+          >
+            <FileSpreadsheet className="size-4 text-primary" />
+            <span>Ekspor Dapodik</span>
+          </Button>
 
           <Link href="/admin/diskon">
             <Button variant="outline" size="sm" className="gap-1.5 font-semibold text-xs h-9">
@@ -626,14 +656,14 @@ export default function AdminStudentsPage() {
               <p>
                 File spreadsheet (.CSV). Pastikan berisi kolom: <code>nama_lengkap</code>, <code>nis</code>, <code>nisn</code>, <code>jenis_kelamin</code> (L/P), <code>unit_code</code> (contoh: <code>sd</code>, <code>smp</code>, <code>sma</code>), <code>kelas</code>, <code>wali_nama</code>, <code>wali_phone</code>, <code>wali_email</code>.
               </p>
-              <a
-                href="/api/admin/import/students/template"
-                download
+              <button
+                type="button"
+                onClick={() => downloadApiFile("/api/admin/import/students/template", "template_import_siswa_siakad.csv")}
                 className="inline-flex items-center gap-1.5 font-bold text-primary hover:underline pt-1"
               >
                 <Download className="size-3.5" />
                 <span>Unduh Format Template CSV Siswa</span>
-              </a>
+              </button>
             </div>
 
             <form onSubmit={handleImportSubmit} className="space-y-4 text-xs">

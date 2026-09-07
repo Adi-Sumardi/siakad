@@ -25,7 +25,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, API_BASE } from "@/lib/api";
 import { rupiah } from "@/lib/format";
 import { useAuth } from "@/lib/auth/auth-context";
 
@@ -388,6 +388,32 @@ export default function FeeRatesPage() {
     }
   }
 
+  // Download endpoints live on the API origin, so a plain <a href="/api/...">
+  // would hit Next.js itself and 404 in development. Fetch with the Sanctum
+  // session cookie and hand the browser a blob instead - same pattern as the
+  // bill PDF downloads.
+  async function downloadApiFile(path: string, filename: string) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+
+      if (!res.ok) {
+        throw new Error("Gagal mengunduh file. Pastikan sesi Anda masih aktif.");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh file.");
+    }
+  }
+
   async function handleImportTariff(e: React.FormEvent) {
     e.preventDefault();
     if (!importFile) {
@@ -496,7 +522,7 @@ export default function FeeRatesPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Tarif Terpasang</span>
             <Building2 className="size-5 text-primary" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{rates?.length ?? <Skeleton className="h-8 w-16" />}</p>
+          <div className="mt-2 text-2xl font-bold">{rates?.length ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Kombinasi unit, kelas & tahun ajaran</p>
         </Card>
 
@@ -505,7 +531,7 @@ export default function FeeRatesPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Master Jenis Biaya</span>
             <Layers className="size-5 text-indigo-600" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{feeTypes?.length ?? <Skeleton className="h-8 w-16" />}</p>
+          <div className="mt-2 text-2xl font-bold">{feeTypes?.length ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Kategori tagihan (SPP, Gedung, Seragam, dll)</p>
         </Card>
 
@@ -1182,14 +1208,14 @@ export default function FeeRatesPage() {
               <p>
                 File .CSV dengan kolom: <code>fee_type_code</code> (contoh: <code>spp</code>, <code>uang_gedung</code>), <code>unit_code</code> (contoh: <code>sd</code>, <code>smp</code>), <code>tingkat</code> (1-12 atau kosong untuk semua tingkat), <code>academic_year</code> (contoh: <code>2027/2028</code>), <code>amount</code> (nominal angka), <code>due_day</code> (tgl jatuh tempo).
               </p>
-              <a
-                href="/api/admin/import/fee-rates/template"
-                download
+              <button
+                type="button"
+                onClick={() => downloadApiFile("/api/admin/import/fee-rates/template", "template_import_tarif_siakad.csv")}
                 className="inline-flex items-center gap-1.5 font-bold text-primary hover:underline pt-1"
               >
                 <Download className="size-3.5" />
                 <span>Unduh Format Template CSV Tarif SPP</span>
-              </a>
+              </button>
             </div>
 
             <form onSubmit={handleImportTariff} className="space-y-4 text-xs">
