@@ -522,7 +522,7 @@ export default function FeeRatesPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Tarif Terpasang</span>
             <Building2 className="size-5 text-primary" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{rates?.length ?? <Skeleton className="h-8 w-16" />}</p>
+          <div className="mt-2 text-2xl font-bold">{rates?.length ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Kombinasi unit, kelas & tahun ajaran</p>
         </Card>
 
@@ -531,7 +531,7 @@ export default function FeeRatesPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Master Jenis Biaya</span>
             <Layers className="size-5 text-indigo-600" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{feeTypes?.length ?? <Skeleton className="h-8 w-16" />}</p>
+          <div className="mt-2 text-2xl font-bold">{feeTypes?.length ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Kategori tagihan (SPP, Gedung, Seragam, dll)</p>
         </Card>
 
