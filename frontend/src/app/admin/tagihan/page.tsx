@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, API_BASE } from "@/lib/api";
 import { dueLabel, rupiah, tanggal } from "@/lib/format";
 import { isOpen, type Bill } from "@/lib/types/billing";
 
@@ -77,6 +77,32 @@ export default function AdminBillsPage() {
       .then((d) => setYears(d.academic_years))
       .catch(() => {});
   }, []);
+
+  // Download endpoints live on the API origin, so a plain <a href="/api/...">
+  // would hit Next.js itself and 404 in development. Fetch with the Sanctum
+  // session cookie and hand the browser a blob instead - same pattern as the
+  // bill PDF downloads.
+  async function downloadApiFile(path: string, filename: string) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+
+      if (!res.ok) {
+        throw new Error("Gagal mengunduh file. Pastikan sesi Anda masih aktif.");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh file.");
+    }
+  }
 
   function openAction(bill: Bill, kind: Action["kind"]) {
     setAction({ bill, kind });
@@ -269,15 +295,19 @@ export default function AdminBillsPage() {
                   )}
                 </div>
 
-                <a
-                  href={`/api/admin/bills/${bill.ulid}/pdf`}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadApiFile(
+                      `/api/admin/bills/${bill.ulid}/pdf`,
+                      `Tagihan-${bill.bill_number.replace(/\//g, "-")}.pdf`,
+                    )
+                  }
                   className="inline-flex items-center gap-1 text-xs text-primary font-medium hover:underline"
                 >
                   <Download className="size-3.5" />
                   <span>Invoice PDF</span>
-                </a>
+                </button>
               </div>
             )}
           </Card>
