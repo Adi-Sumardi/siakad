@@ -312,6 +312,10 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('/import/fee-rates', [\App\Http\Controllers\Api\Admin\ImportController::class, 'importFeeRates']);
     Route::get('/import/students/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadStudentTemplate']);
     Route::get('/import/fee-rates/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadFeeRateTemplate']);
+
+    // Read-only audit trail viewer - see the controller for why this is
+    // central-admin only for now.
+    Route::get('/activity-logs', [\App\Http\Controllers\Api\Admin\ActivityLogController::class, 'index']);
 });
 
 // Dev-only convenience for exercising checkout end to end without a live
