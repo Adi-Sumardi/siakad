@@ -66,7 +66,7 @@ function PaymentsContent() {
 
   const load = useCallback(async () => {
     try {
-      const data = await api.get<{ payments: Payment[] }>("/api/wali/bills/payments");
+      const data = await api.get<{ payments: Payment[] }>("/api/wali/payments");
       setPayments(data.payments);
 
       // Auto-open modal if requested via URL param
