@@ -51,7 +51,7 @@ erDiagram
 | Kolom | Tipe | Catatan |
 |---|---|---|
 | id, ulid | bigint PK, string unique | |
-| name, email (unique), password | string | password nullable sampai akun diaktivasi |
+| name, email (unique) | string | email nullable — wali boleh hanya punya no HP; kolom password pernah ada lalu sengaja di-dropped (D2 di 01-ARSITEKTUR, migration `2026_08_17_000024`) |
 | role | enum(admin, admin_unit, guru, orangtua) | |
 | school_unit_id | FK → school_units, nullable | wajib untuk `admin_unit` dan `guru` |
 | phone, phone_hash | string enc / string(64) index | login alternatif untuk wali tanpa email |
@@ -348,12 +348,16 @@ SPP sudah terpecah alami per bulan.
 | invoice_id, invoice_url | string nullable | Xendit |
 | gateway_response, metadata | jsonb nullable | |
 | expires_at, paid_at, failed_at | timestamp | |
-| receipt_file_path, receipt_file_name, receipt_file_size, receipt_file_mime | | bukti transfer manual |
-| verified_by FK, verified_at, verification_notes, rejection_reason | | |
+| verified_by FK, verified_at, verification_notes, rejection_reason | | tetap ada di skema, tetapi alur verifikasi manual tidak pernah dibangun (lihat 06 Fase 2) |
+| recorded_by FK | | admin yang mencatat pembayaran tunai |
 | timestamps | | |
 
 Unique pada `external_transaction_id` sejak migration pertama — ini bug yang baru
 ketahuan belakangan di PMB, tidak perlu diulang.
+
+Kolom `receipt_file_*` pernah disketsa di sini lalu di-dropped (migration
+`2026_08_17_000025`): pembayaran online settle lewat callback gateway, tunai
+dicatat langsung oleh admin — tidak ada slip transfer yang pernah ada untuk difoto.
 
 ### `payment_allocations`
 `id, payment_id FK cascade, bill_id FK cascade, amount decimal(12,2), timestamps`.
