@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,12 +96,79 @@ function NewThresholdForm({ units, isCentral, onCreated }: { units: Unit[]; isCe
   );
 }
 
+function EditThresholdForm({ threshold, onSaved, onCancel }: { threshold: Threshold; onSaved: () => void; onCancel: () => void }) {
+  const [minPoints, setMinPoints] = useState(String(threshold.min_points));
+  const [maxPoints, setMaxPoints] = useState(String(threshold.max_points));
+  const [label, setLabel] = useState(threshold.label);
+  const [action, setAction] = useState(threshold.action ?? "");
+  const [color, setColor] = useState<"warn" | "bad" | "good">((threshold.color as "warn" | "bad" | "good") ?? "warn");
+  const [notifyGuardian, setNotifyGuardian] = useState(threshold.notify_guardian);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      await api.patch(`/api/admin/point-thresholds/${threshold.ulid}`, {
+        min_points: Number(minPoints), max_points: Number(maxPoints), label,
+        action: action || null, color, notify_guardian: notifyGuardian,
+      });
+      toast.success("Ambang diperbarui.");
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Gagal menyimpan perubahan.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex w-full flex-wrap items-end gap-3">
+      <div className="flex flex-col gap-1.5">
+        <Label>Dari</Label>
+        <Input value={minPoints} onChange={(e) => setMinPoints(e.target.value)} type="number" required className="w-24" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label>Sampai</Label>
+        <Input value={maxPoints} onChange={(e) => setMaxPoints(e.target.value)} type="number" required className="w-24" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label>Label</Label>
+        <Input value={label} onChange={(e) => setLabel(e.target.value)} required className="w-40" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label>Tindakan (opsional)</Label>
+        <Input value={action} onChange={(e) => setAction(e.target.value)} className="w-56" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label>Warna</Label>
+        <select value={color} onChange={(e) => setColor(e.target.value as typeof color)} className="h-10 rounded-lg border border-input bg-card px-3 text-sm">
+          <option value="good">Hijau</option>
+          <option value="warn">Kuning</option>
+          <option value="bad">Merah</option>
+        </select>
+      </div>
+      <label className="flex items-center gap-2 pb-2.5 text-sm">
+        <input type="checkbox" checked={notifyGuardian} onChange={(e) => setNotifyGuardian(e.target.checked)} />
+        Beri tahu wali murid
+      </label>
+      <Button type="submit" disabled={submitting}>{submitting ? "Menyimpan…" : "Simpan"}</Button>
+      <Button type="button" variant="ghost" onClick={onCancel}>Batal</Button>
+      {error && <p className="w-full rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">{error}</p>}
+    </form>
+  );
+}
+
 export default function PointThresholdsPage() {
   const { user } = useAuth();
   const isCentral = user?.role === "admin";
 
   const [thresholds, setThresholds] = useState<Threshold[] | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
+  const [editingUlid, setEditingUlid] = useState<string | null>(null);
 
   function load() {
     api
@@ -145,19 +212,39 @@ export default function PointThresholdsPage() {
           .sort((a, b) => b.min_points - a.min_points)
           .map((t) => (
             <Card key={t.ulid} className="flex flex-wrap items-center justify-between gap-3 p-4">
-              <div>
-                <p className="font-medium">
-                  {t.label} <span className="tabular text-xs text-muted-foreground">({t.min_points} s.d. {t.max_points})</span>
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {t.school_unit ?? "Seluruh sekolah"}
-                  {t.action && ` · ${t.action}`}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                {t.notify_guardian && <Badge variant="primary">Notifikasi wali</Badge>}
-                <Badge variant={(t.color as "good" | "warn" | "bad") ?? "default"}>{t.color ?? "default"}</Badge>
-              </div>
+              {editingUlid === t.ulid ? (
+                <EditThresholdForm
+                  threshold={t}
+                  onSaved={() => { setEditingUlid(null); load(); }}
+                  onCancel={() => setEditingUlid(null)}
+                />
+              ) : (
+                <>
+                  <div>
+                    <p className="font-medium">
+                      {t.label} <span className="tabular text-xs text-muted-foreground">({t.min_points} s.d. {t.max_points})</span>
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {t.school_unit ?? "Seluruh sekolah"}
+                      {t.action && ` · ${t.action}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {t.notify_guardian && <Badge variant="primary">Notifikasi wali</Badge>}
+                    <Badge variant={(t.color as "good" | "warn" | "bad") ?? "default"}>{t.color ?? "default"}</Badge>
+                    {isCentral || t.school_unit !== null ? (
+                      <Button size="sm" variant="ghost" onClick={() => setEditingUlid(t.ulid)}>
+                        <Pencil className="size-4" />
+                      </Button>
+                    ) : (
+                      // School-wide thresholds are readable by every unit but
+                      // only the central admin may change them - the API
+                      // answers 404 for unit admins.
+                      <span className="text-xs text-muted-foreground">Dikelola admin pusat</span>
+                    )}
+                  </div>
+                </>
+              )}
             </Card>
           ))}
       </div>
