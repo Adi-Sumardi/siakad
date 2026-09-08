@@ -1,9 +1,9 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, ChevronDown, ChevronUp, Sparkles, UserCheck, Users } from "lucide-react";
+import { ArrowLeft, CalendarCheck, Check, ChevronDown, ChevronUp, Sparkles, UserCheck, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,100 @@ import type { PointRecord } from "@/lib/types/kesiswaan";
 type StudentRow = { ulid: string; nama_lengkap: string; nis: string | null; point_balance: number | null };
 type Rule = { ulid: string; code: string; name: string; type: "violation" | "merit"; category: string; points: number; requires_evidence: boolean };
 type TodaySchedule = { ulid: string; subject: string; teacher: string | null; start_time: string; end_time: string };
+type RecapRow = { ulid: string; nama_lengkap: string; nis: string | null; hadir: number; sakit: number; izin: number; alpa: number };
+
+/**
+ * Class-wide H/S/I/A over a date range (the running term by default) - the
+ * "who keeps missing school" view the live session roster can never give,
+ * since that only ever shows one lesson period. Collapsed by default: this
+ * page's main job is recording, the recap is the occasional look back.
+ */
+function AttendanceRecapPanel({ classroomUlid }: { classroomUlid: string }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<{ period: { from: string; to: string }; students: RecapRow[] } | null>(null);
+  const [draftFrom, setDraftFrom] = useState("");
+  const [draftTo, setDraftTo] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  const load = useCallback(() => {
+    const params = new URLSearchParams();
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+
+    api
+      .get<{ period: { from: string; to: string }; students: RecapRow[] }>(
+        `/api/guru/classrooms/${classroomUlid}/attendance?${params}`
+      )
+      .then(setData)
+      .catch(() => setData({ period: { from: "", to: "" }, students: [] }));
+  }, [classroomUlid, from, to]);
+
+  useEffect(() => {
+    if (open) load();
+  }, [open, load]);
+
+  return (
+    <Card className="p-4">
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-2">
+        <h2 className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+          <CalendarCheck className="size-4" />
+          Rekap Presensi Kelas
+        </h2>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          {data && open && `${tanggal(data.period.from)} – ${tanggal(data.period.to)}`}
+          {open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-2 flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input value={draftFrom} onChange={(e) => setDraftFrom(e.target.value)} type="date" className="h-9 w-36 text-xs" aria-label="Dari tanggal" />
+            <Input value={draftTo} onChange={(e) => setDraftTo(e.target.value)} type="date" className="h-9 w-36 text-xs" aria-label="Sampai tanggal" />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 text-xs"
+              onClick={() => {
+                setFrom(draftFrom);
+                setTo(draftTo);
+              }}
+            >
+              Terapkan
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-9 text-xs"
+              onClick={() => {
+                setDraftFrom(""); setDraftTo(""); setFrom(""); setTo("");
+              }}
+            >
+              Reset
+            </Button>
+          </div>
+
+          {data === null && <Skeleton className="h-16 w-full rounded-xl" />}
+          {data?.students.length === 0 && (
+            <p className="text-xs text-muted-foreground">Belum ada siswa aktif di kelas ini.</p>
+          )}
+          {data?.students.map((s) => (
+            <div key={s.ulid} className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 p-2.5 text-xs">
+              <p className="min-w-0 truncate font-semibold text-foreground">{s.nama_lengkap}</p>
+              <p className="shrink-0 tabular text-muted-foreground">
+                H <span className="font-bold text-foreground">{s.hadir}</span>
+                {" · "}S {s.sakit}
+                {" · "}I {s.izin}
+                {" · "}A <span className={s.alpa > 0 ? "font-bold text-bad" : ""}>{s.alpa}</span>
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
   const router = useRouter();
@@ -344,6 +438,8 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
       </div>
 
       <TodaySchedulePanel classroomUlid={ulid} />
+
+      <AttendanceRecapPanel classroomUlid={ulid} />
 
       {students === null && (
         <div className="space-y-3">

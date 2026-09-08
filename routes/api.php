@@ -123,6 +123,9 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
 Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function () {
     Route::get('/classrooms', [GuruClassroomController::class, 'index']);
     Route::get('/classrooms/{ulid}/students', [GuruClassroomController::class, 'students']);
+    // Term-to-date H/S/I/A per student - the class-wide view the live
+    // session roster can never give (it only ever shows one lesson period).
+    Route::get('/classrooms/{ulid}/attendance', [GuruClassroomController::class, 'attendanceRecap']);
 
     Route::get('/point-rules', [GuruPointController::class, 'rules']);
     Route::get('/students/{ulid}/points', [GuruPointController::class, 'studentLedger']);

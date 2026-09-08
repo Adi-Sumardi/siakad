@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Guru;
 
 use App\Http\Controllers\Controller;
+use App\Models\AttendanceRecord;
 use App\Models\Classroom;
 use App\Models\Term;
 use App\Services\Points\PointLedger;
@@ -66,6 +67,68 @@ class ClassroomController extends Controller
                 'nama_lengkap' => $student->nama_lengkap,
                 'nis' => $student->nis,
                 'point_balance' => $term ? $ledger->balance($student, $term) : null,
+            ]),
+        ]);
+    }
+
+    /**
+     * H/S/I/A recap for the whole class over a date range - the answer to
+     * "who in my class keeps missing school", which the live session roster
+     * can never give because it only ever shows one lesson period. Every
+     * roster student is listed, zeros included: an all-zero row is itself
+     * the finding (never once checked in).
+     */
+    public function attendanceRecap(Request $request, string $ulid): JsonResponse
+    {
+        $classroom = Classroom::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+
+        $validated = $request->validate([
+            'from' => 'nullable|date',
+            'to' => 'nullable|date|after_or_equal:from',
+        ]);
+
+        $term = Term::current();
+        // Default range = active term to date, not month-to-date: absences
+        // accumulate consequences over a whole semester, and the enrollments
+        // absent/sick/permit summaries are term-scoped too.
+        $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay()
+            : ($term ? Carbon::parse($term->starts_on)->startOfDay() : now('Asia/Jakarta')->startOfMonth());
+        $to = isset($validated['to']) ? Carbon::parse($validated['to'])->endOfDay() : now('Asia/Jakarta')->endOfDay();
+
+        $students = $classroom->enrollments()
+            ->where('status', 'active')
+            ->with('student')
+            ->get()
+            ->pluck('student')
+            ->filter()
+            ->sortBy('nama_lengkap')
+            ->values();
+
+        $tallies = AttendanceRecord::query()
+            ->active()
+            // classroom_id + occurred_on are denormalized onto every record
+            // exactly so a report like this never joins through the schedule;
+            // occurred_on carries a time component, so bound with
+            // start/end-of-day timestamps (same note as the admin report).
+            ->where('classroom_id', $classroom->id)
+            ->whereBetween('occurred_on', [$from, $to])
+            ->selectRaw('student_id, attendance_status, count(*) as n')
+            ->groupBy('student_id', 'attendance_status')
+            ->get()
+            ->groupBy('student_id')
+            ->map(fn ($rows) => $rows->pluck('n', 'attendance_status'));
+
+        return response()->json([
+            'classroom' => ['ulid' => $classroom->ulid, 'name' => $classroom->name],
+            'period' => ['from' => $from->toDateString(), 'to' => $to->toDateString()],
+            'students' => $students->map(fn ($student) => [
+                'ulid' => $student->ulid,
+                'nama_lengkap' => $student->nama_lengkap,
+                'nis' => $student->nis,
+                'hadir' => (int) ($tallies->get($student->id)?->get('hadir') ?? 0),
+                'sakit' => (int) ($tallies->get($student->id)?->get('sakit') ?? 0),
+                'izin' => (int) ($tallies->get($student->id)?->get('izin') ?? 0),
+                'alpa' => (int) ($tallies->get($student->id)?->get('alpa') ?? 0),
             ]),
         ]);
     }
