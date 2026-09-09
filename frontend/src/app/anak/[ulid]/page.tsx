@@ -257,6 +257,9 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
   const [grades, setGrades] = useState<{ term: string | null; term_ulid?: string; terms?: { ulid: string; label: string; is_active: boolean }[]; subjects: SubjectGradeSummary[] } | null>(null);
   const [selectedTermUlid, setSelectedTermUlid] = useState<string>("");
   const [extracurriculars, setExtracurriculars] = useState<{ ulid: string; name: string; pembina: string | null; school_unit: string | null }[] | null>(null);
+  const [availableEkskul, setAvailableEkskul] = useState<{ ulid: string; name: string; pembina: string | null; member_count: number; capacity: number | null }[] | null>(null);
+  const [enrollPick, setEnrollPick] = useState("");
+  const [enrolling, setEnrolling] = useState(false);
   const [downloadingRapor, setDownloadingRapor] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -265,6 +268,33 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
       .get<{ achievements: Achievement[] }>(`/api/wali/students/${ulid}/achievements`)
       .then((d) => setAchievements(d.achievements))
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+  }
+
+  function loadEkskul() {
+    api
+      .get<{ extracurriculars: { ulid: string; name: string; pembina: string | null; school_unit: string | null }[]; available: { ulid: string; name: string; pembina: string | null; member_count: number; capacity: number | null }[] }>(`/api/wali/students/${ulid}/extracurriculars`)
+      .then((d) => {
+        setExtracurriculars(d.extracurriculars);
+        setAvailableEkskul(d.available ?? []);
+        setEnrollPick("");
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+  }
+
+  async function handleEnroll() {
+    if (!enrollPick) return;
+    setEnrolling(true);
+    try {
+      const res = await api.post<{ message: string }>(`/api/wali/students/${ulid}/extracurriculars`, {
+        extracurricular_ulid: enrollPick,
+      });
+      toast.success(res.message);
+      loadEkskul();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mendaftarkan ekstrakurikuler.");
+    } finally {
+      setEnrolling(false);
+    }
   }
 
   useEffect(() => {
@@ -278,10 +308,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
       .get<AttendanceOverview>(`/api/wali/students/${ulid}/attendance`)
       .then(setAttendance)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
-    api
-      .get<{ extracurriculars: { ulid: string; name: string; pembina: string | null; school_unit: string | null }[] }>(`/api/wali/students/${ulid}/extracurriculars`)
-      .then((d) => setExtracurriculars(d.extracurriculars))
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+    loadEkskul();
     loadAchievements();
   }, [ulid, user]);
 
@@ -522,6 +549,31 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
                   {e.name}{e.pembina ? ` · ${e.pembina}` : ""}
                 </Badge>
               ))}
+            </div>
+          )}
+
+          {/* Pendaftaran mandiri (keputusan 2026-09-09): wali memilih dari
+              kegiatan yang masih tersedia di unit anaknya tahun ajaran ini. */}
+          {availableEkskul !== null && availableEkskul.length > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <select
+                value={enrollPick}
+                onChange={(e) => setEnrollPick(e.target.value)}
+                className="w-full sm:max-w-xs rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
+              >
+                <option value="">Pilih ekstrakurikuler…</option>
+                {availableEkskul.map((e) => (
+                  <option key={e.ulid} value={e.ulid}>
+                    {e.name}
+                    {e.pembina ? ` — ${e.pembina}` : ""}
+                    {e.capacity !== null ? ` (${e.member_count}/${e.capacity})` : ""}
+                  </option>
+                ))}
+              </select>
+              <Button size="sm" variant="outline" className="gap-1.5 font-semibold text-xs h-9" disabled={!enrollPick || enrolling} onClick={handleEnroll}>
+                <Plus className="size-3.5 text-primary" />
+                <span>{enrolling ? "Mendaftarkan…" : "Daftarkan Ananda"}</span>
+              </Button>
             </div>
           )}
         </section>

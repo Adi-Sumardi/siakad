@@ -111,6 +111,10 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
     Route::get('/students/{ulid}/rapor', [WaliGradeController::class, 'rapor']);
 
     Route::get('/students/{ulid}/extracurriculars', [\App\Http\Controllers\Api\Wali\ExtracurricularController::class, 'index']);
+    // Self-service enrolment (decision 2026-09-09): same service rules as an
+    // admin assign - unit match, capacity, no double-enrol - reached through
+    // the parent's own scope of children.
+    Route::post('/students/{ulid}/extracurriculars', [\App\Http\Controllers\Api\Wali\ExtracurricularController::class, 'enroll']);
 
     Route::get('/announcements', [WaliAnnouncementController::class, 'index']);
 });
