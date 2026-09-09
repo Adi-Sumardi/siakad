@@ -148,6 +148,10 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     Route::get('/my-subjects', [GuruGradeController::class, 'myAssignments']);
     Route::get('/classrooms/{classroomUlid}/subjects/{subjectUlid}/grades', [GuruGradeController::class, 'roster']);
     Route::post('/classrooms/{classroomUlid}/subjects/{subjectUlid}/grades', [GuruGradeController::class, 'store']);
+    // The whole-class matrix of those grades - entry only ever shows one
+    // category of one subject at a time, so this is the only place a
+    // teacher can see who still owes a UAS or how the class is doing.
+    Route::get('/classrooms/{classroomUlid}/grades', [GuruGradeController::class, 'classRecap']);
 
     // A pembina manages only the activities they themselves supervise.
     Route::get('/my-extracurriculars', [\App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'index']);

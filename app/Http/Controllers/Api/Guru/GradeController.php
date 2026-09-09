@@ -131,4 +131,25 @@ class GradeController extends Controller
 
         return response()->json(['recorded' => $grades->count()], 201);
     }
+
+    /**
+     * The whole-class grade matrix for the running term: every scheduled
+     * subject x every roster student, all three categories side by side
+     * with the weighted final. Read-only, so unlike roster()/store() there
+     * is no canGrade() gate - any teacher of the unit can look at a room
+     * they can already open (the same line attendanceRecap() draws);
+     * entering grades stays scheduled-teachers-only.
+     */
+    public function classRecap(Request $request, string $classroomUlid, GradeService $service): JsonResponse
+    {
+        $classroom = Classroom::visibleTo($request->user())->where('ulid', $classroomUlid)->firstOrFail();
+
+        $term = Term::current();
+        abort_if(! $term, 422, 'Belum ada semester aktif.');
+
+        return response()->json([
+            'classroom' => ['ulid' => $classroom->ulid, 'name' => $classroom->name],
+            ...$service->classRecap($classroom, $term),
+        ]);
+    }
 }

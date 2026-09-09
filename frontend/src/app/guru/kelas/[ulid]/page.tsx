@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CalendarCheck, Check, ChevronDown, ChevronUp, Sparkles, UserCheck, Users } from "lucide-react";
+import { ArrowLeft, CalendarCheck, Check, ChevronDown, ChevronUp, ClipboardList, Sparkles, UserCheck, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,9 @@ type StudentRow = { ulid: string; nama_lengkap: string; nis: string | null; poin
 type Rule = { ulid: string; code: string; name: string; type: "violation" | "merit"; category: string; points: number; requires_evidence: boolean };
 type TodaySchedule = { ulid: string; subject: string; teacher: string | null; start_time: string; end_time: string };
 type RecapRow = { ulid: string; nama_lengkap: string; nis: string | null; hadir: number; sakit: number; izin: number; alpa: number };
+type GradeSubject = { ulid: string; name: string };
+type GradeScore = { tugas: number | null; uts: number | null; uas: number | null; final: number | null };
+type GradeRow = { ulid: string; nama_lengkap: string; nis: string | null; scores: Record<string, GradeScore> };
 
 /**
  * Class-wide H/S/I/A over a date range (the running term by default) - the
@@ -107,6 +110,121 @@ function AttendanceRecapPanel({ classroomUlid }: { classroomUlid: string }) {
               </p>
             </div>
           ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+const NO_SCORE: GradeScore = { tugas: null, uts: null, uas: null, final: null };
+
+/** 78,5 — Indonesian decimals, trailing zeros dropped, "—" for not entered yet. */
+function angka(n: number | null): string {
+  return n === null ? "—" : new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 }).format(n);
+}
+
+/**
+ * The whole-class grade matrix for the running term - every subject x every
+ * student, Tugas/UTS/UAS side by side with the weighted final (20/30/50, an
+ * assumption pending school confirmation). The entry screen only ever shows
+ * one category of one subject at a time, so without this panel there is no
+ * way to spot who still owes a UAS. A null "Akhir" is exactly that signal,
+ * never averaged over; the class average counts entered values only.
+ * Collapsed by default, same deal as the attendance recap above.
+ */
+function GradeRecapPanel({ classroomUlid }: { classroomUlid: string }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<{ subjects: GradeSubject[]; students: GradeRow[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [subject, setSubject] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    api
+      .get<{ classroom: { ulid: string; name: string }; subjects: GradeSubject[]; students: GradeRow[] }>(
+        `/api/guru/classrooms/${classroomUlid}/grades`
+      )
+      .then((d) => {
+        setData(d);
+        // Keep the chosen subject across reopens; only fall back to the
+        // first when it disappeared from the schedule.
+        if (!d.subjects.some((s) => s.ulid === subject)) setSubject(d.subjects[0]?.ulid ?? "");
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Gagal memuat rekap nilai."));
+  }, [open, classroomUlid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rows = data?.students ?? [];
+  const average = (pick: (s: GradeScore) => number | null): number | null => {
+    const nums = rows.map((r) => pick(r.scores[subject] ?? NO_SCORE)).filter((v): v is number => v !== null);
+    return nums.length === 0 ? null : nums.reduce((a, b) => a + b, 0) / nums.length;
+  };
+
+  return (
+    <Card className="p-4">
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-2">
+        <h2 className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+          <ClipboardList className="size-4" />
+          Rekap Nilai Kelas
+        </h2>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          {data && open && data.subjects.length > 0 && `${data.subjects.length} mapel · semester berjalan`}
+          {open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-2 flex flex-col gap-2">
+          {error && <p className="text-xs text-destructive">{error}</p>}
+
+          {data === null && !error && <Skeleton className="h-16 w-full rounded-xl" />}
+
+          {data && data.subjects.length === 0 && (
+            <p className="text-xs text-muted-foreground">Belum ada mata pelajaran terjadwal di kelas ini.</p>
+          )}
+
+          {data && data.subjects.length > 0 && (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {data.subjects.map((s) => (
+                  <button
+                    key={s.ulid}
+                    type="button"
+                    onClick={() => setSubject(s.ulid)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      subject === s.ulid ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+
+              {rows.length === 0 && <p className="text-xs text-muted-foreground">Belum ada siswa aktif di kelas ini.</p>}
+
+              {rows.map((r) => {
+                const s = r.scores[subject] ?? NO_SCORE;
+                return (
+                  <div key={r.ulid} className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 p-2.5 text-xs">
+                    <p className="min-w-0 truncate font-semibold text-foreground">{r.nama_lengkap}</p>
+                    <p className="shrink-0 tabular text-muted-foreground">
+                      T <span className="font-bold text-foreground">{angka(s.tugas)}</span>
+                      {" · "}UTS {angka(s.uts)}
+                      {" · "}UAS {angka(s.uas)}
+                      {" · "}<span className={s.final !== null ? "font-bold text-foreground" : ""}>Akhir {angka(s.final)}</span>
+                    </p>
+                  </div>
+                );
+              })}
+
+              {rows.length > 0 && (
+                <p className="rounded-lg border border-dashed border-border/70 p-2.5 text-xs text-muted-foreground">
+                  Rata-rata kelas: T {angka(average((s) => s.tugas))} · UTS {angka(average((s) => s.uts))} · UAS{" "}
+                  {angka(average((s) => s.uas))} · Akhir {angka(average((s) => s.final))}
+                  <span className="text-[10px]"> (dari nilai yang sudah diisi)</span>
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
     </Card>
@@ -440,6 +558,8 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
       <TodaySchedulePanel classroomUlid={ulid} />
 
       <AttendanceRecapPanel classroomUlid={ulid} />
+
+      <GradeRecapPanel classroomUlid={ulid} />
 
       {students === null && (
         <div className="space-y-3">
