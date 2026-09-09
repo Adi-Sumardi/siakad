@@ -410,36 +410,44 @@ export default function AdminStudentsPage() {
             </div>
           </div>
 
-          <div>
-            <Label className="text-xs">Jenjang Sekolah</Label>
-            <select
-              value={jenjangFilter}
-              onChange={(e) => setJenjangFilter(e.target.value)}
-              className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
-            >
-              <option value="">Semua Jenjang</option>
-              <option value="tk">TK / PAUD / RA</option>
-              <option value="sd">SD</option>
-              <option value="smp">SMP</option>
-              <option value="sma">SMA</option>
-            </select>
-          </div>
+          {/* Jenjang & unit filters are central-admin only: a per-unit
+              admin's scope already narrows every query to their own unit,
+              so these dropdowns would only offer choices that render an
+              empty table. */}
+          {isAdministrator && (
+            <div>
+              <Label className="text-xs">Jenjang Sekolah</Label>
+              <select
+                value={jenjangFilter}
+                onChange={(e) => setJenjangFilter(e.target.value)}
+                className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
+              >
+                <option value="">Semua Jenjang</option>
+                <option value="tk">TK / PAUD / RA</option>
+                <option value="sd">SD</option>
+                <option value="smp">SMP</option>
+                <option value="sma">SMA</option>
+              </select>
+            </div>
+          )}
 
-          <div>
-            <Label className="text-xs">Unit Sekolah</Label>
-            <select
-              value={unitFilter}
-              onChange={(e) => setUnitFilter(e.target.value)}
-              className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
-            >
-              <option value="">Semua Unit</option>
-              {units.map((u) => (
-                <option key={u.ulid} value={u.code}>
-                  {u.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {isAdministrator && (
+            <div>
+              <Label className="text-xs">Unit Sekolah</Label>
+              <select
+                value={unitFilter}
+                onChange={(e) => setUnitFilter(e.target.value)}
+                className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
+              >
+                <option value="">Semua Unit</option>
+                {units.map((u) => (
+                  <option key={u.ulid} value={u.code}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="flex items-end gap-2">
             <div className="flex-1">
@@ -637,8 +645,28 @@ export default function AdminStudentsPage() {
             <div className="bg-primary/5 border border-primary/20 rounded-xl p-3.5 text-xs text-muted-foreground space-y-2">
               <p className="font-semibold text-foreground">Format File yang Didukung:</p>
               <p>
-                File spreadsheet (.CSV). Pastikan berisi kolom: <code>nama_lengkap</code>, <code>nis</code>, <code>nisn</code>, <code>jenis_kelamin</code> (L/P), <code>unit_code</code> (contoh: <code>sd</code>, <code>smp</code>, <code>sma</code>), <code>kelas</code>, <code>wali_nama</code>, <code>wali_phone</code>, <code>wali_email</code>.
+                File spreadsheet (.CSV). Pastikan berisi kolom: <code>nama_lengkap</code>, <code>nis</code>, <code>nisn</code>, <code>jenis_kelamin</code> (L/P), {isAdministrator && (<> <code>unit_code</code>,</> )} <code>kelas</code>, <code>wali_nama</code>, <code>wali_phone</code>, <code>wali_email</code>.
               </p>
+              {isAdministrator ? (
+                <p>
+                  <span className="font-semibold text-foreground">unit_code</span> wajib berisi kode satu unit spesifik (bukan jenjang — satu jenjang bisa terdiri dari beberapa kampus, mis. dua SMP). Kode yang valid:{" "}
+                  {units.length > 0 ? (
+                    units.map((u, i) => (
+                      <span key={u.ulid}>
+                        {i > 0 && ", "}
+                        <code>{u.code}</code>
+                      </span>
+                    ))
+                  ) : (
+                    <span className="italic">memuat daftar unit…</span>
+                  )}
+                  .
+                </p>
+              ) : (
+                <p>
+                  Semua baris otomatis ditempatkan di <span className="font-semibold text-foreground">unit sekolah Anda</span> — kolom unit tidak diperlukan (template untuk admin unit memang tanpa kolom unit).
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => downloadApiFile("/api/admin/import/students/template", "template_import_siswa_siakad.csv")}

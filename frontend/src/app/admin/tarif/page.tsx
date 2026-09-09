@@ -1206,7 +1206,7 @@ export default function FeeRatesPage() {
             <div className="bg-primary/5 border border-primary/20 rounded-xl p-3.5 text-xs text-muted-foreground space-y-2">
               <p className="font-semibold text-foreground">Format Spreadsheet yang Didukung:</p>
               <p>
-                File .CSV dengan kolom: <code>fee_type_code</code> (contoh: <code>spp</code>, <code>uang_gedung</code>), <code>unit_code</code> (contoh: <code>sd</code>, <code>smp</code>), <code>tingkat</code> (1-12 atau kosong untuk semua tingkat), <code>academic_year</code> (contoh: <code>2027/2028</code>), <code>amount</code> (nominal angka), <code>due_day</code> (tgl jatuh tempo).
+                File .CSV dengan kolom: <code>fee_type_code</code> (contoh: <code>spp</code>, <code>uang_gedung</code>), <code>unit_code</code> (kode satu unit spesifik, bukan jenjang — valid: {units.filter((u) => u.code).map((u) => u.code).join(", ")}), <code>tingkat</code> (1-12 atau kosong untuk semua tingkat), <code>academic_year</code> (contoh: <code>2027/2028</code>), <code>amount</code> (nominal angka), <code>due_day</code> (tgl jatuh tempo).
               </p>
               <button
                 type="button"

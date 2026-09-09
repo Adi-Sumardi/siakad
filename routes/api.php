@@ -280,6 +280,13 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::post('/import/users', [\App\Http\Controllers\Api\Admin\ImportController::class, 'importUsers']);
     Route::get('/import/users/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadUserTemplate']);
 
+    // Students CSV works the same way for a per-unit admin - every row lands
+    // in their own unit, the file's unit column is ignored (ImportController
+    // forces it) - while fee rates stay central-only: prices are a
+    // foundation-level decision.
+    Route::post('/import/students', [\App\Http\Controllers\Api\Admin\ImportController::class, 'importStudents']);
+    Route::get('/import/students/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadStudentTemplate']);
+
     // Pickers every admin form needs - none of it sensitive, so one response
     // shape for both admin kinds.
     Route::get('/school-units', [ReferenceController::class, 'schoolUnits']);
@@ -325,10 +332,8 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('/academic-years', [ReferenceController::class, 'storeAcademicYear']);
     Route::post('/academic-years/{academicYear}/activate', [ReferenceController::class, 'activateAcademicYear']);
 
-    // Bulk Import endpoints
-    Route::post('/import/students', [\App\Http\Controllers\Api\Admin\ImportController::class, 'importStudents']);
+    // Bulk Import endpoints - fee rates only: setting prices is central.
     Route::post('/import/fee-rates', [\App\Http\Controllers\Api\Admin\ImportController::class, 'importFeeRates']);
-    Route::get('/import/students/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadStudentTemplate']);
     Route::get('/import/fee-rates/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadFeeRateTemplate']);
 
     // Read-only audit trail viewer - see the controller for why this is

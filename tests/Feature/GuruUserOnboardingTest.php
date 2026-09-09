@@ -191,6 +191,30 @@ class GuruUserOnboardingTest extends TestCase
         $this->assertNotNull($res->json('errors.0'));
     }
 
+    public function test_central_admin_import_rejects_an_ambiguous_unit_cell(): void
+    {
+        // "smp" fits both SMP campuses now that a second one exists - the
+        // row must be reported naming them, never parked silently on
+        // whichever unit the collection happened to return first.
+        $smpLain = SchoolUnit::create(['code' => 'SMP-55', 'label' => 'SMP Islam Al Azhar 55 Jatimakmur', 'jenjang_group' => 'smp']);
+
+        $csv = "nama_lengkap,email,no_hp,role,unit_code\n" .
+            "Guru Nyasal,nyasal@alazhar.sch.id,,guru,smp\n";
+
+        $res = $this->actingAs($this->pusat)->postJson('/api/admin/import/users', [
+            'file' => UploadedFile::fake()->createWithContent('guru.csv', $csv),
+        ]);
+
+        $res->assertOk()->assertJsonPath('imported_count', 0);
+
+        $error = $res->json('errors.0');
+        $this->assertStringContainsString('cocok ke beberapa unit', $error);
+        $this->assertStringContainsString('SMP-SAKINAH', $error);
+        $this->assertStringContainsString('SMP-55', $error);
+
+        $this->assertNull(User::where('email', 'nyasal@alazhar.sch.id')->first());
+    }
+
     public function test_central_admin_imports_staff_roles_from_the_role_column(): void
     {
         $csv = "nama_lengkap,email,no_hp,role,unit_code,is_aktif\n" .

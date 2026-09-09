@@ -224,4 +224,166 @@ class AdminImportAndAcademicYearTest extends TestCase
             ->assertOk()
             ->assertHeader('Content-Disposition', 'attachment; filename="template_import_tarif_spp.csv"');
     }
+
+    public function test_an_ambiguous_jenjang_shorthand_is_an_error_row_naming_both_campuses(): void
+    {
+        // Two SMP campuses on the roll is the situation the old first-match
+        // behaviour silently misrouted: every "smp" row landed on whichever
+        // unit the collection happened to return first. It must now name
+        // both candidates and import nothing, rather than guess.
+        SchoolUnit::create(['code' => 'SMP-12', 'label' => 'SMPI Al Azhar 12 Rawamangun', 'jenjang_group' => 'smp']);
+        SchoolUnit::create(['code' => 'SMP-55', 'label' => 'SMPI Al Azhar 55 Jatimakmur', 'jenjang_group' => 'smp']);
+
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n" .
+            "Siswa Nyasal,27010,L,smp\n";
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/import/students', [
+            'file' => UploadedFile::fake()->createWithContent('students.csv', $csvContent),
+        ]);
+
+        $response->assertOk()->assertJsonPath('imported_count', 0);
+
+        $errors = $response->json('errors');
+        $this->assertCount(1, $errors);
+        $this->assertStringContainsString('cocok ke beberapa unit', $errors[0]);
+        $this->assertStringContainsString('SMP-12', $errors[0]);
+        $this->assertStringContainsString('SMP-55', $errors[0]);
+
+        $this->assertSame(0, Student::count());
+    }
+
+    public function test_a_substring_that_names_one_campus_still_resolves(): void
+    {
+        SchoolUnit::create(['code' => 'SMP-12', 'label' => 'SMPI Al Azhar 12 Rawamangun', 'jenjang_group' => 'smp']);
+        SchoolUnit::create(['code' => 'SMP-55', 'label' => 'SMPI Al Azhar 55 Jatimakmur', 'jenjang_group' => 'smp']);
+
+        // "jatimakmur" fits exactly one label, so the hand-typed-file
+        // convenience survives - but only ever by pointing at ONE campus.
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n" .
+            "Siswa Jatimakmur,27011,L,jatimakmur\n";
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/import/students', [
+            'file' => UploadedFile::fake()->createWithContent('students.csv', $csvContent),
+        ]);
+
+        $response->assertOk()->assertJsonPath('imported_count', 1);
+        $this->assertSame('SMP-55', Student::first()->schoolUnit->code);
+    }
+
+    public function test_a_blank_unit_cell_is_reported_as_missing(): void
+    {
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n" .
+            "Siswa Tanpa Unit,27012,L,\n";
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/import/students', [
+            'file' => UploadedFile::fake()->createWithContent('students.csv', $csvContent),
+        ]);
+
+        $response->assertOk()->assertJsonPath('imported_count', 0);
+        $this->assertStringContainsString('kosong', $response->json('errors.0'));
+    }
+
+    public function test_an_ambiguous_unit_cell_in_a_fee_rate_row_is_an_error(): void
+    {
+        SchoolUnit::create(['code' => 'SMP-12', 'label' => 'SMPI Al Azhar 12 Rawamangun', 'jenjang_group' => 'smp']);
+        SchoolUnit::create(['code' => 'SMP-55', 'label' => 'SMPI Al Azhar 55 Jatimakmur', 'jenjang_group' => 'smp']);
+
+        // A rate resolving to the wrong campus would misprice that school's
+        // bills, so the same one-campus rule applies to tarif rows.
+        $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n" .
+            "spp,smp,,2027/2028,750000,10,0\n";
+
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/import/fee-rates', [
+            'file' => UploadedFile::fake()->createWithContent('tariffs.csv', $csvContent),
+        ]);
+
+        $response->assertOk()->assertJsonPath('imported_count', 0);
+        $this->assertStringContainsString('SMP-55', $response->json('errors.0'));
+        $this->assertSame(0, FeeRate::count());
+    }
+
+    public function test_the_student_template_cites_real_unit_codes_from_the_database(): void
+    {
+        // The template must never teach a jenjang shorthand: with two SMP
+        // campuses "smp" is precisely the value the matcher rejects, and the
+        // samples have to come from the live unit master at download time.
+        SchoolUnit::create(['code' => 'SMP-12', 'label' => 'SMPI Al Azhar 12 Rawamangun', 'jenjang_group' => 'smp', 'is_active' => true]);
+        SchoolUnit::create(['code' => 'SMP-55', 'label' => 'SMPI Al Azhar 55 Jatimakmur', 'jenjang_group' => 'smp', 'is_active' => true]);
+
+        $content = $this->actingAs($this->admin)
+            ->get('/api/admin/import/students/template')
+            ->assertOk()
+            ->streamedContent();
+
+        $this->assertStringContainsString('unit_code', $content);
+        // Sample rows carry real codes - deliberately a same-jenjang pair.
+        $this->assertStringContainsString('SMP-12', $content);
+        $this->assertStringContainsString('SMP-55', $content);
+    }
+
+    public function test_the_fee_rate_template_cites_real_unit_codes_from_the_database(): void
+    {
+        SchoolUnit::create(['code' => 'SMP-55', 'label' => 'SMPI Al Azhar 55 Jatimakmur', 'jenjang_group' => 'smp', 'is_active' => true]);
+
+        $content = $this->actingAs($this->admin)
+            ->get('/api/admin/import/fee-rates/template')
+            ->assertOk()
+            ->streamedContent();
+
+        $this->assertStringContainsString('SMP-55', $content);
+    }
+
+    private function unitAdmin(): User
+    {
+        return User::create([
+            'name' => 'Admin SD', 'email' => 'admin.sd'.uniqid().'@yapinet.id',
+            'role' => 'admin_unit', 'school_unit_id' => $this->unit->id, 'is_active' => true,
+        ]);
+    }
+
+    public function test_a_unit_admin_imports_students_into_their_own_unit_even_when_another_is_named(): void
+    {
+        SchoolUnit::create(['code' => 'SMP-12', 'label' => 'SMPI Al Azhar 12 Rawamangun', 'jenjang_group' => 'smp']);
+
+        // The unit column names the SMP campus and even carries the
+        // shorthand that would be ambiguous for a central admin - it must
+        // be ignored entirely: the importer's own unit wins, the same line
+        // importUsers draws.
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n" .
+            "Siswa Unit SD,27020,L,smp\n";
+
+        $response = $this->actingAs($this->unitAdmin())->postJson('/api/admin/import/students', [
+            'file' => UploadedFile::fake()->createWithContent('students.csv', $csvContent),
+        ]);
+
+        $response->assertOk()->assertJsonPath('imported_count', 1);
+        $this->assertSame($this->unit->id, Student::first()->school_unit_id);
+    }
+
+    public function test_a_unit_admin_gets_a_student_template_without_the_unit_column(): void
+    {
+        // Their import forces their own unit, so a unit column in their
+        // template would only invite values that get ignored.
+        $content = $this->actingAs($this->unitAdmin())
+            ->get('/api/admin/import/students/template')
+            ->assertOk()
+            ->streamedContent();
+
+        $this->assertStringContainsString('nama_lengkap', $content);
+        $this->assertStringNotContainsString('unit_code', $content);
+    }
+
+    public function test_a_unit_admin_cannot_import_fee_rates(): void
+    {
+        // Prices stay a foundation-level decision even though students are
+        // now importable per unit.
+        $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n" .
+            "spp,sd,1,2027/2028,650000,10,0\n";
+
+        $this->actingAs($this->unitAdmin())->postJson('/api/admin/import/fee-rates', [
+            'file' => UploadedFile::fake()->createWithContent('tariffs.csv', $csvContent),
+        ])->assertStatus(403);
+
+        $this->assertSame(0, FeeRate::count());
+    }
 }

@@ -134,6 +134,31 @@ class AdminUserAndStudentTest extends TestCase
         $this->assertFalse($emails->contains('wali.smp@example.com'));
     }
 
+    /**
+     * Scope of the students list itself: a per-unit admin shares the screen
+     * with the central admin, so the endpoint must answer with one unit's
+     * rows even though the role gate let them in - "hanya unit saya", not
+     * "seluruh jenjang SMP".
+     */
+    public function test_a_unit_admins_student_list_stays_inside_their_unit(): void
+    {
+        $otherUnit = SchoolUnit::create(['code' => 'smp', 'label' => 'SMP Islam Al Azhar 12', 'jenjang_group' => 'smp']);
+
+        $unitAdmin = User::create([
+            'name' => 'Admin SD', 'email' => 'admin.sd@yapinet.id',
+            'role' => 'admin_unit', 'school_unit_id' => $this->unit->id, 'is_active' => true,
+        ]);
+
+        Student::create(['nama_lengkap' => 'Anak SD', 'jenis_kelamin' => 'L', 'school_unit_id' => $this->unit->id, 'status' => 'active']);
+        Student::create(['nama_lengkap' => 'Anak SMP Unit Lain', 'jenis_kelamin' => 'L', 'school_unit_id' => $otherUnit->id, 'status' => 'active']);
+
+        $this->actingAs($unitAdmin)
+            ->getJson('/api/admin/students')
+            ->assertOk()
+            ->assertJsonCount(1, 'students.data')
+            ->assertJsonPath('students.data.0.nama_lengkap', 'Anak SD');
+    }
+
     public function test_the_student_list_shows_the_guardians_actual_name_and_phone(): void
     {
         $student = Student::create([
