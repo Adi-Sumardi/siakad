@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CalendarCheck, Check, ChevronDown, ChevronUp, ClipboardList, Sparkles, UserCheck, Users } from "lucide-react";
+import { ArrowLeft, CalendarCheck, Check, ChevronDown, ChevronUp, ClipboardList, FileText, Loader2, Sparkles, UserCheck, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError } from "@/lib/api";
+import { API_BASE, api, ApiError } from "@/lib/api";
 import { tanggal, todayJakarta } from "@/lib/format";
 import type { PointRecord } from "@/lib/types/kesiswaan";
 
@@ -461,6 +461,34 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
   const [bulkDate, setBulkDate] = useState(todayJakarta());
   const [bulkDescription, setBulkDescription] = useState("");
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [raporLoading, setRaporLoading] = useState<string | null>(null);
+
+  /**
+   * The report card exactly as the guardian will receive it, for the running
+   * term - the "check before it reaches the family" the B.2 audit found
+   * missing. On-demand PDF, nothing is stored on either side.
+   */
+  async function downloadRapor(student: StudentRow) {
+    setRaporLoading(student.ulid);
+    try {
+      const res = await fetch(`${API_BASE}/api/guru/students/${student.ulid}/rapor`, { credentials: "include" });
+      if (!res.ok) throw new Error("Gagal mengunduh rapor.");
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Rapor-${student.nama_lengkap.replace(/\s+/g, "-")}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Gagal mengunduh rapor - mungkin belum ada semester aktif.");
+    } finally {
+      setRaporLoading(null);
+    }
+  }
 
   function load() {
     api
@@ -613,6 +641,15 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
                   >
                     Catat Poin
                   </Button>
+                  <button
+                    onClick={() => downloadRapor(student)}
+                    disabled={raporLoading === student.ulid}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    aria-label="Unduh rapor"
+                    title="Unduh rapor (semester berjalan)"
+                  >
+                    {raporLoading === student.ulid ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
+                  </button>
                   <button
                     onClick={() => {
                       setOpenLedger(openLedger === student.ulid ? null : student.ulid);

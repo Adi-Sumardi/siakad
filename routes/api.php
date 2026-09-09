@@ -152,6 +152,9 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     // category of one subject at a time, so this is the only place a
     // teacher can see who still owes a UAS or how the class is doing.
     Route::get('/classrooms/{classroomUlid}/grades', [GuruGradeController::class, 'classRecap']);
+    // The report card itself, for the teacher to check before the guardian
+    // ever sees it - same on-demand PDF the wali portal downloads.
+    Route::get('/students/{ulid}/rapor', [GuruGradeController::class, 'rapor']);
 
     // A pembina manages only the activities they themselves supervise.
     Route::get('/my-extracurriculars', [\App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'index']);

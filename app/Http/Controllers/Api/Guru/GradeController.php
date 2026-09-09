@@ -11,9 +11,11 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Term;
 use App\Services\Academic\GradeService;
+use App\Services\Academic\RaporPdfService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\Response;
 
 class GradeController extends Controller
 {
@@ -151,5 +153,24 @@ class GradeController extends Controller
             'classroom' => ['ulid' => $classroom->ulid, 'name' => $classroom->name],
             ...$service->classRecap($classroom, $term),
         ]);
+    }
+
+    /**
+     * The same report card the guardian will eventually download, so the
+     * teacher can check it before it reaches them - the B.2 audit gap. Same
+     * read line as classRecap(): any teacher of the unit, not only the
+     * scheduled one, since reading never edits. Rendered on demand, nothing
+     * stored (D9/R9).
+     */
+    public function rapor(Request $request, string $studentUlid, RaporPdfService $pdf, GradeService $service): Response
+    {
+        $student = Student::visibleTo($request->user())->where('ulid', $studentUlid)->firstOrFail();
+
+        $termUlid = $request->string('term_ulid')->value();
+        $term = $termUlid ? Term::where('ulid', $termUlid)->first() : Term::current();
+
+        abort_if(! $term, 422, 'Belum ada semester yang bisa dipilih.');
+
+        return $pdf->render($student, $term, $service)->stream($pdf->filename($student, $term));
     }
 }
