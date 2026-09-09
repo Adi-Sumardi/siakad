@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\BillReasonRequest;
+use App\Http\Requests\Admin\RecordBillPaymentRequest;
 use App\Http\Resources\BillResource;
 use App\Http\Resources\PaymentResource;
 use App\Models\ActivityLog;
@@ -57,9 +59,9 @@ class BillController extends Controller
      * Writes the bill off. Requires a reason, because the alternative is a
      * balance that silently disappeared and nobody can account for at audit.
      */
-    public function waive(Request $request, string $ulid): JsonResponse
+    public function waive(BillReasonRequest $request, string $ulid): JsonResponse
     {
-        $validated = $request->validate(['reason' => 'required|string|max:500']);
+        $validated = $request->validated();
 
         $bill = Bill::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
@@ -82,9 +84,9 @@ class BillController extends Controller
         return response()->json(['bill' => new BillResource($bill->fresh())]);
     }
 
-    public function cancel(Request $request, string $ulid): JsonResponse
+    public function cancel(BillReasonRequest $request, string $ulid): JsonResponse
     {
-        $validated = $request->validate(['reason' => 'required|string|max:500']);
+        $validated = $request->validated();
 
         $bill = Bill::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
@@ -113,13 +115,9 @@ class BillController extends Controller
     }
 
     /** Cash at the front desk, or a transfer the admin has already confirmed. */
-    public function recordPayment(Request $request, string $ulid, CheckoutService $checkout): JsonResponse
+    public function recordPayment(RecordBillPaymentRequest $request, string $ulid, CheckoutService $checkout): JsonResponse
     {
-        $validated = $request->validate([
-            'amount' => 'required|numeric|min:1',
-            'method' => 'required|in:cash,bank_transfer,qris,other',
-            'notes' => 'nullable|string|max:500',
-        ]);
+        $validated = $request->validated();
 
         $bill = Bill::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\BillingRunRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\BillingRun;
@@ -49,7 +50,7 @@ class BillingRunController extends Controller
         ]);
     }
 
-    public function preview(Request $request, BillGenerator $generator): JsonResponse
+    public function preview(BillingRunRequest $request, BillGenerator $generator): JsonResponse
     {
         [$type, $year, $unit, $month, $due] = $this->resolve($request);
 
@@ -66,7 +67,7 @@ class BillingRunController extends Controller
         ]);
     }
 
-    public function store(Request $request, BillGenerator $generator): JsonResponse
+    public function store(BillingRunRequest $request, BillGenerator $generator): JsonResponse
     {
         [$type, $year, $unit, $month, $due] = $this->resolve($request);
 
@@ -95,14 +96,9 @@ class BillingRunController extends Controller
     /**
      * @return array{0: FeeType, 1: AcademicYear, 2: ?SchoolUnit, 3: ?int, 4: ?Carbon}
      */
-    private function resolve(Request $request): array
+    private function resolve(BillingRunRequest $request): array
     {
-        $validated = $request->validate([
-            'fee_type_code' => 'required|exists:fee_types,code',
-            'month' => 'nullable|integer|min:1|max:12',
-            'unit_code' => 'nullable|exists:school_units,code',
-            'due_date' => 'nullable|date',
-        ]);
+        $validated = $request->validated();
 
         $type = FeeType::where('code', $validated['fee_type_code'])->firstOrFail();
         $year = AcademicYear::current();

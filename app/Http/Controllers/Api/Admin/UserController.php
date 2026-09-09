@@ -3,13 +3,14 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreUserRequest;
+use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Models\ActivityLog;
 use App\Models\Guardian;
 use App\Models\SchoolUnit;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 class UserController extends Controller
 {
@@ -93,16 +94,9 @@ class UserController extends Controller
     /**
      * Create a new user.
      */
-    public function store(Request $request): JsonResponse
+    public function store(StoreUserRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:120',
-            'email' => 'nullable|email|max:120|unique:users,email',
-            'phone' => 'nullable|string|max:32',
-            'role' => 'required|in:admin,admin_unit,guru,orangtua',
-            'school_unit_ulid' => 'nullable|exists:school_units,ulid',
-            'is_active' => 'boolean',
-        ]);
+        $validated = $request->validated();
 
         // A per-unit admin may onboard their own unit's teachers and parents,
         // nothing else - the controller forces the unit rather than trusting
@@ -154,16 +148,9 @@ class UserController extends Controller
     /**
      * Update user details.
      */
-    public function update(Request $request, User $user): JsonResponse
+    public function update(UpdateUserRequest $request, User $user): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:120',
-            'email' => ['nullable', 'email', 'max:120', Rule::unique('users', 'email')->ignore($user->id)],
-            'phone' => 'nullable|string|max:32',
-            'role' => 'sometimes|in:admin,admin_unit,guru,orangtua',
-            'school_unit_ulid' => 'nullable|exists:school_units,ulid',
-            'is_active' => 'boolean',
-        ]);
+        $validated = $request->validated();
 
         if (array_key_exists('school_unit_ulid', $validated)) {
             $unit = ! empty($validated['school_unit_ulid'])
