@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
+  Download,
   Edit2,
+  FileUp,
   Mail,
   Phone,
   Plus,
@@ -13,6 +15,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Trash2,
+  Upload,
   UserCheck,
   UserPlus,
   Users,
@@ -26,7 +29,8 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, API_BASE } from "@/lib/api";
+import { useAuth } from "@/lib/auth/auth-context";
 import { tanggalWaktu } from "@/lib/format";
 
 type UserItem = {
@@ -46,9 +50,20 @@ type UserItem = {
 type SchoolUnit = { ulid: string; code: string; label: string };
 
 export default function UserManagementPage() {
+  const { user } = useAuth();
+  // A per-unit admin can only onboard guru accounts for their own unit -
+  // the backend forces both, this only keeps the form honest about it.
+  const isUnitAdmin = user?.role === "admin_unit";
+
   const [users, setUsers] = useState<UserItem[] | null>(null);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Guru CSV import
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ message: string; imported: number; updated: number; errors: string[] } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Filters
   const [search, setSearch] = useState("");
@@ -102,10 +117,65 @@ export default function UserManagementPage() {
     setFormName("");
     setFormEmail("");
     setFormPhone("");
-    setFormRole("admin_unit");
-    setFormUnitUlid(units[0]?.ulid ?? "");
+    setFormRole(isUnitAdmin ? "guru" : "admin_unit");
+    setFormUnitUlid(isUnitAdmin ? (user?.school_unit?.ulid ?? "") : (units[0]?.ulid ?? ""));
     setFormIsActive(true);
     setShowCreateModal(true);
+  }
+
+  async function downloadApiFile(path: string, filename: string) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Gagal mengunduh file.");
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Gagal mengunduh template. Pastikan sesi Anda masih aktif.");
+    }
+  }
+
+  async function handleImportUsers(e: React.FormEvent) {
+    e.preventDefault();
+    if (!importFile) {
+      toast.error("Silakan pilih file CSV terlebih dahulu.");
+      return;
+    }
+
+    setImporting(true);
+    setImportResult(null);
+
+    const form = new FormData();
+    form.set("file", importFile);
+
+    try {
+      const res = await api.post<{
+        message: string;
+        imported_count: number;
+        updated_count: number;
+        errors: string[];
+      }>("/api/admin/import/users", form);
+
+      toast.success(res.message);
+      setImportResult({
+        message: res.message,
+        imported: res.imported_count,
+        updated: res.updated_count,
+        errors: res.errors || [],
+      });
+      loadUsers();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengimpor akun pengguna.");
+    } finally {
+      setImporting(false);
+    }
   }
 
   function openEdit(u: UserItem) {
@@ -127,7 +197,9 @@ export default function UserManagementPage() {
         email: formEmail || null,
         phone: formPhone || null,
         role: formRole,
-        school_unit_ulid: (formRole === "admin_unit" || formRole === "guru") ? formUnitUlid : null,
+        school_unit_ulid: (formRole === "admin_unit" || formRole === "guru")
+          ? (isUnitAdmin ? (user?.school_unit?.ulid ?? null) : formUnitUlid)
+          : null,
         is_active: formIsActive,
       });
       toast.success("Pengguna baru berhasil ditambahkan.");
@@ -185,7 +257,7 @@ export default function UserManagementPage() {
       case "admin_unit":
         return <Badge variant="primary" className="gap-1 font-bold"><ShieldCheck className="size-3" /> TU / Unit</Badge>;
       case "guru":
-        return <Badge variant="good" className="gap-1 font-bold"><Shield className="size-3" /> Guru / Wali Kelas</Badge>;
+        return <Badge variant="good" className="gap-1 font-bold"><Shield className="size-3" /> Guru</Badge>;
       case "orangtua":
         return <Badge variant="default" className="gap-1 font-bold"><Users className="size-3" /> Wali Murid</Badge>;
     }
@@ -204,9 +276,84 @@ export default function UserManagementPage() {
 
         <Button onClick={openCreate} className="gap-2 font-bold shadow-xs">
           <UserPlus className="size-4" />
-          <span>Tambah Pengguna</span>
+          <span>{isUnitAdmin ? "Tambah Guru" : "Tambah Pengguna"}</span>
         </Button>
       </div>
+
+      {/* Impor Akun CSV */}
+      <Card className="p-5 border-border/80 shadow-xs">
+        <h2 className="text-sm font-semibold">
+          {isUnitAdmin ? "Impor Akun Guru & Wali Murid (CSV)" : "Impor Akun Pengguna (CSV)"}
+        </h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {isUnitAdmin ? (
+            <>
+              Masukkan banyak akun sekaligus — kolom: nama_lengkap, email, no_hp,
+              role (guru / orangtua; kosong = guru). Semua akun otomatis terhubung ke
+              unit Anda. Akun wali murid langsung siap dihubungkan ke siswa saat impor
+              siswa (dicocokkan lewat No HP / email). Login memakai OTP ke email atau No HP.
+            </>
+          ) : (
+            <>
+              Masukkan banyak akun sekaligus (sesuai form Tambah Pengguna) — kolom:
+              nama_lengkap, email, no_hp, role (admin / admin_unit / guru / orangtua),
+              unit_code (wajib untuk admin_unit &amp; guru — isi persis nama unit pada
+              dropdown Tambah Pengguna, kosongkan untuk lainnya), is_aktif (kosong = aktif).
+              Login memakai OTP ke email atau No HP.
+            </>
+          )}
+        </p>
+        <form onSubmit={handleImportUsers} className="mt-3 flex flex-col gap-2.5">
+          {/* The native "Choose File" control ignores the theme; a styled block */}
+          {/* button opens the same dialog via a hidden input. */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv,text/plain"
+            onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+            className="hidden"
+          />
+          <Button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full gap-2 font-bold shadow-xs"
+          >
+            <FileUp className="size-4" />
+            {importFile ? importFile.name : "Pilih File CSV"}
+          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={() =>
+                downloadApiFile(
+                  "/api/admin/import/users/template",
+                  isUnitAdmin ? "template_import_guru_wali_siakad.csv" : "template_import_pengguna_siakad.csv",
+                )
+              }
+            >
+              <Download className="size-3.5" />
+              Unduh Template
+            </Button>
+            <Button type="submit" size="sm" disabled={!importFile || importing} className="gap-1.5">
+              <Upload className="size-3.5" />
+              {importing ? "Mengimpor…" : isUnitAdmin ? "Impor Akun" : "Impor Pengguna"}
+            </Button>
+          </div>
+        </form>
+        {importResult && (
+          <div className="mt-3 rounded-lg bg-muted/30 p-3 text-xs">
+            <p className="font-semibold">{importResult.message}</p>
+            {importResult.errors.length > 0 && (
+              <ul className="mt-1.5 list-disc pl-4 text-destructive">
+                {importResult.errors.map((err, i) => <li key={i}>{err}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+      </Card>
 
       {/* Filter & Search Bar */}
       <Card className="p-4 border-border/80 shadow-xs">
@@ -224,6 +371,9 @@ export default function UserManagementPage() {
             </div>
           </div>
 
+          {/* A per-unit admin's list holds exactly two account kinds - their */}
+          {/* own unit's guru and wali murid - so their role filter offers only */}
+          {/* those; the unit filter stays central-only (one unit, no choice). */}
           <div>
             <Label className="text-xs">Role / Peran</Label>
             <select
@@ -232,28 +382,39 @@ export default function UserManagementPage() {
               className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
             >
               <option value="">Semua Role</option>
-              <option value="admin">Administrator Pusat</option>
-              <option value="admin_unit">Tata Usaha / Admin Unit</option>
-              <option value="guru">Guru / Wali Kelas</option>
-              <option value="orangtua">Wali Murid</option>
+              {isUnitAdmin ? (
+                <>
+                  <option value="guru">Guru</option>
+                  <option value="orangtua">Wali Murid</option>
+                </>
+              ) : (
+                <>
+                  <option value="admin">Administrator Pusat</option>
+                  <option value="admin_unit">Tata Usaha / Admin Unit</option>
+                  <option value="guru">Guru</option>
+                  <option value="orangtua">Wali Murid</option>
+                </>
+              )}
             </select>
           </div>
 
-          <div>
-            <Label className="text-xs">Unit Sekolah</Label>
-            <select
-              value={unitFilter}
-              onChange={(e) => setUnitFilter(e.target.value)}
-              className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
-            >
-              <option value="">Semua Unit</option>
-              {units.map((u) => (
-                <option key={u.ulid} value={u.code}>
-                  {u.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!isUnitAdmin && (
+            <div>
+              <Label className="text-xs">Unit Sekolah</Label>
+              <select
+                value={unitFilter}
+                onChange={(e) => setUnitFilter(e.target.value)}
+                className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
+              >
+                <option value="">Semua Unit</option>
+                {units.map((u) => (
+                  <option key={u.ulid} value={u.code}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="flex items-end gap-2">
             <div className="flex-1">
@@ -354,25 +515,29 @@ export default function UserManagementPage() {
                       {u.last_login_at ? tanggalWaktu(u.last_login_at) : "Belum pernah masuk"}
                     </td>
                     <td className="px-5 py-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openEdit(u)}
-                          className="h-8 px-2.5 text-xs font-semibold gap-1"
-                        >
-                          <Edit2 className="size-3.5" />
-                          <span>Edit</span>
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setDeletingUser(u)}
-                          className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </div>
+                      {/* Editing/deleting any account stays central-admin only - */}
+                      {/* hidden rather than left to 403 on click. */}
+                      {!isUnitAdmin && (
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openEdit(u)}
+                            className="h-8 px-2.5 text-xs font-semibold gap-1"
+                          >
+                            <Edit2 className="size-3.5" />
+                            <span>Edit</span>
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setDeletingUser(u)}
+                            className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -431,19 +596,36 @@ export default function UserManagementPage() {
 
               <div>
                 <Label className="text-xs">Peran / Role Pengguna</Label>
-                <select
-                  value={formRole}
-                  onChange={(e) => setFormRole(e.target.value as any)}
-                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
-                >
-                  <option value="admin">Administrator Pusat (Akses Penuh Semua Unit)</option>
-                  <option value="admin_unit">Tata Usaha / Admin Unit (Akses 1 Unit)</option>
-                  <option value="guru">Guru / Wali Kelas (Pencatatan Poin & Prestasi)</option>
-                  <option value="orangtua">Wali Murid</option>
-                </select>
+                {isUnitAdmin ? (
+                  <div className="mt-1 space-y-1.5">
+                    <select
+                      value={formRole}
+                      onChange={(e) => setFormRole(e.target.value as any)}
+                      className="w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                    >
+                      <option value="guru">Guru</option>
+                      <option value="orangtua">Wali Murid</option>
+                    </select>
+                    <p className="text-[11px] text-muted-foreground">
+                      Akun otomatis terpasang di unit {user?.school_unit?.label ?? "Anda"}. Guru mengajar
+                      sesuai jadwal pelajaran; akun wali murid langsung bisa dihubungkan ke siswa saat impor siswa.
+                    </p>
+                  </div>
+                ) : (
+                  <select
+                    value={formRole}
+                    onChange={(e) => setFormRole(e.target.value as any)}
+                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                  >
+                    <option value="admin">Administrator Pusat (Akses Penuh Semua Unit)</option>
+                    <option value="admin_unit">Tata Usaha / Admin Unit (Akses 1 Unit)</option>
+                    <option value="guru">Guru (mengajar sesuai jadwal; catat poin &amp; prestasi)</option>
+                    <option value="orangtua">Wali Murid</option>
+                  </select>
+                )}
               </div>
 
-              {(formRole === "admin_unit" || formRole === "guru") && (
+              {(formRole === "admin_unit" || formRole === "guru") && !isUnitAdmin && (
                 <div>
                   <Label className="text-xs">Unit Sekolah Penugasan</Label>
                   <select
@@ -541,7 +723,7 @@ export default function UserManagementPage() {
                 >
                   <option value="admin">Administrator Pusat</option>
                   <option value="admin_unit">Tata Usaha / Admin Unit</option>
-                  <option value="guru">Guru / Wali Kelas</option>
+                  <option value="guru">Guru</option>
                   <option value="orangtua">Wali Murid</option>
                 </select>
               </div>

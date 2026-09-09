@@ -35,7 +35,10 @@ const NAV: StaffNavItem[] = [
   { href: "/admin/tarif", label: "Pengaturan Biaya & SPP", icon: SlidersHorizontal },
   { href: "/admin/diskon", label: "Kelola Diskon & Beasiswa", icon: BadgePercent },
   { href: "/admin/laporan", label: "Laporan Keuangan", icon: ScrollText },
-  { href: "/admin/users", label: "Manajemen Pengguna", icon: Users, centralOnly: true },
+  // Not centralOnly: a per-unit admin onboards their own unit's guru
+  // accounts here (create + CSV import); editing/deleting any account stays
+  // central-only and the page hides those buttons for them.
+  { href: "/admin/users", label: "Manajemen Pengguna", icon: Users },
   { href: "/admin/unit", label: "Manajemen Unit", icon: Building2, centralOnly: true },
   { href: "/admin/log-aktivitas", label: "Log Aktivitas", icon: History, centralOnly: true },
   { href: "/admin/jadwal", label: "Jadwal Pelajaran", icon: CalendarClock },

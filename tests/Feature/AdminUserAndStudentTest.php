@@ -92,7 +92,14 @@ class AdminUserAndStudentTest extends TestCase
         ]);
     }
 
-    public function test_a_unit_admin_only_sees_their_own_units_staff_and_parents(): void
+    /**
+     * Narrowed 2026-09-09: a per-unit admin's account power is onboarding
+     * their own unit's teachers and parents, so the list shows exactly those
+     * - own-unit gurus, plus this unit's parents (imported with the unit
+     * stamped on, or PMB-created and linked through their children). Other
+     * staff and any other unit's accounts must not reach this response.
+     */
+    public function test_a_unit_admin_sees_their_own_units_gurus_and_parents(): void
     {
         $otherUnit = SchoolUnit::create(['code' => 'smp', 'label' => 'SMP Islam Al Azhar 12', 'jenjang_group' => 'smp']);
 
@@ -121,6 +128,7 @@ class AdminUserAndStudentTest extends TestCase
         $emails = collect($response->json('users.data'))->pluck('email');
 
         $this->assertTrue($emails->contains('guru.sd@yapinet.id'));
+        // A parent of this unit's own student IS their business now.
         $this->assertTrue($emails->contains('wali.sd@example.com'));
         $this->assertFalse($emails->contains('guru.smp@yapinet.id'));
         $this->assertFalse($emails->contains('wali.smp@example.com'));

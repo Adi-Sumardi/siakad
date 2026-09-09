@@ -268,8 +268,17 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/discount-schemes', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'schemes']);
     Route::get('/student-discounts', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'studentDiscounts']);
 
-    // User management (viewable by admins)
+    // User management (viewable by admins). A per-unit admin may also CREATE
+    // accounts for their own unit - UserController::store() forces the unit
+    // (and limits the role) rather than trusting the parameters, the same
+    // line BillingRunController draws - so the route can live in this
+    // shared group.
     Route::get('/users', [\App\Http\Controllers\Api\Admin\UserController::class, 'index']);
+    Route::post('/users', [\App\Http\Controllers\Api\Admin\UserController::class, 'store']);
+    // Bulk counterpart: a whole year's staff in one CSV. Same forced-unit
+    // and role limits for a per-unit admin, inside ImportController.
+    Route::post('/import/users', [\App\Http\Controllers\Api\Admin\ImportController::class, 'importUsers']);
+    Route::get('/import/users/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadUserTemplate']);
 
     // Pickers every admin form needs - none of it sensitive, so one response
     // shape for both admin kinds.
@@ -301,7 +310,6 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('/student-discounts', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'assignStudentDiscount']);
     Route::delete('/student-discounts/{studentDiscount}', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'revokeStudentDiscount']);
 
-    Route::post('/users', [\App\Http\Controllers\Api\Admin\UserController::class, 'store']);
     Route::patch('/users/{user}', [\App\Http\Controllers\Api\Admin\UserController::class, 'update']);
     Route::delete('/users/{user}', [\App\Http\Controllers\Api\Admin\UserController::class, 'destroy']);
 

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
+use App\Models\Guardian;
 use App\Models\SchoolUnit;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -21,17 +22,24 @@ class UserController extends Controller
 
         $users = User::query()
             ->with('schoolUnit')
-            // A per-unit admin manages their own unit's staff, and the
-            // parents of their own unit's students - never the whole
-            // foundation's roster. Without this an admin_unit's GET here
-            // returned every staff and parent account system-wide, contact
-            // details included - the exact cross-unit leak this codebase's
-            // role-check-alone-is-not-enough rule (see the admin route group
-            // in routes/api.php) exists to prevent, just never applied here.
+            // A per-unit admin's whole job on this page is onboarding their
+            // own unit's teachers and parents - the two account kinds they
+            // can create, so the two kinds the list shows them. Other staff
+            // stays invisible; parents show whether they were imported with
+            // this unit stamped on them or arrived via PMB linked to this
+            // unit's student. Without this an admin_unit's GET here returned
+            // every account system-wide, contact details included - the exact
+            // cross-unit leak the role-check-alone-is-not-enough rule (see
+            // the admin route group in routes/api.php) exists to prevent.
             ->when($caller->isUnitScoped(), function ($q) use ($caller) {
                 $q->where(function ($sq) use ($caller) {
-                    $sq->where('school_unit_id', $caller->school_unit_id)
-                        ->orWhereHas('guardian.students', fn ($gq) => $gq->where('school_unit_id', $caller->school_unit_id));
+                    $sq->where(function ($uq) use ($caller) {
+                        $uq->whereIn('role', ['guru', 'orangtua'])
+                            ->where('school_unit_id', $caller->school_unit_id);
+                    })->orWhere(function ($pq) use ($caller) {
+                        $pq->where('role', 'orangtua')
+                            ->whereHas('guardian.students', fn ($gq) => $gq->where('school_unit_id', $caller->school_unit_id));
+                    });
                 });
             })
             ->when($request->string('search')->value(), function ($q, $search) {
@@ -58,7 +66,7 @@ class UserController extends Controller
                     'role_label' => match ($u->role) {
                         'admin' => 'Administrator Pusat',
                         'admin_unit' => 'Tata Usaha / Admin Unit',
-                        'guru' => 'Guru / Wali Kelas',
+                        'guru' => 'Guru',
                         'orangtua' => 'Wali Murid',
                         default => $u->role,
                     },
@@ -96,6 +104,17 @@ class UserController extends Controller
             'is_active' => 'boolean',
         ]);
 
+        // A per-unit admin may onboard their own unit's teachers and parents,
+        // nothing else - the controller forces the unit rather than trusting
+        // the parameter, the same line BillingRunController draws.
+        if ($request->user()->isUnitScoped()) {
+            if (! in_array($validated['role'], ['guru', 'orangtua'], true)) {
+                return response()->json(['message' => 'Admin unit hanya dapat membuat akun guru atau wali murid untuk unitnya sendiri.'], 422);
+            }
+
+            $validated['school_unit_ulid'] = $request->user()->schoolUnit->ulid;
+        }
+
         if (empty($validated['email']) && empty($validated['phone'])) {
             return response()->json(['message' => 'Email atau Nomor HP/WhatsApp harus diisi untuk proses autentikasi OTP.'], 422);
         }
@@ -112,6 +131,20 @@ class UserController extends Controller
             'school_unit_id' => $unit?->id,
             'is_active' => $validated['is_active'] ?? true,
         ]);
+
+        // A parent account is only useful once a guardian row exists to
+        // attach students to - students CSV import later matches wali by
+        // phone/email and links the children through it. PMB handoff
+        // creates its own; every other creation path starts one here.
+        if ($user->role === 'orangtua' && ! Guardian::where('user_id', $user->id)->exists()) {
+            Guardian::create([
+                'user_id' => $user->id,
+                'nama' => $user->name,
+                'hubungan' => 'wali',
+                'no_hp' => $user->phone,
+                'email' => $user->email,
+            ]);
+        }
 
         ActivityLog::record($request->user(), 'user.created', $user, ['role' => $user->role]);
 
