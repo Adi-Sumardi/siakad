@@ -110,6 +110,46 @@ class AdminBillingTest extends TestCase
             ->assertJsonCount(2, 'bills.data');
     }
 
+    public function test_the_central_admin_can_filter_bills_by_unit_and_year(): void
+    {
+        $this->studentIn($this->sd, 'Anak SD');
+        $this->studentIn($this->smp, 'Anak SMP');
+        $this->generateAll();
+
+        // By unit code - the dropdown the tagihan page has always sent.
+        $this->actingAs($this->staff('admin'))
+            ->getJson('/api/admin/bills?unit='.$this->smp->code)
+            ->assertOk()
+            ->assertJsonCount(1, 'bills.data')
+            ->assertJsonPath('bills.data.0.student.nama_lengkap', 'Anak SMP');
+
+        // By year string, as the page's picker sends it.
+        $this->actingAs($this->staff('admin'))
+            ->getJson('/api/admin/bills?year='.$this->year->year)
+            ->assertOk()
+            ->assertJsonCount(2, 'bills.data');
+
+        // A year nothing was billed in yields an honest empty list.
+        $this->actingAs($this->staff('admin'))
+            ->getJson('/api/admin/bills?year=2030/2031')
+            ->assertOk()
+            ->assertJsonCount(0, 'bills.data');
+    }
+
+    public function test_a_unit_admins_bill_list_ignores_a_foreign_unit_filter(): void
+    {
+        $this->studentIn($this->sd, 'Anak SD');
+        $this->studentIn($this->smp, 'Anak SMP');
+        $this->generateAll();
+
+        // The dropdown is hidden for a per-unit admin, but scope - not the
+        // query string - decides what they see even if one is sent anyway.
+        $this->actingAs($this->staff('admin_unit', $this->sd))
+            ->getJson('/api/admin/bills?unit='.$this->smp->code)
+            ->assertOk()
+            ->assertJsonCount(0, 'bills.data');
+    }
+
     public function test_a_unit_admin_cannot_touch_another_units_bill(): void
     {
         $this->studentIn($this->smp, 'Anak SMP');

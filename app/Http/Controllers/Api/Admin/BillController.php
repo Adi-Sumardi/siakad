@@ -28,6 +28,13 @@ class BillController extends Controller
             ->when($request->integer('month'), fn ($q, $month) => $q->where('period_month', $month))
             ->when($request->string('q')->value(), fn ($q, $term) => $q->whereHas('student',
                 fn ($s) => $s->where('nama_lengkap', 'like', "%{$term}%")))
+            // The tagihan page has always sent unit and year filters; they
+            // are applied inside visibleTo(), so a per-unit admin's scope
+            // wins no matter what the dropdown claimed.
+            ->when($request->string('unit')->value(), fn ($q, $unitCode) => $q->whereHas('student.schoolUnit',
+                fn ($u) => $u->where('code', $unitCode)))
+            ->when($request->string('year')->value(), fn ($q, $year) => $q->whereHas('academicYear',
+                fn ($ay) => $ay->where('year', $year)->orWhere('ulid', $year)))
             ->orderBy('due_date')
             ->paginate(50);
 

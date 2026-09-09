@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError, API_BASE } from "@/lib/api";
+import { useAuth } from "@/lib/auth/auth-context";
 import { dueLabel, rupiah, tanggal } from "@/lib/format";
 import { isOpen, type Bill } from "@/lib/types/billing";
 
@@ -32,6 +33,9 @@ function statusBadge(bill: Bill) {
 type Action = { bill: Bill; kind: "bayar" | "bebaskan" | "batalkan" };
 
 export default function AdminBillsPage() {
+  const { user } = useAuth();
+  const isCentral = user?.role === "admin";
+
   const [bills, setBills] = useState<Paginated<Bill> | null>(null);
   const [status, setStatus] = useState("open");
   const [q, setQ] = useState("");
@@ -153,7 +157,9 @@ export default function AdminBillsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Tagihan & Transaksi Siswa</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Daftar tagihan SPP dan administrasi sekolah di seluruh unit.
+            {isCentral
+              ? "Daftar tagihan SPP dan administrasi sekolah di seluruh unit."
+              : "Daftar tagihan SPP dan administrasi sekolah di unit Anda."}
           </p>
         </div>
 
@@ -194,16 +200,21 @@ export default function AdminBillsPage() {
             ))}
           </select>
 
-          <select
-            value={unitCode}
-            onChange={(e) => setUnitCode(e.target.value)}
-            className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
-          >
-            <option value="">Semua Unit Sekolah</option>
-            {units.map((u) => (
-              <option key={u.ulid} value={u.code}>{u.label}</option>
-            ))}
-          </select>
+          {/* Unit filter is central-admin only: a per-unit admin's scope
+              already narrows the list to their own unit, so the dropdown
+              would list campuses they can never see. */}
+          {isCentral && (
+            <select
+              value={unitCode}
+              onChange={(e) => setUnitCode(e.target.value)}
+              className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
+            >
+              <option value="">Semua Unit Sekolah</option>
+              {units.map((u) => (
+                <option key={u.ulid} value={u.code}>{u.label}</option>
+              ))}
+            </select>
+          )}
 
           <select
             value={status}
