@@ -22,29 +22,14 @@ class TestPaymentSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. Ensure all 8 School Units exist
-        $unitsData = [
-            ['code' => 'RA-SAKINAH', 'label' => 'RA Sakinah', 'jenjang_group' => 'tk', 'sort_order' => 0],
-            ['code' => 'PG-SAKINAH', 'label' => 'Playgroup (PG) Sakinah', 'jenjang_group' => 'pg', 'sort_order' => 1],
-            ['code' => 'TK-13', 'label' => 'TK Islam Al Azhar 13', 'jenjang_group' => 'tk', 'sort_order' => 2],
-            ['code' => 'SD-13', 'label' => 'SD Islam Al Azhar 13 Rawamangun', 'jenjang_group' => 'sd', 'sort_order' => 3],
-            ['code' => 'SMP-12', 'label' => 'SMP Islam Al Azhar 12 Rawamangun', 'jenjang_group' => 'smp', 'sort_order' => 4],
-            ['code' => 'SMP-55', 'label' => 'SMP Islam Al Azhar 55 Jatiasih', 'jenjang_group' => 'smp', 'sort_order' => 5],
-            ['code' => 'SMA-33', 'label' => 'SMA Islam Al Azhar 33', 'jenjang_group' => 'sma', 'sort_order' => 6],
-            ['code' => 'SMA-48', 'label' => 'SMA Islam Al Azhar 48', 'jenjang_group' => 'sma', 'sort_order' => 7],
-        ];
-
-        $units = [];
-        foreach ($unitsData as $ud) {
-            $units[$ud['code']] = SchoolUnit::updateOrCreate(
-                ['code' => $ud['code']],
-                ['label' => $ud['label'], 'jenjang_group' => $ud['jenjang_group'], 'sort_order' => $ud['sort_order'], 'is_active' => true]
-            );
-        }
-
-        // Also ensure legacy codes if any exist
-        $sdUnit = $units['SD-13'] ?? SchoolUnit::where('jenjang_group', 'sd')->first();
-        $smpUnit = $units['SMP-12'] ?? SchoolUnit::where('jenjang_group', 'smp')->first();
+        // 1. Resolve the units this test data lives in. The catalogue itself
+        // is seeded by DatabaseSeeder - keeping a second creation list here is
+        // what produced the "phantom unit" audit finding (two lists drifting
+        // apart), so this seeder only ever looks rows up.
+        $sdUnit = SchoolUnit::where('code', 'SD-13')->first()
+            ?? SchoolUnit::where('jenjang_group', 'sd')->first();
+        $smpUnit = SchoolUnit::where('code', 'SMP-12')->first()
+            ?? SchoolUnit::where('jenjang_group', 'smp')->first();
 
         // 2. Ensure Academic Year & Active Term
         $year = AcademicYear::where('is_active', true)->first()
@@ -141,7 +126,7 @@ class TestPaymentSeeder extends Seeder
             ]
         );
 
-        // 6. Create Child 1: Jenjang SD (SD Islam Al Azhar 13)
+        // 6. Create Child 1: SDI Al Azhar 13 Rawamangun
         $classSD = Classroom::firstOrCreate(
             [
                 'school_unit_id' => $sdUnit->id,
@@ -183,7 +168,7 @@ class TestPaymentSeeder extends Seeder
             ],
         ]);
 
-        // 7. Create Child 2: Jenjang SMP (SMP Islam Al Azhar 12)
+        // 7. Create Child 2: SMPI Al Azhar 12 Rawamangun
         $classSMP = Classroom::firstOrCreate(
             [
                 'school_unit_id' => $smpUnit->id,
@@ -246,7 +231,7 @@ class TestPaymentSeeder extends Seeder
                 'term_id' => $term->id,
                 'fee_rate_id' => $sdRate->id,
                 'dedup_key' => "spp:{$studentSD->id}:{$year->id}:{$currentMonth}",
-                'description' => "SPP {$monthName} - {$studentSD->nama_lengkap} (SD Al Azhar 13)",
+                'description' => "SPP {$monthName} - {$studentSD->nama_lengkap} (SDI Al Azhar 13)",
                 'subtotal' => 650000,
                 'discount_amount' => 0,
                 'late_fee' => 0,
@@ -287,7 +272,7 @@ class TestPaymentSeeder extends Seeder
                 'term_id' => $term->id,
                 'fee_rate_id' => $smpRate->id,
                 'dedup_key' => "spp:{$studentSMP->id}:{$year->id}:{$currentMonth}",
-                'description' => "SPP {$monthName} - {$studentSMP->nama_lengkap} (SMP Al Azhar 12)",
+                'description' => "SPP {$monthName} - {$studentSMP->nama_lengkap} (SMPI Al Azhar 12)",
                 'subtotal' => 750000,
                 'discount_amount' => 0,
                 'late_fee' => 0,

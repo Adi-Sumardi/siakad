@@ -13,19 +13,24 @@ use Illuminate\Database\Seeder;
 /**
  * Development seed only.
  *
- * The real unit master comes from PMB via `php artisan units:sync` - the codes
- * below are placeholders so a fresh checkout has something to click through,
- * and must not be treated as the source of truth.
+ * The unit list below is the dev copy of the real campus catalogue (confirmed
+ * by the school, 2026-09-09) and the single place it lives - TestPaymentSeeder
+ * looks these up by code instead of carrying a second list that drifts. In
+ * production the master still comes from PMB via `php artisan units:sync`,
+ * matched on `code`, so codes here must not be renamed casually.
  */
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
         $units = [
-            ['code' => 'PG-SAKINAH', 'label' => 'Playgroup (PG) Sakinah', 'jenjang_group' => 'pg'],
-            ['code' => 'TK-SAKINAH', 'label' => 'TK Sakinah', 'jenjang_group' => 'tk'],
-            ['code' => 'SD-SAKINAH', 'label' => 'SD Sakinah', 'jenjang_group' => 'sd'],
-            ['code' => 'SMP-SAKINAH', 'label' => 'SMP Sakinah', 'jenjang_group' => 'smp'],
+            ['code' => 'PG-SAKINAH', 'label' => 'Playgroup Sakinah Rawamangun', 'jenjang_group' => 'pg'],
+            ['code' => 'RA-SAKINAH', 'label' => 'RA Sakinah Kebayoran Baru', 'jenjang_group' => 'tk'],
+            ['code' => 'TK-13', 'label' => 'TKI Al Azhar 13 Rawamangun', 'jenjang_group' => 'tk'],
+            ['code' => 'SD-13', 'label' => 'SDI Al Azhar 13 Rawamangun', 'jenjang_group' => 'sd'],
+            ['code' => 'SMP-12', 'label' => 'SMPI Al Azhar 12 Rawamangun', 'jenjang_group' => 'smp'],
+            ['code' => 'SMP-55', 'label' => 'SMPI Al Azhar 55 Jatimakmur', 'jenjang_group' => 'smp'],
+            ['code' => 'SMA-33', 'label' => 'SMAI Al Azhar 33 Jatimakmur', 'jenjang_group' => 'sma'],
         ];
 
         foreach ($units as $i => $unit) {
@@ -93,7 +98,7 @@ class DatabaseSeeder extends Seeder
         // Dev rates only. Real amounts are set per unit in Pengaturan; these
         // exist so a fresh checkout can run the generator and see something.
         $spp = FeeType::where('code', 'spp')->first();
-        $monthly = ['PG-SAKINAH' => 450000, 'TK-SAKINAH' => 500000, 'SD-SAKINAH' => 650000, 'SMP-SAKINAH' => 750000];
+        $monthly = ['PG-SAKINAH' => 450000, 'TK-13' => 500000, 'SD-13' => 650000, 'SMP-12' => 750000];
 
         foreach ($monthly as $code => $amount) {
             $unit = SchoolUnit::where('code', $code)->first();
@@ -109,12 +114,14 @@ class DatabaseSeeder extends Seeder
             );
         }
 
-        $sd = SchoolUnit::where('code', 'SD-SAKINAH')->first();
+        // Sits on the unit the seeded students belong to, so admin_unit flows
+        // can be exercised against real rows straight after a fresh seed.
+        $sd = SchoolUnit::where('code', 'SD-13')->first();
 
         User::updateOrCreate(
             ['email' => 'admin.sd@yapinet.id'],
             [
-                'name' => 'Admin SD Sakinah',
+                'name' => 'Admin SDI Al Azhar 13',
                 'role' => 'admin_unit',
                 'school_unit_id' => $sd?->id,
                 'is_active' => true,
