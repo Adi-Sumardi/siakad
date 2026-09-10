@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Public;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Public\StudentCheckInRequest;
 use App\Models\AttendanceSession;
 use App\Models\Enrollment;
 use App\Models\Student;
@@ -39,9 +40,9 @@ class AttendancePresensiController extends Controller
     }
 
     /** Resolves a NIS to a name for confirmation - writes nothing. */
-    public function lookup(Request $request, string $token, AttendanceLedger $ledger): JsonResponse
+    public function lookup(StudentCheckInRequest $request, string $token, AttendanceLedger $ledger): JsonResponse
     {
-        $validated = $request->validate(['nis' => 'required|string|max:50']);
+        $validated = $request->validated();
 
         $session = AttendanceSession::where('token', $token)->firstOrFail();
 
@@ -62,9 +63,9 @@ class AttendancePresensiController extends Controller
     }
 
     /** The actual write - re-validates everything server-side rather than trusting the client's lookup() result. */
-    public function checkIn(Request $request, string $token, AttendanceLedger $ledger): JsonResponse
+    public function checkIn(StudentCheckInRequest $request, string $token, AttendanceLedger $ledger): JsonResponse
     {
-        $validated = $request->validate(['nis' => 'required|string|max:50']);
+        $validated = $request->validated();
 
         $session = AttendanceSession::where('token', $token)->firstOrFail();
 

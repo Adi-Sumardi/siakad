@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreSubjectRequest;
 use App\Models\ActivityLog;
 use App\Models\SchoolUnit;
 use App\Models\Subject;
@@ -31,13 +32,9 @@ class SubjectController extends Controller
         ]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreSubjectRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'school_unit_code' => 'nullable|exists:school_units,code',
-            'code' => 'required|string|max:32|alpha_dash',
-            'name' => 'required|string|max:120',
-        ]);
+        $validated = $request->validated();
 
         $unit = $request->user()->isUnitScoped()
             ? $request->user()->schoolUnit

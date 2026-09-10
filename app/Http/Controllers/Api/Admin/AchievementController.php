@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\RejectAchievementRequest;
+use App\Http\Requests\Admin\VerifyAchievementRequest;
 use App\Http\Resources\AchievementResource;
 use App\Models\Achievement;
 use App\Models\ActivityLog;
@@ -34,9 +36,9 @@ class AchievementController extends Controller
      * this win, really", made once, at the moment someone independent signs
      * off on it.
      */
-    public function verify(Request $request, string $ulid, PointLedger $ledger): JsonResponse
+    public function verify(VerifyAchievementRequest $request, string $ulid, PointLedger $ledger): JsonResponse
     {
-        $validated = $request->validate(['points_awarded' => 'nullable|integer|min:1|max:200']);
+        $validated = $request->validated();
 
         $achievement = Achievement::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
@@ -85,9 +87,9 @@ class AchievementController extends Controller
         return response()->json(['achievement' => new AchievementResource($achievement->fresh())]);
     }
 
-    public function reject(Request $request, string $ulid): JsonResponse
+    public function reject(RejectAchievementRequest $request, string $ulid): JsonResponse
     {
-        $validated = $request->validate(['reason' => 'required|string|max:500']);
+        $validated = $request->validated();
 
         $achievement = Achievement::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 

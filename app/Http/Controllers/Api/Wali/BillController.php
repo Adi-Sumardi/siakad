@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Wali;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Wali\CheckoutRequest;
 use App\Http\Resources\BillResource;
 use App\Http\Resources\PaymentResource;
 use App\Models\Bill;
@@ -73,16 +74,9 @@ class BillController extends Controller
     /**
      * One invoice for however many bills were ticked.
      */
-    public function checkout(Request $request, CheckoutService $checkout): JsonResponse
+    public function checkout(CheckoutRequest $request, CheckoutService $checkout): JsonResponse
     {
-        $validated = $request->validate([
-            'bill_ulids' => 'required|array|min:1|max:50',
-            'bill_ulids.*' => 'required|string',
-            'method' => 'required|in:virtual_account,e_wallet,qris,bank_transfer,credit_card',
-            'bank' => 'nullable|in:muamalat,bsi',
-            'custom_amounts' => 'nullable|array',
-            'custom_amounts.*' => 'numeric|min:1',
-        ]);
+        $validated = $request->validated();
 
         try {
             $payment = $checkout->start(

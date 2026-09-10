@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\ImportFeeRatesRequest;
+use App\Http\Requests\Admin\ImportStudentsRequest;
+use App\Http\Requests\Admin\ImportUsersRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Classroom;
@@ -25,12 +28,8 @@ class ImportController extends Controller
     /**
      * Import students, their classes, and their guardians from CSV.
      */
-    public function importStudents(Request $request): JsonResponse
+    public function importStudents(ImportStudentsRequest $request): JsonResponse
     {
-        $request->validate([
-            'file' => 'required|file|mimes:csv,txt|max:5120',
-            'academic_year_ulid' => 'nullable|exists:academic_years,ulid',
-        ]);
 
         $caller = $request->user();
 
@@ -311,11 +310,8 @@ class ImportController extends Controller
     /**
      * Import fee rates from CSV.
      */
-    public function importFeeRates(Request $request): JsonResponse
+    public function importFeeRates(ImportFeeRatesRequest $request): JsonResponse
     {
-        $request->validate([
-            'file' => 'required|file|mimes:csv,txt|max:5120',
-        ]);
 
         $file = $request->file('file');
         $handle = fopen($file->getRealPath(), 'r');
@@ -478,11 +474,8 @@ class ImportController extends Controller
      * email/number already owned by an account of a different role is an
      * error, never a silent role flip.
      */
-    public function importUsers(Request $request): JsonResponse
+    public function importUsers(ImportUsersRequest $request): JsonResponse
     {
-        $request->validate([
-            'file' => 'required|file|mimes:csv,txt|max:5120',
-        ]);
 
         $caller = $request->user();
 

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\DateRangeRequest;
 use App\Models\Bill;
 use App\Models\Payment;
 use Illuminate\Http\JsonResponse;
@@ -53,12 +54,9 @@ class ReportController extends Controller
     }
 
     /** What actually came in, over a window an admin picks. */
-    public function collections(Request $request): JsonResponse
+    public function collections(DateRangeRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'from' => 'nullable|date',
-            'to' => 'nullable|date|after_or_equal:from',
-        ]);
+        $validated = $request->validated();
 
         $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : now()->startOfMonth();
         $to = isset($validated['to']) ? Carbon::parse($validated['to'])->endOfDay() : now()->endOfDay();

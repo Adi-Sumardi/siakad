@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Wali;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Wali\EnrollExtracurricularRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Extracurricular;
@@ -51,13 +52,11 @@ class ExtracurricularController extends Controller
      * lock - so the only gates added here are the ones a parent faces:
      * the activity must be active and belong to the running academic year.
      */
-    public function enroll(Request $request, string $ulid, ExtracurricularService $service): JsonResponse
+    public function enroll(EnrollExtracurricularRequest $request, string $ulid, ExtracurricularService $service): JsonResponse
     {
         $student = Student::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
-        $validated = $request->validate([
-            'extracurricular_ulid' => 'required|string',
-        ]);
+        $validated = $request->validated();
 
         $ekskul = Extracurricular::where('ulid', $validated['extracurricular_ulid'])->first();
         $year = AcademicYear::where('is_active', true)->first();

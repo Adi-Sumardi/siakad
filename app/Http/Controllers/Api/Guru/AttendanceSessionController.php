@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Guru;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Guru\CompleteAttendanceSessionRequest;
+use App\Http\Requests\Guru\RevokeReasonRequest;
 use App\Models\ActivityLog;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
@@ -71,9 +73,9 @@ class AttendanceSessionController extends Controller
     }
 
     /** A teacher striking one self-service check-in they believe is wrong (someone else's NIS, or a no-show). */
-    public function revoke(Request $request, string $sessionUlid, string $recordUlid, AttendanceLedger $ledger): JsonResponse
+    public function revoke(RevokeReasonRequest $request, string $sessionUlid, string $recordUlid, AttendanceLedger $ledger): JsonResponse
     {
-        $validated = $request->validate(['reason' => 'required|string|max:500']);
+        $validated = $request->validated();
 
         $session = $this->ownSession($request, $sessionUlid);
 
@@ -92,14 +94,9 @@ class AttendanceSessionController extends Controller
     }
 
     /** Marks the rest of the roster (sick/permitted/unexcused, or a teacher-witnessed "hadir") and closes the session. */
-    public function complete(Request $request, string $sessionUlid, AttendanceLedger $ledger, AttendanceSessionService $sessions): JsonResponse
+    public function complete(CompleteAttendanceSessionRequest $request, string $sessionUlid, AttendanceLedger $ledger, AttendanceSessionService $sessions): JsonResponse
     {
-        $validated = $request->validate([
-            'records' => 'array|max:200',
-            'records.*.student_ulid' => 'required_with:records|string',
-            'records.*.status' => 'required_with:records|in:hadir,sakit,izin,alpa',
-            'records.*.description' => 'nullable|string|max:500',
-        ]);
+        $validated = $request->validated();
 
         $session = $this->ownSession($request, $sessionUlid);
 

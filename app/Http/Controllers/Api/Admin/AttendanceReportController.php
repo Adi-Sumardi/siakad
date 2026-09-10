@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\DateRangeRequest;
 use App\Models\AttendanceRecord;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,12 +12,9 @@ use Illuminate\Support\Carbon;
 class AttendanceReportController extends Controller
 {
     /** H/S/I/A tallies over a date range, grouped by class and by subject - same shape as ReportController::collections(). */
-    public function summary(Request $request): JsonResponse
+    public function summary(DateRangeRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'from' => 'nullable|date',
-            'to' => 'nullable|date|after_or_equal:from',
-        ]);
+        $validated = $request->validated();
 
         $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : now()->startOfMonth();
         $to = isset($validated['to']) ? Carbon::parse($validated['to'])->endOfDay() : now()->endOfDay();

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreSchoolUnitRequest;
+use App\Http\Requests\Admin\UpdateSchoolUnitRequest;
 use App\Models\ActivityLog;
 use App\Models\SchoolUnit;
 use Illuminate\Database\QueryException;
@@ -18,14 +20,6 @@ use Illuminate\Http\Request;
  */
 class SchoolUnitController extends Controller
 {
-    private const RULES = [
-        'code' => 'required|string|max:100|alpha_dash',
-        'label' => 'required|string|max:255',
-        'jenjang_group' => 'required|in:ra,pg,tk,sd,smp,sma',
-        'is_active' => 'required|boolean',
-        'sort_order' => 'nullable|integer|min:0',
-    ];
-
     /** Full management list - active and inactive both, unlike ReferenceController::schoolUnits()'s picker-only slice. */
     public function index(): JsonResponse
     {
@@ -42,11 +36,9 @@ class SchoolUnitController extends Controller
         ]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreSchoolUnitRequest $request): JsonResponse
     {
-        $validated = $request->validate(array_merge(self::RULES, [
-            'code' => self::RULES['code'].'|unique:school_units,code',
-        ]));
+        $validated = $request->validated();
 
         $unit = SchoolUnit::create($validated);
 
@@ -55,11 +47,9 @@ class SchoolUnitController extends Controller
         return response()->json(['message' => 'Unit sekolah berhasil ditambahkan.', 'school_unit' => $unit], 201);
     }
 
-    public function update(Request $request, SchoolUnit $schoolUnit): JsonResponse
+    public function update(UpdateSchoolUnitRequest $request, SchoolUnit $schoolUnit): JsonResponse
     {
-        $validated = $request->validate(array_merge(self::RULES, [
-            'code' => self::RULES['code'].'|unique:school_units,code,'.$schoolUnit->id,
-        ]));
+        $validated = $request->validated();
 
         $schoolUnit->update($validated);
 

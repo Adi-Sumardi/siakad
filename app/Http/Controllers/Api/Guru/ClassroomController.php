@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Guru;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Guru\DateRangeRequest;
 use App\Models\AttendanceRecord;
 use App\Models\Classroom;
 use App\Models\Term;
@@ -78,14 +79,11 @@ class ClassroomController extends Controller
      * roster student is listed, zeros included: an all-zero row is itself
      * the finding (never once checked in).
      */
-    public function attendanceRecap(Request $request, string $ulid): JsonResponse
+    public function attendanceRecap(DateRangeRequest $request, string $ulid): JsonResponse
     {
         $classroom = Classroom::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
-        $validated = $request->validate([
-            'from' => 'nullable|date',
-            'to' => 'nullable|date|after_or_equal:from',
-        ]);
+        $validated = $request->validated();
 
         $term = Term::current();
         // Default range = active term to date, not month-to-date: absences

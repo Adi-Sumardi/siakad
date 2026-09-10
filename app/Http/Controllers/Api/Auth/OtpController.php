@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Auth\OtpRequestRequest;
+use App\Http\Requests\Auth\OtpVerifyRequest;
 use App\Http\Resources\UserResource;
 use App\Models\ActivityLog;
 use App\Models\LoginOtp;
@@ -33,11 +35,9 @@ class OtpController extends Controller
      * unknown address apart from a known one turns this into a way to find out
      * which families attend the school.
      */
-    public function request(Request $request): JsonResponse
+    public function request(OtpRequestRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'identifier' => 'required|string|max:200',
-        ]);
+        $validated = $request->validated();
 
         $identifier = $this->otp->normalise($validated['identifier']);
         $channel = $this->otp->channelFor($identifier);
@@ -86,12 +86,9 @@ class OtpController extends Controller
     }
 
     /** Checks the code and, if it matches, starts the session. */
-    public function verify(Request $request): JsonResponse
+    public function verify(OtpVerifyRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'identifier' => 'required|string|max:200',
-            'code' => 'required|string|size:6',
-        ]);
+        $validated = $request->validated();
 
         $identifier = $this->otp->normalise($validated['identifier']);
         $user = $this->otp->verify($identifier, $validated['code']);

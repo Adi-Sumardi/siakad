@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Guru;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Guru\AssignExtracurricularMemberRequest;
 use App\Models\Extracurricular;
 use App\Models\ExtracurricularMember;
 use App\Models\Student;
@@ -49,11 +50,11 @@ class ExtracurricularController extends Controller
         ]);
     }
 
-    public function assignStudent(Request $request, string $ulid, ExtracurricularService $service): JsonResponse
+    public function assignStudent(AssignExtracurricularMemberRequest $request, string $ulid, ExtracurricularService $service): JsonResponse
     {
         $ekskul = $this->ownActivity($request, $ulid);
 
-        $validated = $request->validate(['student_ulid' => 'required|string']);
+        $validated = $request->validated();
         $student = Student::visibleTo($request->user())->where('ulid', $validated['student_ulid'])->firstOrFail();
 
         try {

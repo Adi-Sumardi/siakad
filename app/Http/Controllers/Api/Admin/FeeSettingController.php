@@ -3,6 +3,10 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreFeeRateRequest;
+use App\Http\Requests\Admin\StoreFeeTypeRequest;
+use App\Http\Requests\Admin\UpdateFeeRateRequest;
+use App\Http\Requests\Admin\UpdateFeeTypeRequest;
 use App\Models\ActivityLog;
 use App\Models\FeeComponent;
 use App\Models\FeeRate;
@@ -46,20 +50,9 @@ class FeeSettingController extends Controller
         ]);
     }
 
-    public function storeType(Request $request): JsonResponse
+    public function storeType(StoreFeeTypeRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'code' => 'required|string|max:32|alpha_dash|unique:fee_types,code',
-            'name' => 'required|string|max:120',
-            'recurrence' => 'required|in:monthly,per_term,once',
-            'allow_installment' => 'boolean',
-            'requires_selection' => 'boolean',
-            // Mirrors requires_selection - only ekskul uses it today, but any
-            // future fee type tied to a roster (extracurricular_members-style
-            // table) can opt in the same way instead of a new hardcoded check.
-            'requires_roster_membership' => 'boolean',
-            'sort_order' => 'integer',
-        ]);
+        $validated = $request->validated();
 
         $type = FeeType::create($validated);
 
@@ -68,19 +61,9 @@ class FeeSettingController extends Controller
         return response()->json(['fee_type' => $type], 201);
     }
 
-    public function updateType(Request $request, FeeType $feeType): JsonResponse
+    public function updateType(UpdateFeeTypeRequest $request, FeeType $feeType): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:120',
-            // `code` is deliberately absent: it is the key the generator and
-            // every dedup_key already written are built on. Renaming it would
-            // orphan bills that were issued under the old one.
-            'allow_installment' => 'boolean',
-            'requires_selection' => 'boolean',
-            'requires_roster_membership' => 'boolean',
-            'is_active' => 'boolean',
-            'sort_order' => 'integer',
-        ]);
+        $validated = $request->validated();
 
         $feeType->update($validated);
 
@@ -147,27 +130,9 @@ class FeeSettingController extends Controller
         ]);
     }
 
-    public function storeRate(Request $request): JsonResponse
+    public function storeRate(StoreFeeRateRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'fee_type_ulid' => 'required|exists:fee_types,ulid',
-            'school_unit_ulid' => 'required|exists:school_units,ulid',
-            'academic_year_ulid' => 'required|exists:academic_years,ulid',
-            'tingkat' => 'nullable|integer|min:1|max:12',
-            'amount' => 'required|numeric|min:0',
-            'due_day' => 'nullable|integer|min:1|max:28',
-            'late_fee_amount' => 'numeric|min:0',
-            'late_fee_grace_days' => 'integer|min:0',
-            'notes' => 'nullable|string|max:500',
-
-            'components' => 'array',
-            'components.*.name' => 'required_with:components|string|max:120',
-            'components.*.amount' => 'required_with:components|numeric|min:0',
-            'components.*.default_qty' => 'integer|min:1',
-            'components.*.is_optional' => 'boolean',
-            'components.*.has_size_option' => 'boolean',
-            'components.*.size_options' => 'nullable|string|max:255',
-        ]);
+        $validated = $request->validated();
 
         $type = FeeType::where('ulid', $validated['fee_type_ulid'])->firstOrFail();
         $unit = SchoolUnit::where('ulid', $validated['school_unit_ulid'])->firstOrFail();
@@ -216,16 +181,9 @@ class FeeSettingController extends Controller
         return response()->json(['rate' => $rate->load('components')], 201);
     }
 
-    public function updateRate(Request $request, FeeRate $feeRate): JsonResponse
+    public function updateRate(UpdateFeeRateRequest $request, FeeRate $feeRate): JsonResponse
     {
-        $validated = $request->validate([
-            'amount' => 'sometimes|numeric|min:0',
-            'due_day' => 'nullable|integer|min:1|max:28',
-            'late_fee_amount' => 'numeric|min:0',
-            'late_fee_grace_days' => 'integer|min:0',
-            'is_active' => 'boolean',
-            'notes' => 'nullable|string|max:500',
-        ]);
+        $validated = $request->validated();
 
         $before = (float) $feeRate->amount;
         $feeRate->update($validated);

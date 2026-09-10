@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Wali;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Wali\StoreAchievementRequest;
 use App\Http\Resources\AchievementResource;
 use App\Models\Achievement;
 use App\Models\ActivityLog;
@@ -33,27 +34,11 @@ class AchievementController extends Controller
      * to confirm it actually happened before it counts as anything, and never
      * carries points on its own.
      */
-    public function store(Request $request, string $ulid): JsonResponse
+    public function store(StoreAchievementRequest $request, string $ulid): JsonResponse
     {
         $student = Student::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
-        $validated = $request->validate([
-            'nama_prestasi' => 'required|string|max:200',
-            'kategori' => 'required|in:Akademik,Non-Akademik,Olahraga,Seni,Lainnya',
-            'tingkat' => 'required|in:Kelas,Sekolah,Kecamatan,Kabupaten/Kota,Provinsi,Nasional,Internasional',
-            'juara' => 'nullable|in:1,2,3,Harapan 1,Harapan 2,Harapan 3,Peserta',
-            'nama_event' => 'nullable|string|max:200',
-            'penyelenggara' => 'nullable|string|max:200',
-            // Laravel's bare 'today' keyword resolves against
-            // config('app.timezone'), which is UTC despite .env setting
-            // Asia/Jakarta - an explicit Jakarta date avoids rejecting a
-            // same-day event as "in the future" during the seven hours every
-            // morning UTC's calendar date still lags Jakarta's.
-            'tanggal_event' => ['nullable', 'date', 'before_or_equal:'.Carbon::today('Asia/Jakarta')->toDateString()],
-            'tempat_event' => 'nullable|string|max:200',
-            'sertifikat' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
-            'foto_kegiatan' => 'nullable|file|mimes:jpg,jpeg,png|max:5120',
-        ]);
+        $validated = $request->validated();
 
         $achievement = Achievement::create([
             'student_id' => $student->id,

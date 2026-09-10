@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Guru;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Guru\StoreGradesRequest;
 use App\Models\ActivityLog;
 use App\Models\ClassSchedule;
 use App\Models\Classroom;
@@ -80,7 +81,7 @@ class GradeController extends Controller
         ]);
     }
 
-    public function store(Request $request, string $classroomUlid, string $subjectUlid, GradeService $service): JsonResponse
+    public function store(StoreGradesRequest $request, string $classroomUlid, string $subjectUlid, GradeService $service): JsonResponse
     {
         $classroom = Classroom::visibleTo($request->user())->where('ulid', $classroomUlid)->firstOrFail();
         $subject = Subject::where('ulid', $subjectUlid)->firstOrFail();
@@ -90,13 +91,7 @@ class GradeController extends Controller
         $term = Term::current();
         abort_if(! $term, 422, 'Belum ada semester aktif.');
 
-        $validated = $request->validate([
-            'category' => 'required|in:tugas,uts,uas',
-            'entries' => 'required|array|min:1|max:200',
-            'entries.*.student_ulid' => 'required|string',
-            'entries.*.score' => 'required|numeric|min:0|max:100',
-            'entries.*.description' => 'nullable|string|max:500',
-        ]);
+        $validated = $request->validated();
 
         $ulids = collect($validated['entries'])->pluck('student_ulid');
 

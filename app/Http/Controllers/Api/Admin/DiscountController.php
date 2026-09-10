@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\AssignStudentDiscountRequest;
+use App\Http\Requests\Admin\StoreDiscountSchemeRequest;
+use App\Http\Requests\Admin\UpdateDiscountSchemeRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\DiscountScheme;
@@ -50,18 +53,9 @@ class DiscountController extends Controller
     /**
      * Create a new discount scheme.
      */
-    public function storeScheme(Request $request): JsonResponse
+    public function storeScheme(StoreDiscountSchemeRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'code' => 'required|string|max:32|alpha_dash|unique:discount_schemes,code',
-            'name' => 'required|string|max:120',
-            'type' => 'required|in:percent,nominal',
-            'value' => 'required|numeric|min:0',
-            'fee_type_ulid' => 'nullable|exists:fee_types,ulid',
-            'school_unit_ulid' => 'nullable|exists:school_units,ulid',
-            'is_active' => 'boolean',
-            'notes' => 'nullable|string|max:500',
-        ]);
+        $validated = $request->validated();
 
         $feeType = ! empty($validated['fee_type_ulid']) ? FeeType::where('ulid', $validated['fee_type_ulid'])->first() : null;
         $unit = ! empty($validated['school_unit_ulid']) ? SchoolUnit::where('ulid', $validated['school_unit_ulid'])->first() : null;
@@ -85,17 +79,9 @@ class DiscountController extends Controller
     /**
      * Update a discount scheme.
      */
-    public function updateScheme(Request $request, DiscountScheme $discountScheme): JsonResponse
+    public function updateScheme(UpdateDiscountSchemeRequest $request, DiscountScheme $discountScheme): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:120',
-            'type' => 'sometimes|in:percent,nominal',
-            'value' => 'sometimes|numeric|min:0',
-            'fee_type_ulid' => 'nullable|exists:fee_types,ulid',
-            'school_unit_ulid' => 'nullable|exists:school_units,ulid',
-            'is_active' => 'boolean',
-            'notes' => 'nullable|string|max:500',
-        ]);
+        $validated = $request->validated();
 
         if (array_key_exists('fee_type_ulid', $validated)) {
             $feeType = ! empty($validated['fee_type_ulid']) ? FeeType::where('ulid', $validated['fee_type_ulid'])->first() : null;
@@ -191,16 +177,9 @@ class DiscountController extends Controller
     /**
      * Assign a discount scheme to a student.
      */
-    public function assignStudentDiscount(Request $request): JsonResponse
+    public function assignStudentDiscount(AssignStudentDiscountRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'student_ulid' => 'required|exists:students,ulid',
-            'discount_scheme_ulid' => 'required|exists:discount_schemes,ulid',
-            'academic_year_ulid' => 'required|exists:academic_years,ulid',
-            'effective_from' => 'required|date',
-            'effective_to' => 'nullable|date|after_or_equal:effective_from',
-            'reason' => 'nullable|string|max:500',
-        ]);
+        $validated = $request->validated();
 
         $student = Student::where('ulid', $validated['student_ulid'])->firstOrFail();
         $scheme = DiscountScheme::where('ulid', $validated['discount_scheme_ulid'])->firstOrFail();

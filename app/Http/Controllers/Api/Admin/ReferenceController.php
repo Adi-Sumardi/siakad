@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreAcademicYearRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Classroom;
@@ -52,14 +53,9 @@ class ReferenceController extends Controller
         ]);
     }
 
-    public function storeAcademicYear(Request $request): JsonResponse
+    public function storeAcademicYear(StoreAcademicYearRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'year' => 'required|string|regex:/^\d{4}\/\d{4}$/|unique:academic_years,year',
-            'starts_on' => 'nullable|date',
-            'ends_on' => 'nullable|date|after_or_equal:starts_on',
-            'is_active' => 'boolean',
-        ]);
+        $validated = $request->validated();
 
         $startsOn = $validated['starts_on'] ?? substr($validated['year'], 0, 4) . '-07-01';
         $endsOn = $validated['ends_on'] ?? substr($validated['year'], 5, 4) . '-06-30';
