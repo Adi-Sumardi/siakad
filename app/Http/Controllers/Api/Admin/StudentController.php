@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\UpdateStudentRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\FeeRate;
@@ -13,7 +14,6 @@ use App\Models\StudentDiscount;
 use App\Services\Export\DapodikExportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class StudentController extends Controller
@@ -204,17 +204,9 @@ class StudentController extends Controller
      * TU/admin_unit can view and export their students but not edit or
      * remove them, same tier as user management and fee settings.
      */
-    public function update(Request $request, Student $student): JsonResponse
+    public function update(UpdateStudentRequest $request, Student $student): JsonResponse
     {
-        $validated = $request->validate([
-            'nama_lengkap' => 'sometimes|string|max:255',
-            'nama_panggilan' => 'nullable|string|max:100',
-            'nis' => ['nullable', 'string', 'max:50', Rule::unique('students', 'nis')->ignore($student->id)],
-            'nisn' => 'nullable|string|max:50',
-            'jenis_kelamin' => 'sometimes|in:L,P',
-            'school_unit_ulid' => 'sometimes|exists:school_units,ulid',
-            'status' => 'sometimes|in:prospective,active,graduated,transferred,dropped_out',
-        ]);
+        $validated = $request->validated();
 
         if (array_key_exists('school_unit_ulid', $validated)) {
             $unit = SchoolUnit::where('ulid', $validated['school_unit_ulid'])->firstOrFail();

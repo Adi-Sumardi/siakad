@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreClassScheduleRequest;
+use App\Http\Requests\Admin\UpdateClassScheduleRequest;
 use App\Models\ActivityLog;
 use App\Models\Classroom;
 use App\Models\ClassSchedule;
@@ -36,17 +38,11 @@ class ScheduleController extends Controller
         ]);
     }
 
-    public function store(Request $request, string $classroomUlid): JsonResponse
+    public function store(StoreClassScheduleRequest $request, string $classroomUlid): JsonResponse
     {
         $classroom = Classroom::visibleTo($request->user())->where('ulid', $classroomUlid)->firstOrFail();
 
-        $validated = $request->validate([
-            'subject_ulid' => 'required|string',
-            'teacher_ulid' => 'nullable|string',
-            'day_of_week' => 'required|integer|min:1|max:6',
-            'start_time' => 'required|date_format:H:i',
-            'end_time' => 'required|date_format:H:i|after:start_time',
-        ]);
+        $validated = $request->validated();
 
         $subject = Subject::where('ulid', $validated['subject_ulid'])->firstOrFail();
         $teacher = isset($validated['teacher_ulid'])
@@ -69,17 +65,12 @@ class ScheduleController extends Controller
         return response()->json(['schedule' => $schedule], 201);
     }
 
-    public function update(Request $request, string $classroomUlid, string $ulid): JsonResponse
+    public function update(UpdateClassScheduleRequest $request, string $classroomUlid, string $ulid): JsonResponse
     {
         $classroom = Classroom::visibleTo($request->user())->where('ulid', $classroomUlid)->firstOrFail();
         $schedule = $classroom->classSchedules()->where('ulid', $ulid)->firstOrFail();
 
-        $validated = $request->validate([
-            'teacher_ulid' => 'nullable|string',
-            'day_of_week' => 'sometimes|integer|min:1|max:6',
-            'start_time' => 'sometimes|date_format:H:i',
-            'end_time' => 'sometimes|date_format:H:i',
-        ]);
+        $validated = $request->validated();
 
         if (array_key_exists('teacher_ulid', $validated)) {
             $teacher = $validated['teacher_ulid']

@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\AssignExtracurricularMemberRequest;
+use App\Http\Requests\Admin\StoreExtracurricularRequest;
+use App\Http\Requests\Admin\UpdateExtracurricularRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Extracurricular;
@@ -31,16 +34,9 @@ class ExtracurricularController extends Controller
         ]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreExtracurricularRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:80',
-            'description' => 'nullable|string|max:1000',
-            'school_unit_code' => 'nullable|exists:school_units,code',
-            'academic_year_ulid' => 'required|string',
-            'pembina_ulid' => 'nullable|string',
-            'capacity' => 'nullable|integer|min:1|max:500',
-        ]);
+        $validated = $request->validated();
 
         $unit = $this->resolveUnit($request, $validated['school_unit_code'] ?? null);
         $academicYear = AcademicYear::where('ulid', $validated['academic_year_ulid'])->firstOrFail();
@@ -64,18 +60,12 @@ class ExtracurricularController extends Controller
         return response()->json(['extracurricular' => $this->shape($ekskul->fresh(['schoolUnit', 'academicYear', 'pembina']))], 201);
     }
 
-    public function update(Request $request, string $ulid): JsonResponse
+    public function update(UpdateExtracurricularRequest $request, string $ulid): JsonResponse
     {
         $ekskul = Extracurricular::where('ulid', $ulid)->firstOrFail();
         $this->authoriseScope($request, $ekskul);
 
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:80',
-            'description' => 'nullable|string|max:1000',
-            'pembina_ulid' => 'nullable|string',
-            'capacity' => 'nullable|integer|min:1|max:500',
-            'is_active' => 'boolean',
-        ]);
+        $validated = $request->validated();
 
         if (array_key_exists('pembina_ulid', $validated)) {
             $pembina = $validated['pembina_ulid']
@@ -108,11 +98,11 @@ class ExtracurricularController extends Controller
         ]);
     }
 
-    public function assignStudent(Request $request, string $ulid, ExtracurricularService $service): JsonResponse
+    public function assignStudent(AssignExtracurricularMemberRequest $request, string $ulid, ExtracurricularService $service): JsonResponse
     {
         $ekskul = Extracurricular::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
-        $validated = $request->validate(['student_ulid' => 'required|string']);
+        $validated = $request->validated();
         $student = Student::visibleTo($request->user())->where('ulid', $validated['student_ulid'])->firstOrFail();
 
         try {

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StorePointThresholdRequest;
+use App\Http\Requests\Admin\UpdatePointThresholdRequest;
 use App\Models\ActivityLog;
 use App\Models\PointThreshold;
 use App\Models\SchoolUnit;
@@ -34,17 +36,9 @@ class PointThresholdController extends Controller
         ]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StorePointThresholdRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'school_unit_code' => 'nullable|exists:school_units,code',
-            'min_points' => 'required|integer|lt:max_points',
-            'max_points' => 'required|integer',
-            'label' => 'required|string|max:80',
-            'action' => 'nullable|string|max:500',
-            'color' => 'nullable|string|max:20',
-            'notify_guardian' => 'boolean',
-        ]);
+        $validated = $request->validated();
 
         $unit = $request->user()->isUnitScoped()
             ? $request->user()->schoolUnit
@@ -67,21 +61,14 @@ class PointThresholdController extends Controller
         return response()->json(['threshold' => $threshold], 201);
     }
 
-    public function update(Request $request, PointThreshold $pointThreshold): JsonResponse
+    public function update(UpdatePointThresholdRequest $request, PointThreshold $pointThreshold): JsonResponse
     {
         abort_if(
             $request->user()->isUnitScoped() && $pointThreshold->school_unit_id !== $request->user()->school_unit_id,
             404,
         );
 
-        $validated = $request->validate([
-            'min_points' => 'sometimes|integer',
-            'max_points' => 'sometimes|integer',
-            'label' => 'sometimes|string|max:80',
-            'action' => 'nullable|string|max:500',
-            'color' => 'nullable|string|max:20',
-            'notify_guardian' => 'boolean',
-        ]);
+        $validated = $request->validated();
 
         $pointThreshold->update($validated);
 

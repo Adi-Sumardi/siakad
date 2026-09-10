@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreClassroomRequest;
+use App\Http\Requests\Admin\UpdateClassroomRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Classroom;
@@ -19,16 +21,9 @@ use Illuminate\Http\Request;
  */
 class ClassroomController extends Controller
 {
-    public function store(Request $request): JsonResponse
+    public function store(StoreClassroomRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:60',
-            'tingkat' => 'required|integer|min:1|max:12',
-            'school_unit_code' => 'nullable|exists:school_units,code',
-            'academic_year_ulid' => 'required|string',
-            'capacity' => 'nullable|integer|min:1|max:100',
-            'homeroom_teacher_ulid' => 'nullable|string',
-        ]);
+        $validated = $request->validated();
 
         $unit = $this->resolveUnit($request, $validated['school_unit_code'] ?? null);
 
@@ -62,18 +57,12 @@ class ClassroomController extends Controller
         return response()->json(['classroom' => $classroom->fresh('schoolUnit')], 201);
     }
 
-    public function update(Request $request, string $ulid): JsonResponse
+    public function update(UpdateClassroomRequest $request, string $ulid): JsonResponse
     {
         $classroom = Classroom::where('ulid', $ulid)->firstOrFail();
         $this->authoriseScope($request, $classroom);
 
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:60',
-            'tingkat' => 'sometimes|integer|min:1|max:12',
-            'capacity' => 'nullable|integer|min:1|max:100',
-            'homeroom_teacher_ulid' => 'nullable|string',
-            'is_active' => 'boolean',
-        ]);
+        $validated = $request->validated();
 
         if (array_key_exists('homeroom_teacher_ulid', $validated)) {
             $teacher = $validated['homeroom_teacher_ulid']
