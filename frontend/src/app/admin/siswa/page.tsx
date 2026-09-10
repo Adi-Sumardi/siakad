@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   BadgePercent,
   Calendar,
@@ -77,9 +78,10 @@ type StudentItem = {
 type SchoolUnit = { ulid: string; code: string; label: string; jenjang_group: string };
 type AcademicYear = { ulid: string; year: string; is_active: boolean };
 
-export default function AdminStudentsPage() {
+function AdminStudentsContent() {
   const { user } = useAuth();
   const isAdministrator = user?.role === "admin";
+  const searchParams = useSearchParams();
 
   const [students, setStudents] = useState<StudentItem[] | null>(null);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
@@ -89,7 +91,7 @@ export default function AdminStudentsPage() {
 
   // Filters
   const [search, setSearch] = useState("");
-  const [unitFilter, setUnitFilter] = useState("");
+  const [unitFilter, setUnitFilter] = useState(searchParams.get("unit") ?? "");
   const [jenjangFilter, setJenjangFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
 
@@ -873,5 +875,27 @@ export default function AdminStudentsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AdminStudentsPage() {
+  // useSearchParams reads the ?unit= filter the dashboard appends, and needs a
+  // Suspense boundary or the route bails out of prerendering.
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-4">
+          <Skeleton className="h-10 w-64 rounded-xl" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Skeleton className="h-24 rounded-2xl" />
+            <Skeleton className="h-24 rounded-2xl" />
+            <Skeleton className="h-24 rounded-2xl" />
+          </div>
+          <Skeleton className="h-96 w-full rounded-2xl" />
+        </div>
+      }
+    >
+      <AdminStudentsContent />
+    </Suspense>
   );
 }

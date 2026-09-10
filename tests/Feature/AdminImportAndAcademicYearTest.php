@@ -4,7 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AcademicYear;
 use App\Models\FeeRate;
-use App\Models\FeeType;
+use App\Models\Guardian;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\User;
@@ -17,7 +17,9 @@ class AdminImportAndAcademicYearTest extends TestCase
     use RefreshDatabase;
 
     private User $admin;
+
     private SchoolUnit $unit;
+
     private AcademicYear $year;
 
     protected function setUp(): void
@@ -65,11 +67,26 @@ class AdminImportAndAcademicYearTest extends TestCase
         $this->assertFalse($this->year->fresh()->is_active);
     }
 
+    public function test_activating_an_already_active_year_keeps_it_active(): void
+    {
+        $this->year->activate();
+
+        $this->assertTrue($this->year->fresh()->is_active);
+        $this->assertSame(1, AcademicYear::where('is_active', true)->count());
+        $this->assertSame('2026/2027', AcademicYear::current()?->year);
+
+        $this->year->activate();
+
+        $this->assertTrue($this->year->fresh()->is_active);
+        $this->assertSame(1, AcademicYear::where('is_active', true)->count());
+        $this->assertSame('2026/2027', AcademicYear::current()?->year);
+    }
+
     public function test_can_import_students_from_csv(): void
     {
         $this->withoutExceptionHandling();
-        $csvContent = "nama_lengkap,nis,nisn,jenis_kelamin,unit_code,kelas,wali_nama,wali_phone,wali_email,status\n" .
-            "Muhammad Farhan,27001,0012345678,L,sd,1-A,Ahmad Syahid,081299887766,ahmad@gmail.com,active\n" .
+        $csvContent = "nama_lengkap,nis,nisn,jenis_kelamin,unit_code,kelas,wali_nama,wali_phone,wali_email,status\n".
+            "Muhammad Farhan,27001,0012345678,L,sd,1-A,Ahmad Syahid,081299887766,ahmad@gmail.com,active\n".
             "Fatimah Az Zahra,27002,0012345679,P,sd,1-A,Umar Abdullah,081399887766,umar@gmail.com,active\n";
 
         $file = UploadedFile::fake()->createWithContent('students.csv', $csvContent);
@@ -110,7 +127,7 @@ class AdminImportAndAcademicYearTest extends TestCase
         // phone is an encrypted column; a naive where('phone', ...) can never
         // match its own ciphertext, so without findByEncrypted() this row
         // would mint a brand new guardian/user pair on every re-import.
-        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code,wali_nama,wali_phone\n" .
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code,wali_nama,wali_phone\n".
             "Muhammad Farhan,27001,L,sd,Ahmad Syahid,081299887766\n";
 
         $file1 = UploadedFile::fake()->createWithContent('students.csv', $csvContent);
@@ -120,7 +137,7 @@ class AdminImportAndAcademicYearTest extends TestCase
         $res = $this->actingAs($this->admin)->postJson('/api/admin/import/students', ['file' => $file2]);
 
         $res->assertOk()->assertJsonPath('updated_count', 1)->assertJsonPath('imported_count', 0);
-        $this->assertSame(1, \App\Models\Guardian::where('nama', 'Ahmad Syahid')->count());
+        $this->assertSame(1, Guardian::where('nama', 'Ahmad Syahid')->count());
         $this->assertSame(1, User::where('role', 'orangtua')->count());
     }
 
@@ -128,9 +145,9 @@ class AdminImportAndAcademicYearTest extends TestCase
     {
         // An "orphan" guardian - no linked user account - already exists,
         // e.g. a secondary contact who was never invited.
-        $orphan = \App\Models\Guardian::create(['nama' => 'Kontak Lama Tidak Terkait', 'hubungan' => 'wali']);
+        $orphan = Guardian::create(['nama' => 'Kontak Lama Tidak Terkait', 'hubungan' => 'wali']);
 
-        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code,wali_nama\n" .
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code,wali_nama\n".
             "Siswa Baru,27099,L,sd,Wali Tanpa Kontak\n";
         $file = UploadedFile::fake()->createWithContent('students.csv', $csvContent);
 
@@ -152,13 +169,13 @@ class AdminImportAndAcademicYearTest extends TestCase
         // A CSV only has one wali column, so this only shows up across two
         // imports of the same student naming a different wali - correcting a
         // typo, or filing the father then the mother in separate uploads.
-        $first = "nama_lengkap,nis,jenis_kelamin,unit_code,wali_nama,wali_phone\n" .
+        $first = "nama_lengkap,nis,jenis_kelamin,unit_code,wali_nama,wali_phone\n".
             "Anak Ganda,27050,L,sd,Ayah Pertama,081200000001\n";
         $this->actingAs($this->admin)->postJson('/api/admin/import/students', [
             'file' => UploadedFile::fake()->createWithContent('s1.csv', $first),
         ])->assertOk();
 
-        $second = "nama_lengkap,nis,jenis_kelamin,unit_code,wali_nama,wali_phone\n" .
+        $second = "nama_lengkap,nis,jenis_kelamin,unit_code,wali_nama,wali_phone\n".
             "Anak Ganda,27050,L,sd,Ibu Kedua,081200000002\n";
         $this->actingAs($this->admin)->postJson('/api/admin/import/students', [
             'file' => UploadedFile::fake()->createWithContent('s2.csv', $second),
@@ -179,7 +196,7 @@ class AdminImportAndAcademicYearTest extends TestCase
         // spreadsheet - a period grouping thousands, not a decimal point.
         // Stripping only non-digit characters would keep the period and
         // read this as 650.0 rupiah.
-        $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n" .
+        $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n".
             "spp,sd,1,2027/2028,650.000,10,25.000\n";
 
         $file = UploadedFile::fake()->createWithContent('tariffs.csv', $csvContent);
@@ -195,8 +212,8 @@ class AdminImportAndAcademicYearTest extends TestCase
 
     public function test_can_import_fee_rates_from_csv(): void
     {
-        $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n" .
-            "spp,sd,1,2027/2028,650000,10,0\n" .
+        $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n".
+            "spp,sd,1,2027/2028,650000,10,0\n".
             "spp,sd,2,2027/2028,650000,10,0\n";
 
         $file = UploadedFile::fake()->createWithContent('tariffs.csv', $csvContent);
@@ -234,7 +251,7 @@ class AdminImportAndAcademicYearTest extends TestCase
         SchoolUnit::create(['code' => 'SMP-12', 'label' => 'SMPI Al Azhar 12 Rawamangun', 'jenjang_group' => 'smp']);
         SchoolUnit::create(['code' => 'SMP-55', 'label' => 'SMPI Al Azhar 55 Jatimakmur', 'jenjang_group' => 'smp']);
 
-        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n" .
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n".
             "Siswa Nyasal,27010,L,smp\n";
 
         $response = $this->actingAs($this->admin)->postJson('/api/admin/import/students', [
@@ -259,7 +276,7 @@ class AdminImportAndAcademicYearTest extends TestCase
 
         // "jatimakmur" fits exactly one label, so the hand-typed-file
         // convenience survives - but only ever by pointing at ONE campus.
-        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n" .
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n".
             "Siswa Jatimakmur,27011,L,jatimakmur\n";
 
         $response = $this->actingAs($this->admin)->postJson('/api/admin/import/students', [
@@ -272,7 +289,7 @@ class AdminImportAndAcademicYearTest extends TestCase
 
     public function test_a_blank_unit_cell_is_reported_as_missing(): void
     {
-        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n" .
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n".
             "Siswa Tanpa Unit,27012,L,\n";
 
         $response = $this->actingAs($this->admin)->postJson('/api/admin/import/students', [
@@ -290,7 +307,7 @@ class AdminImportAndAcademicYearTest extends TestCase
 
         // A rate resolving to the wrong campus would misprice that school's
         // bills, so the same one-campus rule applies to tarif rows.
-        $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n" .
+        $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n".
             "spp,smp,,2027/2028,750000,10,0\n";
 
         $response = $this->actingAs($this->admin)->postJson('/api/admin/import/fee-rates', [
@@ -349,7 +366,7 @@ class AdminImportAndAcademicYearTest extends TestCase
         // shorthand that would be ambiguous for a central admin - it must
         // be ignored entirely: the importer's own unit wins, the same line
         // importUsers draws.
-        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n" .
+        $csvContent = "nama_lengkap,nis,jenis_kelamin,unit_code\n".
             "Siswa Unit SD,27020,L,smp\n";
 
         $response = $this->actingAs($this->unitAdmin())->postJson('/api/admin/import/students', [
@@ -377,7 +394,7 @@ class AdminImportAndAcademicYearTest extends TestCase
     {
         // Prices stay a foundation-level decision even though students are
         // now importable per unit.
-        $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n" .
+        $csvContent = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n".
             "spp,sd,1,2027/2028,650000,10,0\n";
 
         $this->actingAs($this->unitAdmin())->postJson('/api/admin/import/fee-rates', [

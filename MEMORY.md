@@ -77,12 +77,11 @@
 - **Email Gateway**: `https://sendagomail.adilabs.id` (Sendago Mail)
 - **PMB Handoff**: `POST /api/webhooks/pmb/students` (HMAC SHA-256)
 - **Admin Akun**: `adisumardi888@gmail.com` (Role: Super Admin / Administrator)
-- **8 Unit Sekolah**:
-  1. RA Sakinah
-  2. Playgroup Sakinah
-  3. TK Islam Al Azhar 13
-  4. SD Islam Al Azhar 13
-  5. SMP Islam Al Azhar 12
-  6. SMP Islam Al Azhar 55
-  7. SMA Islam Al Azhar 33
-  8. SMA Islam Al Azhar 48
+- **7 Unit Sekolah** (daftar resmi 2026-09-09):
+  1. Playgroup Sakinah Rawamangun (`PG-SAKINAH`)
+  2. RA Sakinah Kebayoran Baru (`RA-SAKINAH`)
+  3. TKI Al Azhar 13 Rawamangun (`TK-13`)
+  4. SDI Al Azhar 13 Rawamangun (`SD-13`)
+  5. SMPI Al Azhar 12 Rawamangun (`SMP-12`)
+  6. SMPI Al Azhar 55 Jatimakmur (`SMP-55`)
+  7. SMAI Al Azhar 33 Jatimakmur (`SMA-33`)

@@ -45,7 +45,7 @@ class AcademicYear extends Model
     {
         DB::transaction(function () {
             static::query()->where('is_active', true)->update(['is_active' => false]);
-            $this->forceFill(['is_active' => true])->save();
+            static::whereKey($this->getKey())->update(['is_active' => true]);
         });
     }
 
