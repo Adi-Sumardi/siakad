@@ -114,6 +114,38 @@ class PointThresholdNotifierTest extends TestCase
         $this->assertDatabaseHas('point_threshold_notifications', ['student_id' => $student->id]);
     }
 
+    public function test_a_guardian_with_no_email_is_notified_over_whatsapp_and_logged(): void
+    {
+        $student = Student::create([
+            'nama_lengkap' => 'Aisyah', 'jenis_kelamin' => 'P',
+            'school_unit_id' => $this->unit->id, 'status' => 'active',
+        ]);
+        $user = User::create([
+            'name' => 'Budi', 'role' => 'orangtua', 'is_active' => true, 'activated_at' => now(),
+        ]);
+        $guardian = Guardian::create(['user_id' => $user->id, 'nama' => 'Budi', 'hubungan' => 'ayah', 'no_hp' => '081234567890']);
+        $student->guardians()->attach($guardian->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+        $rule = PointRule::create(['code' => 'R-'.uniqid(), 'name' => 'Rule', 'category' => 'X', 'type' => 'violation', 'points' => 30]);
+        $guru = User::create([
+            'name' => 'Guru', 'email' => 'guru'.uniqid().'@yapinet.id', 'role' => 'guru',
+            'school_unit_id' => $this->unit->id, 'is_active' => true, 'activated_at' => now(),
+        ]);
+        app(PointLedger::class)->record($student->fresh(), $this->term, $rule, $guru, now(), 'Setup');
+
+        $sent = app(PointThresholdNotifier::class)->evaluate($student->fresh(), $this->term);
+
+        $this->assertTrue($sent);
+        $this->assertEmpty($this->sentMail);
+
+        // Queued rather than sent inline (App\Jobs\SendWhatsAppMessage) - under
+        // QUEUE_CONNECTION=sync it still runs within this call, so the log row
+        // it owns should already read 'sent', not stuck on 'queued'.
+        $log = \App\Models\NotificationLog::where('channel', 'whatsapp')->where('template', 'point_threshold')->first();
+        $this->assertNotNull($log);
+        $this->assertSame('sent', $log->status);
+    }
+
     public function test_a_band_with_notify_guardian_false_sends_nothing(): void
     {
         $student = $this->studentWithGuardian(-5); // "Baik" band, notify_guardian=false

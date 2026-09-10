@@ -2,13 +2,13 @@
 
 namespace App\Services\Billing;
 
+use App\Jobs\SendWhatsAppMessage;
 use App\Models\Bill;
 use App\Models\BillReminder;
 use App\Models\Guardian;
 use App\Models\NotificationLog;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
-use App\Services\Notification\WhatsAppGateway;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -28,7 +28,6 @@ class BillReminderSender
 
     public function __construct(
         private MailGateway $mail,
-        private WhatsAppGateway $whatsapp,
     ) {}
 
     public function kindFor(Bill $bill): ?string
@@ -84,9 +83,17 @@ class BillReminderSender
             'kind' => $kind,
         ];
 
-        $result = $channel === 'email'
-            ? $this->mail->send($to, 'bill_reminder', $data)
-            : $this->whatsapp->sendMessage($to, $this->whatsappMessage($data));
+        // WhatsApp is queued rather than sent inline (App\Jobs\
+        // SendWhatsAppMessage) and logs itself - SPP due dates cluster on
+        // the same day of the month for most families, so this daily sweep
+        // is exactly the kind of burst Sendago's unofficial gateway cannot
+        // absorb all at once.
+        if ($channel === 'email') {
+            $result = $this->mail->send($to, 'bill_reminder', $data);
+            $this->log($bill, $channel, $to, $data, $result);
+        } else {
+            $result = $this->queueWhatsApp($bill, $to, $data);
+        }
 
         // Recorded whether or not the gateway accepted it. A failed send that is
         // retried tomorrow is better than a family messaged twice because the
@@ -98,8 +105,6 @@ class BillReminderSender
             'sent_to' => $to,
             'sent_at' => now(),
         ]);
-
-        $this->log($bill, $channel, $to, $data, $result);
 
         return $result->success;
     }
@@ -131,6 +136,23 @@ class BillReminderSender
             .$lead."\n\n"
             ."Sisa tagihan: Rp {$data['amount']}\n\n"
             .'Pembayaran bisa dilakukan lewat aplikasi sekolah. Abaikan pesan ini bila sudah dibayar.';
+    }
+
+    private function queueWhatsApp(Bill $bill, string $phone, array $data): NotificationResult
+    {
+        $log = NotificationLog::create([
+            'channel' => 'whatsapp',
+            'template' => 'bill_reminder',
+            'recipient' => $phone,
+            'payload' => $data,
+            'status' => 'queued',
+            'notifiable_type' => Bill::class,
+            'notifiable_id' => $bill->id,
+        ]);
+
+        SendWhatsAppMessage::dispatch($phone, $this->whatsappMessage($data), $log->ulid);
+
+        return NotificationResult::ok(['mode' => 'queued']);
     }
 
     private function log(Bill $bill, string $channel, string $to, array $data, NotificationResult $result): void

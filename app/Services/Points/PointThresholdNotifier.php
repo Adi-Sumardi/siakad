@@ -2,6 +2,7 @@
 
 namespace App\Services\Points;
 
+use App\Jobs\SendWhatsAppMessage;
 use App\Models\Guardian;
 use App\Models\NotificationLog;
 use App\Models\PointThreshold;
@@ -10,7 +11,6 @@ use App\Models\Student;
 use App\Models\Term;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
-use App\Services\Notification\WhatsAppGateway;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -29,7 +29,6 @@ class PointThresholdNotifier
     public function __construct(
         private PointLedger $ledger,
         private MailGateway $mail,
-        private WhatsAppGateway $whatsapp,
     ) {}
 
     /** Sends the notification if this student has crossed into a fresh band, or returns false. */
@@ -74,11 +73,18 @@ class PointThresholdNotifier
             'action' => (string) $threshold->action,
         ];
 
-        $result = $channel === 'email'
-            ? $this->mail->send($to, 'point_threshold', $data)
-            : $this->whatsapp->sendMessage($to, $this->whatsappMessage($data));
+        // WhatsApp is queued rather than sent inline (App\Jobs\
+        // SendWhatsAppMessage) and logs itself, since a daily sweep across
+        // every active student is exactly the kind of burst Sendago's
+        // unofficial gateway cannot absorb all at once.
+        if ($channel === 'email') {
+            $result = $this->mail->send($to, 'point_threshold', $data);
+            $this->log($student, $channel, $to, $data, $result);
+        } else {
+            $result = $this->queueWhatsApp($student, $to, $data);
+        }
 
-        // Recorded before checking $result->success: a failed send that gets
+        // Recorded regardless of $result->success: a failed send that gets
         // retried tomorrow by the same daily job would otherwise need its own
         // separate retry bookkeeping. Simpler to log the failure and let a
         // human resend from the admin screen if it matters.
@@ -89,8 +95,6 @@ class PointThresholdNotifier
             'balance_at_notification' => $balance,
             'notified_at' => now(),
         ]);
-
-        $this->log($student, $channel, $to, $data, $result);
 
         return $result->success;
     }
@@ -108,6 +112,23 @@ class PointThresholdNotifier
             ."Poin {$data['student_name']} saat ini {$data['balance']} ({$data['label']}).\n\n"
             .($data['action'] !== '' ? "{$data['action']}\n\n" : '')
             .'Rincian dapat dilihat di aplikasi sekolah.';
+    }
+
+    private function queueWhatsApp(Student $student, string $phone, array $data): NotificationResult
+    {
+        $log = NotificationLog::create([
+            'channel' => 'whatsapp',
+            'template' => 'point_threshold',
+            'recipient' => $phone,
+            'payload' => $data,
+            'status' => 'queued',
+            'notifiable_type' => Student::class,
+            'notifiable_id' => $student->id,
+        ]);
+
+        SendWhatsAppMessage::dispatch($phone, $this->whatsappMessage($data), $log->ulid);
+
+        return NotificationResult::ok(['mode' => 'queued']);
     }
 
     private function log(Student $student, string $channel, string $to, array $data, NotificationResult $result): void

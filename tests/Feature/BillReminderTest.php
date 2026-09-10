@@ -205,6 +205,13 @@ class BillReminderTest extends TestCase
         $this->assertEmpty($this->sentMail);
         $this->assertCount(1, $this->sentWhatsApp);
         $this->assertDatabaseHas('bill_reminders', ['bill_id' => $bill->id, 'channel' => 'whatsapp']);
+
+        // Queued rather than sent inline (App\Jobs\SendWhatsAppMessage) - under
+        // QUEUE_CONNECTION=sync it still runs within this call, so the log row
+        // it owns should already read 'sent', not stuck on 'queued'.
+        $log = \App\Models\NotificationLog::where('channel', 'whatsapp')->where('template', 'bill_reminder')->first();
+        $this->assertNotNull($log);
+        $this->assertSame('sent', $log->status);
     }
 
     public function test_a_bill_with_no_reachable_guardian_is_skipped_not_failed(): void

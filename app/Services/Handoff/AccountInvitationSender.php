@@ -2,12 +2,12 @@
 
 namespace App\Services\Handoff;
 
+use App\Jobs\SendWhatsAppMessage;
 use App\Models\AccountInvitation;
 use App\Models\NotificationLog;
 use App\Models\User;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
-use App\Services\Notification\WhatsAppGateway;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -18,7 +18,6 @@ class AccountInvitationSender
 {
     public function __construct(
         private MailGateway $mail,
-        private WhatsAppGateway $whatsapp,
     ) {}
 
     /**
@@ -87,6 +86,12 @@ class AccountInvitationSender
         return $result;
     }
 
+    /**
+     * Queued rather than sent inline - see App\Jobs\SendWhatsAppMessage for
+     * why. Logs itself (as 'queued', updated to sent/failed by the job)
+     * instead of going through the generic log() below, which can only
+     * record an outcome it already knows.
+     */
     private function deliverWhatsApp(AccountInvitation $invitation, array $data): NotificationResult
     {
         $message = "Assalamu'alaikum {$data['guardian_name']},\n\n"
@@ -94,11 +99,21 @@ class AccountInvitationSender
             ."Aktifkan akun serta tentukan kata sandi di tautan berikut:\n{$data['activation_url']}\n\n"
             ."Tautan berlaku sampai {$data['expires_at']}.";
 
-        $result = $this->whatsapp->sendMessage($invitation->sent_to, $message);
+        $log = NotificationLog::create([
+            'channel' => 'whatsapp',
+            'template' => 'school_account_invite',
+            'recipient' => $invitation->sent_to,
+            // The activation URL carries a working credential, so it never
+            // reaches the log table.
+            'payload' => collect($data)->except('activation_url')->all(),
+            'status' => 'queued',
+            'notifiable_type' => AccountInvitation::class,
+            'notifiable_id' => $invitation->id,
+        ]);
 
-        $this->log($invitation, 'whatsapp', 'school_account_invite', $data, $result);
+        SendWhatsAppMessage::dispatch($invitation->sent_to, $message, $log->ulid);
 
-        return $result;
+        return NotificationResult::ok(['mode' => 'queued']);
     }
 
     /**
