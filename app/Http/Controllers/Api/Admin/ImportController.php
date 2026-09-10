@@ -55,7 +55,7 @@ class ImportController extends Controller
         }
 
         // Read header
-        $header = fgetcsv($handle, 2000, ',');
+        $header = $this->readCsvRow($handle);
         if (! $header) {
             fclose($handle);
             return response()->json(['message' => 'File CSV kosong atau tidak valid.'], 422);
@@ -95,7 +95,7 @@ class ImportController extends Controller
 
         DB::beginTransaction();
         try {
-            while (($row = fgetcsv($handle, 2000, ',')) !== false) {
+            while (($row = $this->readCsvRow($handle)) !== false) {
                 $rowNum++;
                 if (empty(array_filter($row))) {
                     continue;
@@ -319,7 +319,7 @@ class ImportController extends Controller
             return response()->json(['message' => 'Gagal membaca file CSV.'], 422);
         }
 
-        $header = fgetcsv($handle, 2000, ',');
+        $header = $this->readCsvRow($handle);
         if (! $header) {
             fclose($handle);
             return response()->json(['message' => 'File CSV kosong atau tidak valid.'], 422);
@@ -353,7 +353,7 @@ class ImportController extends Controller
 
         DB::beginTransaction();
         try {
-            while (($row = fgetcsv($handle, 2000, ',')) !== false) {
+            while (($row = $this->readCsvRow($handle)) !== false) {
                 $rowNum++;
                 if (empty(array_filter($row))) {
                     continue;
@@ -485,7 +485,7 @@ class ImportController extends Controller
             return response()->json(['message' => 'Gagal membaca file CSV.'], 422);
         }
 
-        $header = fgetcsv($handle, 2000, ',');
+        $header = $this->readCsvRow($handle);
         if (! $header) {
             fclose($handle);
             return response()->json(['message' => 'File CSV kosong atau tidak valid.'], 422);
@@ -518,7 +518,7 @@ class ImportController extends Controller
 
         DB::beginTransaction();
         try {
-            while (($row = fgetcsv($handle, 2000, ',')) !== false) {
+            while (($row = $this->readCsvRow($handle)) !== false) {
                 $rowNum++;
                 if (empty(array_filter($row))) {
                     continue;
@@ -850,17 +850,17 @@ class ImportController extends Controller
             };
 
             if ($isUnitScoped) {
-                fputcsv($handle, ['nama_lengkap', 'nis', 'nisn', 'jenis_kelamin', 'kelas', 'wali_nama', 'wali_phone', 'wali_email', 'status']);
+                $this->writeCsvRow($handle,['nama_lengkap', 'nis', 'nisn', 'jenis_kelamin', 'kelas', 'wali_nama', 'wali_phone', 'wali_email', 'status']);
 
                 $kelas = $kelasFor($request->user()->schoolUnit?->jenjang_group);
 
                 foreach ([0, 1] as $i) {
                     [$nama, $nis, $nisn, $jk, $wali, $hp, $email] = $people[$i];
 
-                    fputcsv($handle, [$nama, $nis, $nisn, $jk, $kelas, $wali, $hp, $email, 'active']);
+                    $this->writeCsvRow($handle,[$nama, $nis, $nisn, $jk, $kelas, $wali, $hp, $email, 'active']);
                 }
             } else {
-                fputcsv($handle, ['nama_lengkap', 'nis', 'nisn', 'jenis_kelamin', 'unit_code', 'kelas', 'wali_nama', 'wali_phone', 'wali_email', 'status']);
+                $this->writeCsvRow($handle,['nama_lengkap', 'nis', 'nisn', 'jenis_kelamin', 'unit_code', 'kelas', 'wali_nama', 'wali_phone', 'wali_email', 'status']);
 
                 $units = SchoolUnit::active()->ordered()->get();
 
@@ -886,7 +886,7 @@ class ImportController extends Controller
                 foreach ($samples->unique('id')->values() as $i => $unit) {
                     [$nama, $nis, $nisn, $jk, $wali, $hp, $email] = $people[$i % count($people)];
 
-                    fputcsv($handle, [$nama, $nis, $nisn, $jk, $unit->code, $kelasFor($unit->jenjang_group), $wali, $hp, $email, 'active']);
+                    $this->writeCsvRow($handle,[$nama, $nis, $nisn, $jk, $unit->code, $kelasFor($unit->jenjang_group), $wali, $hp, $email, 'active']);
                 }
             }
 
@@ -922,23 +922,23 @@ class ImportController extends Controller
                 // No unit column: their import lands every row in their own
                 // unit. Role is the one choice left: their unit's teachers
                 // and its parents.
-                fputcsv($handle, ['nama_lengkap', 'email', 'no_hp', 'role']);
+                $this->writeCsvRow($handle,['nama_lengkap', 'email', 'no_hp', 'role']);
 
-                fputcsv($handle, ['Ahmad Fauzi, S.Pd.', 'ahmad.fauzi@alazhar.sch.id', '081234567801', 'guru']);
-                fputcsv($handle, ['Siti Rahmawati', '', '081234567802', 'guru']);
-                fputcsv($handle, ['Hendra Gunawan', '', '081234567803', 'orangtua']);
+                $this->writeCsvRow($handle,['Ahmad Fauzi, S.Pd.', 'ahmad.fauzi@alazhar.sch.id', '081234567801', 'guru']);
+                $this->writeCsvRow($handle,['Siti Rahmawati', '', '081234567802', 'guru']);
+                $this->writeCsvRow($handle,['Hendra Gunawan', '', '081234567803', 'orangtua']);
             } else {
                 $units = SchoolUnit::query()->orderBy('sort_order')->orderBy('label')->limit(3)->get()->values();
                 $unitLabel = fn (int $i) => $units->get($i)?->label ?? '';
 
-                fputcsv($handle, ['nama_lengkap', 'email', 'no_hp', 'role', 'unit_code', 'is_aktif']);
+                $this->writeCsvRow($handle,['nama_lengkap', 'email', 'no_hp', 'role', 'unit_code', 'is_aktif']);
 
-                fputcsv($handle, ['Ahmad Fauzi, S.Pd.', 'ahmad.fauzi@alazhar.sch.id', '081234567801', 'guru', $unitLabel(0), '1']);
-                fputcsv($handle, ['Siti Rahmawati', '', '081234567802', 'guru', $unitLabel(1), '1']);
-                fputcsv($handle, ['Rina Amalia, S.E.', 'rina.amalia@alazhar.sch.id', '', 'admin_unit', $unitLabel(2), '1']);
+                $this->writeCsvRow($handle,['Ahmad Fauzi, S.Pd.', 'ahmad.fauzi@alazhar.sch.id', '081234567801', 'guru', $unitLabel(0), '1']);
+                $this->writeCsvRow($handle,['Siti Rahmawati', '', '081234567802', 'guru', $unitLabel(1), '1']);
+                $this->writeCsvRow($handle,['Rina Amalia, S.E.', 'rina.amalia@alazhar.sch.id', '', 'admin_unit', $unitLabel(2), '1']);
                 // admin & orangtua are not tied to one unit - leave unit_code blank.
-                fputcsv($handle, ['Yusuf Hanafi', 'yusuf.hanafi@yapinet.id', '', 'admin', '', '1']);
-                fputcsv($handle, ['Wali Aisyah', 'wali.aisyah@gmail.com', '', 'orangtua', '', '1']);
+                $this->writeCsvRow($handle,['Yusuf Hanafi', 'yusuf.hanafi@yapinet.id', '', 'admin', '', '1']);
+                $this->writeCsvRow($handle,['Wali Aisyah', 'wali.aisyah@gmail.com', '', 'orangtua', '', '1']);
             }
 
             fclose($handle);
@@ -960,7 +960,7 @@ class ImportController extends Controller
 
         return response()->stream(function () {
             $handle = fopen('php://output', 'w');
-            fputcsv($handle, [
+            $this->writeCsvRow($handle,[
                 'fee_type_code',
                 'unit_code',
                 'tingkat',
@@ -974,7 +974,7 @@ class ImportController extends Controller
             $units = SchoolUnit::active()->ordered()->get();
             $codeAt = fn (int $i) => $units->get($i)?->code ?? '';
 
-            fputcsv($handle, [
+            $this->writeCsvRow($handle,[
                 'spp',
                 $codeAt(0),
                 '1',
@@ -983,7 +983,7 @@ class ImportController extends Controller
                 '10',
                 '0',
             ]);
-            fputcsv($handle, [
+            $this->writeCsvRow($handle,[
                 'spp',
                 $codeAt(1),
                 '',
@@ -992,7 +992,7 @@ class ImportController extends Controller
                 '10',
                 '0',
             ]);
-            fputcsv($handle, [
+            $this->writeCsvRow($handle,[
                 'uang_gedung',
                 $codeAt(2),
                 '',
@@ -1004,5 +1004,22 @@ class ImportController extends Controller
 
             fclose($handle);
         }, 200, $headers);
+    }
+
+    /**
+     * PHP 8.4 deprecates relying on fgetcsv/fputcsv defaults - the $escape
+     * parameter must be passed explicitly. Both wrappers live here so every
+     * read and write of an import/template CSV goes through ONE spot, and
+     * the escaping stays the pre-8.4 behaviour ('\'): byte-identical output
+     * to what production has always written.
+     */
+    private function readCsvRow($handle): array|false
+    {
+        return fgetcsv($handle, 2000, ',', '"', '\\');
+    }
+
+    private function writeCsvRow($handle, array $fields): int|false
+    {
+        return fputcsv($handle, $fields, ',', '"', '\\');
     }
 }

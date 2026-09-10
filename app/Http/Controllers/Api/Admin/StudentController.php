@@ -186,10 +186,14 @@ class StudentController extends Controller
 
         return response()->stream(function () use ($service, $students) {
             $handle = fopen('php://output', 'w');
-            fputcsv($handle, $service->headers());
+            // Explicit separator/enclosure/escape: PHP 8.4 deprecates the
+            // defaults, and Dapodik's parser expects the bytes unchanged -
+            // same values the defaults produced (see ImportController's
+            // CSV wrappers for the fuller note).
+            fputcsv($handle, $service->headers(), ',', '"', '\\');
 
             foreach ($service->rows($students) as $row) {
-                fputcsv($handle, $row);
+                fputcsv($handle, $row, ',', '"', '\\');
             }
 
             fclose($handle);
