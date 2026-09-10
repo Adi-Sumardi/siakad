@@ -11,7 +11,9 @@ use App\Services\Payment\PaymentGateway;
 use App\Services\Payment\SendagoPayGateway;
 use App\Services\Payment\XenditGateway;
 use Carbon\Carbon;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -42,5 +44,11 @@ class AppServiceProvider extends ServiceProvider
         // Dates in emails read as "14 Agustus 2026" - Carbon's own locale, which
         // is what translatedFormat() consults.
         Carbon::setLocale('id');
+
+        // Paces every queued App\Jobs\SendWhatsAppMessage - see that class for
+        // why Sendago's unofficial-gateway number needs this.
+        RateLimiter::for('whatsapp-messages', fn () => Limit::perMinute(
+            (int) config('services.sendago.send_rate_per_minute', 60)
+        ));
     }
 }

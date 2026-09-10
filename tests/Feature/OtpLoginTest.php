@@ -114,6 +114,15 @@ class OtpLoginTest extends TestCase
         $this->assertCount(1, $this->sentWhatsApp);
         $this->assertEmpty($this->sentMail);
         $this->assertMatchesRegularExpression('/\d{6}/', $this->sentWhatsApp[0]['message']);
+
+        // The send is queued (App\Jobs\SendWhatsAppMessage) rather than made
+        // inline - under QUEUE_CONNECTION=sync it still runs within this same
+        // request, so the log row it owns should already read 'sent', not
+        // stuck on the 'queued' state it starts at.
+        $log = \App\Models\NotificationLog::where('channel', 'whatsapp')->first();
+        $this->assertNotNull($log);
+        $this->assertSame('sent', $log->status);
+        $this->assertNotNull($log->sent_at);
     }
 
     public function test_a_correct_code_signs_the_guardian_in_and_activates_the_account(): void

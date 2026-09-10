@@ -40,6 +40,10 @@ return [
     'sendago' => [
         'base_url' => env('SENDAGO_BASE_URL'),
         'api_key' => env('SENDAGO_API_KEY'),
+        // Sendago is an unofficial gateway behind one connected number - see
+        // App\Jobs\SendWhatsAppMessage. Messages/minute across the whole app,
+        // not per recipient.
+        'send_rate_per_minute' => env('WHATSAPP_SEND_RATE_PER_MINUTE', 60),
     ],
 
     // Email gateway. Auth is memberId+secret in the request body, not a header.

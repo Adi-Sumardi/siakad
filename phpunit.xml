@@ -33,6 +33,11 @@
         <env name="PMB_HANDOFF_SECRET" value="test-handoff-secret"/>
         <env name="FRONTEND_URL" value="http://localhost:3000"/>
         <env name="SESSION_DRIVER" value="array"/>
+        <!-- CACHE_STORE=array persists for the whole suite, not per-test - a
+             real per-minute cap here would eventually throttle a later test's
+             WhatsApp send, which under QUEUE_CONNECTION=sync means it never
+             actually runs instead of just running late. -->
+        <env name="WHATSAPP_SEND_RATE_PER_MINUTE" value="100000"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

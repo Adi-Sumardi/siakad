@@ -2,13 +2,13 @@
 
 namespace App\Services\Auth;
 
+use App\Jobs\SendWhatsAppMessage;
 use App\Models\LoginOtp;
 use App\Models\NotificationLog;
 use App\Models\User;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
 use App\Services\Notification\PhoneNumberFormatter;
-use App\Services\Notification\WhatsAppGateway;
 use App\Services\Security\FieldEncrypter;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -24,7 +24,6 @@ class OtpService
 {
     public function __construct(
         private MailGateway $mail,
-        private WhatsAppGateway $whatsapp,
         private FieldEncrypter $encrypter,
     ) {}
 
@@ -68,11 +67,16 @@ class OtpService
             ]);
         });
 
-        $sent = $channel === 'email'
-            ? $this->sendEmail($user, $identifier, $code)
-            : $this->sendWhatsApp($identifier, $code);
-
-        $this->log($otp, $channel, $identifier, $sent);
+        // WhatsApp logs itself - queuing (see queueWhatsApp()) means the
+        // eventual sent/failed status can no longer be known synchronously
+        // here, so there is nothing left for the generic log() call below to
+        // record honestly for that channel.
+        if ($channel === 'email') {
+            $sent = $this->sendEmail($user, $identifier, $code);
+            $this->log($otp, $channel, $identifier, $sent);
+        } else {
+            $sent = $this->queueWhatsApp($otp, $identifier, $code);
+        }
 
         return ['otp' => $otp, 'sent' => $sent];
     }
@@ -154,13 +158,34 @@ class OtpService
         ]);
     }
 
-    private function sendWhatsApp(string $phone, string $code): NotificationResult
+    /**
+     * Queues the WhatsApp send instead of making it inline - see
+     * App\Jobs\SendWhatsAppMessage for why. The NotificationLog row is
+     * created here, up front, as 'queued' (a real state in the status enum,
+     * not a workaround) so there is still an immediate record even before
+     * the job runs; the job updates this same row to sent/failed once it
+     * actually attempts delivery.
+     */
+    private function queueWhatsApp(LoginOtp $otp, string $phone, string $code): NotificationResult
     {
         $message = "Kode masuk Siakad YAPI Anda: *{$code}*\n\n"
             ."Berlaku ".LoginOtp::TTL_MINUTES." menit. Jangan berikan kode ini kepada siapa pun, "
             .'termasuk yang mengaku dari sekolah.';
 
-        return $this->whatsapp->sendMessage($phone, $message);
+        $log = NotificationLog::create([
+            'channel' => 'whatsapp',
+            'template' => 'login_otp',
+            'recipient' => $phone,
+            // The code is the credential; it never reaches the log table.
+            'payload' => ['otp_ulid' => $otp->ulid],
+            'status' => 'queued',
+            'notifiable_type' => LoginOtp::class,
+            'notifiable_id' => $otp->id,
+        ]);
+
+        SendWhatsAppMessage::dispatch($phone, $message, $log->ulid);
+
+        return NotificationResult::ok(['mode' => 'queued']);
     }
 
     private function log(LoginOtp $otp, string $channel, string $recipient, NotificationResult $result): void
