@@ -41,7 +41,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="id" className={`${fontDisplay.variable} ${fontBody.variable} ${fontBrand.variable}`}>
-      <body>
+      {/* suppressHydrationWarning: browser extensions (grammar checkers,
+          password managers...) stamp attributes onto <body> before React
+          hydrates, which trips a false mismatch error. This only silences
+          attribute diffs on this one element - children still validated. */}
+      <body suppressHydrationWarning>
         <AuthProvider>{children}</AuthProvider>
         <Toaster position="top-center" richColors />
       </body>
