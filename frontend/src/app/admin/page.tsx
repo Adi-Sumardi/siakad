@@ -82,6 +82,9 @@ type SummaryResponse = {
     term_label: string | null;
     term_ulid: string | null;
   };
+  // What the watchlist conditions were measured against - quoted by the
+  // tiles instead of hardcoded numbers.
+  thresholds: { kkm: number; min_alpa: number; grade_drop: number };
   scope: {
     is_central: boolean;
     unit_count: number;
@@ -251,7 +254,7 @@ export default function AdminHomePage() {
       {/* Ringkasan Akademik - khusus admin_unit (terpisah dari keuangan SPP) */}
       {/* =================================================================== */}
       {!isCentral && data && kpi && data.units[0] && (
-        <RingkasanAkademikCard unit={data.units[0]} kpi={kpi} />
+        <RingkasanAkademikCard unit={data.units[0]} kpi={kpi} thresholds={data.thresholds} />
       )}
 
       {/* =================================================================== */}
@@ -361,7 +364,7 @@ export default function AdminHomePage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {data.units.map((unit) => (
-                <UnitAkademikCard key={unit.unit_id} unit={unit} />
+                <UnitAkademikCard key={unit.unit_id} unit={unit} thresholds={data.thresholds} />
               ))}
             </div>
           )}
@@ -553,17 +556,18 @@ function ShortcutCard({ href, icon, title, desc }: { href: string; icon: React.R
 
 /**
  * A compact academic summary for ONE school unit, used inside the central
- * admin's "Ringkasan Akademik per Unit Sekolah" card. The whole card links to
- * that unit's student list so the detail of the numbers can be acted on.
+ * admin's "Ringkasan Akademik per Unit Sekolah" card. The whole card opens
+ * that unit's watchlist drill-down - the named students these numbers are
+ * made of.
  */
-function UnitAkademikCard({ unit }: { unit: UnitSummary }) {
+function UnitAkademikCard({ unit, thresholds }: { unit: UnitSummary; thresholds: SummaryResponse["thresholds"] }) {
   const today = unit.attendance_today;
   const todayRate = unit.attendance_today_rate;
   const todayTotal = today.hadir + today.sakit + today.izin + today.alpa;
   const pointRecords = unit.points_merit_records + unit.points_violation_records;
 
   return (
-    <Link href={`/admin/siswa?unit=${unit.unit_code}`} className="group">
+    <Link href={`/admin/perhatian?unit=${unit.unit_code}`} className="group">
       <Card className="p-5 border-border/80 shadow-xs hover:border-primary/50 hover:shadow-md transition-all h-full">
         <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-3">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
@@ -626,7 +630,7 @@ function UnitAkademikCard({ unit }: { unit: UnitSummary }) {
             </p>
             <p className="mt-1.5 text-[10px] font-semibold text-muted-foreground">
               {unit.grades_graded > 0
-                ? `${num(unit.grades_graded)} dinilai · ${num(unit.grades_below_kkm)} di bawah KKM (${70})`
+                ? `${num(unit.grades_graded)} dinilai · ${num(unit.grades_below_kkm)} di bawah KKM (${thresholds.kkm})`
                 : "Belum ada nilai akhir"}
             </p>
           </div>
@@ -688,7 +692,15 @@ function MiniStat({
  * kehadiran hari ini, nilai akhir semester, capaian prestasi, dan poin tata
  * tertib - strictly academic, kept apart from the SPP/keuangan overview.
  */
-function RingkasanAkademikCard({ unit, kpi }: { unit: UnitSummary; kpi: NonNullable<SummaryResponse["kpi"]> }) {
+function RingkasanAkademikCard({
+  unit,
+  kpi,
+  thresholds,
+}: {
+  unit: UnitSummary;
+  kpi: NonNullable<SummaryResponse["kpi"]>;
+  thresholds: SummaryResponse["thresholds"];
+}) {
   const today = kpi.attendance_today;
   const todayRate = today.rate;
   const todayTotal = today.hadir + today.sakit + today.izin + today.alpa;
@@ -749,10 +761,11 @@ function RingkasanAkademikCard({ unit, kpi }: { unit: UnitSummary; kpi: NonNulla
         </div>
       </div>
 
-      {/* Watchlist akademik - siswa perlu perhatian */}
+      {/* Watchlist akademik - siswa perlu perhatian. Setiap tile membuka
+          daftar nama di /admin/perhatian, bukan halaman umum. */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <WatchStatTile
-          href="/admin/siswa"
+          href="/admin/perhatian"
           icon={<AlertTriangle className="size-5" />}
           tone="bad"
           label="Siswa Perlu Perhatian"
@@ -760,20 +773,20 @@ function RingkasanAkademikCard({ unit, kpi }: { unit: UnitSummary; kpi: NonNulla
           sub={unit.students_needing_attention > 0 ? "Terindikasi dalam kondisi akademik yang perlu dimonitor" : "Tidak ada siswa yang perlu dimonitor"}
         />
         <WatchStatTile
-          href="/admin/laporan"
+          href="/admin/perhatian?reason=absenteeism"
           icon={<UserCheck className="size-5" />}
           tone="warn"
           label="Absensi Tinggi"
           count={unit.students_high_absenteeism}
-          sub={`Alpa ${5} kali atau lebih tahun ini`}
+          sub={`Alpa ${thresholds.min_alpa} kali atau lebih tahun ini`}
         />
         <WatchStatTile
-          href="/admin/nilai"
+          href="/admin/perhatian?reason=grade_decline"
           icon={<TrendingDown className="size-5" />}
           tone="warn"
           label="Penurunan Nilai"
           count={unit.students_declined}
-          sub={`Rata-rata turun ${5} poin antar semester`}
+          sub={`Rata-rata turun ${thresholds.grade_drop} poin antar semester`}
         />
       </div>
 

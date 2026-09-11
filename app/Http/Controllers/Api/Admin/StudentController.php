@@ -59,6 +59,14 @@ class StudentController extends Controller
             ->when($request->string('unit')->value(), fn ($q, $unitCode) => $q->whereHas('schoolUnit', fn ($uq) => $uq->where('code', $unitCode)))
             ->when($request->string('jenjang')->value(), fn ($q, $jenjang) => $q->whereHas('schoolUnit', fn ($uq) => $uq->where('jenjang_group', $jenjang)))
             ->when($request->string('status')->value(), fn ($q, $status) => $q->where('status', $status))
+            // The dashboard's "belum ditempatkan di kelas" alert links here
+            // with placement=none - same definition that alert counts:
+            // no active enrollment in the SELECTED year (default = active
+            // year), so a student deliberately between rombels for a future
+            // year is not reported as unplaced.
+            ->when($request->string('placement')->value() === 'none', fn ($q) => $q
+                ->whereDoesntHave('enrollments', fn ($eq) => $eq->where('status', 'active')
+                    ->when($selectedYear, fn ($ey) => $ey->where('academic_year_id', $selectedYear->id))))
             ->orderBy('nama_lengkap');
 
         $students = $studentsQuery->paginate($request->integer('per_page', 25));

@@ -15,7 +15,7 @@ use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\Term;
 use App\Models\User;
-use App\Services\Academic\GradeService;
+use App\Services\Academic\WatchlistService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -33,21 +33,12 @@ use Illuminate\Support\Facades\DB;
  */
 class DashboardSummaryController extends Controller
 {
-    /** Assumed school KKM - a dashboard threshold, not a stored policy. */
-    private const KKM = 70;
-
-    /** An enrollment's rollup alpa count from which a child is worth flagging. */
-    private const HIGH_ABSENTEEISM_ALPA = 5;
-
-    /** A final-grade drop this large (in points) between terms counts as decline. */
-    private const GRADE_DROP_POINTS = 5;
-
-    public function summary(Request $request): JsonResponse
+    public function summary(Request $request, WatchlistService $watchlist): JsonResponse
     {
         $user = $request->user();
         $year = AcademicYear::current() ?? AcademicYear::latest('starts_on')->first();
         $term = $year?->activeTerm() ?? $year?->terms()->latest('starts_on')->first();
-        $prevTerm = $this->previousTerm($term);
+        $prevTerm = $watchlist->previousTerm($term);
 
         $units = SchoolUnit::active()->ordered()
             ->when($user?->isUnitScoped(), fn ($q) => $q->where('id', $user->school_unit_id))
@@ -152,6 +143,11 @@ class DashboardSummaryController extends Controller
                 ->get(['extracurricular_id', 'student_id'])
             : collect();
 
+        // ---- Watchlist (shared with the /admin/perhatian drill-down) ---------
+        $watch = $watchlist->identify($students, $enrollments, $grades, $points, $term, $prevTerm);
+        $watchByUnit = $watch->groupBy(fn (array $row) => $studentById->get($row['student_id'])?->school_unit_id);
+        $currentAverages = $watchlist->perStudentAverages($grades, $term?->id);
+
         // ---- Per-unit + grand aggregates -------------------------------------
         $unitsData = [];
         $alerts = [];
@@ -166,7 +162,6 @@ class DashboardSummaryController extends Controller
             $unitAtt = $attendanceRows->where('school_unit_id', $unit->id);
             $unitAchievements = $achievements->filter(fn (Achievement $a) => $this->achievementUnitId($a) === $unit->id);
             $unitPoints = $points->where('school_unit_id', $unit->id);
-            $unitGrades = $grades->where('school_unit_id', $unit->id);
             $unitEkskuls = $extracurriculars->where('school_unit_id', $unit->id);
             $unitEkskulIds = $unitEkskuls->pluck('id');
 
@@ -186,21 +181,19 @@ class DashboardSummaryController extends Controller
             $verified = $unitAchievements->where('status', 'verified');
             $pending = $unitAchievements->where('status', 'pending');
 
-            $curScores = $this->finalScores($unitGrades, $term?->id);
-            $belowKkmScores = $curScores->filter(fn (?float $s) => $s !== null && $s < self::KKM);
-            $belowKkm = $belowKkmScores->count();
+            // Watchlist counts per unit - the unit-scoped academic attention
+            // strip, grouped from the same WatchlistService rows the
+            // /admin/perhatian drill-down lists names from.
+            $unitWatch = $watchByUnit->get($unit->id, collect());
+            $withReason = fn (string $reason) => $unitWatch->filter(fn (array $row) => in_array($reason, $row['reasons'], true));
 
-            $violationStudents = $unitPoints->filter(fn ($p) => (int) $p->points < 0)->pluck('student_id')->unique();
+            $unitCurScores = $currentAverages->only($unitStudents->pluck('id')->all());
+            $belowKkm = $unitCurScores->filter(fn (float $s) => $s < WatchlistService::KKM)->count();
 
-            // Watchlist counts per unit - the unit-scoped academic attention strip.
-            $highAlpaIds = $unitEnrollments->filter(fn (Enrollment $e) => $e->absent_count >= self::HIGH_ABSENTEEISM_ALPA)->pluck('student_id');
-            $prevUnitScores = $prevTerm ? $this->finalScores($unitGrades, $prevTerm->id) : collect();
-            $declinedIds = $curScores->filter(function ($cur, $studentId) use ($prevUnitScores) {
-                $prev = $prevUnitScores->get($studentId);
-
-                return $prev !== null && $prev - $cur >= self::GRADE_DROP_POINTS;
-            })->keys();
-            $attentionIds = $highAlpaIds->merge($belowKkmScores->keys())->merge($declinedIds)->merge($violationStudents)->unique();
+            $violationStudents = $withReason('point_violation');
+            $highAlpaIds = $withReason('absenteeism');
+            $declinedIds = $withReason('grade_decline');
+            $attentionIds = $unitWatch->keys();
 
             $ekskulMemberCount = $ekskulMembers->filter(fn ($m) => $unitEkskulIds->contains($m->extracurricular_id))->count();
 
@@ -225,8 +218,8 @@ class DashboardSummaryController extends Controller
                 'achievements' => $verified->count(),
                 'achievements_pending' => $pending->count(),
                 'grades_below_kkm' => $belowKkm,
-                'grades_graded' => $curScores->count(),
-                'grades_average' => $curScores->isEmpty() ? null : round($curScores->avg(), 1),
+                'grades_graded' => $unitCurScores->count(),
+                'grades_average' => $unitCurScores->isEmpty() ? null : round($unitCurScores->avg(), 1),
                 'students_high_absenteeism' => $highAlpaIds->count(),
                 'students_declined' => $declinedIds->count(),
                 'students_needing_attention' => $attentionIds->count(),
@@ -271,17 +264,14 @@ class DashboardSummaryController extends Controller
         $grand['grades']['students_graded'] = 0;
         $grand['grades']['average'] = 0;
         if ($term) {
-            $allCurScores = $this->finalScores($grades, $term->id);
-            $allCurScores = $allCurScores->filter(fn ($s) => $s !== null);
-            $grand['grades']['students_graded'] = $allCurScores->count();
-            $grand['grades']['average'] = $allCurScores->isEmpty()
+            $grand['grades']['students_graded'] = $currentAverages->count();
+            $grand['grades']['average'] = $currentAverages->isEmpty()
                 ? 0
-                : round($allCurScores->avg(), 1);
-            $grand['grades']['below_kkm'] = $this->finalScores($grades, $term->id)
-                ->filter(fn (?float $s) => $s !== null && $s < self::KKM)->count();
-
-            $prevScores = $prevTerm ? $this->finalScores($grades, $prevTerm->id) : collect();
-            $grand['grades']['declined'] = $this->countDeclined($allCurScores->map(fn ($s) => (float) $s), $prevScores->map(fn ($s) => (float) $s), self::GRADE_DROP_POINTS);
+                : round($currentAverages->avg(), 1);
+            $grand['grades']['below_kkm'] = $currentAverages
+                ->filter(fn (float $s) => $s < WatchlistService::KKM)->count();
+            $grand['grades']['declined'] = $watch
+                ->filter(fn (array $row) => in_array('grade_decline', $row['reasons'], true))->count();
         }
 
         $grand['billing']['collection_rate'] = $grand['billing']['total_billed'] > 0
@@ -300,7 +290,7 @@ class DashboardSummaryController extends Controller
 
         // ---- Alerts / watchlist ----------------------------------------------
         $alerts = $this->buildAlerts(
-            $bills, $enrollments, $studentById, $units, $term, $grades, $achievements, $points,
+            $bills, $enrollments, $studentById, $units, $term, $achievements, $watch,
         );
 
         return response()->json([
@@ -309,6 +299,13 @@ class DashboardSummaryController extends Controller
                 'term' => $term?->name,
                 'term_label' => $term ? ucfirst($term->name).' '.$year?->year : null,
                 'term_ulid' => $term?->ulid,
+            ],
+            // What the watchlist conditions above were measured against - the
+            // tiles quote these, and T24 may turn them into per-unit config.
+            'thresholds' => [
+                'kkm' => WatchlistService::KKM,
+                'min_alpa' => WatchlistService::HIGH_ABSENTEEISM_ALPA,
+                'grade_drop' => WatchlistService::GRADE_DROP_POINTS,
             ],
             'scope' => [
                 'is_central' => ! $user?->isUnitScoped(),
@@ -385,85 +382,10 @@ class DashboardSummaryController extends Controller
     }
 
     /**
-     * Per-student average final score for one term.
-     *
-     * A student sits many subjects, so the score is first finalized per
-     * subject (GradeService weighting, null when a subject's categories are
-     * incomplete) and then averaged across that student's complete subjects -
-     * NOT collapsed across subjects, which would silently keep only the last
-     * subject's data per category.
-     *
-     * @return Collection<int, float> keyed by student id, only students with at least one complete subject
-     */
-    private function finalScores(Collection $termGrades, ?int $termId): Collection
-    {
-        if (! $termId) {
-            return collect();
-        }
-
-        return $termGrades
-            ->where('term_id', $termId)
-            ->groupBy(fn ($g) => $g->student_id.'|'.$g->subject_id)
-            ->map(function (Collection $rows) {
-                $scores = $rows->pluck('score', 'category')->map(fn ($s) => (float) $s);
-
-                if (array_diff(array_keys(GradeService::WEIGHTS), $scores->keys()->all())) {
-                    return null;
-                }
-
-                $total = 0.0;
-                foreach (GradeService::WEIGHTS as $category => $weight) {
-                    $total += (float) $scores[$category] * $weight;
-                }
-
-                return round($total, 2);
-            })
-            ->filter(fn ($final) => $final !== null)
-            ->groupBy(fn ($final, string $key) => explode('|', $key)[0])
-            ->map(fn (Collection $finals) => round($finals->avg(), 2));
-    }
-
-    /** How many students dropped at least $dropPoints between term averages. Both maps are studentId => float|null. */
-    private function countDeclined(Collection $current, Collection $previous, float $dropPoints): int
-    {
-        return $current->filter(function ($cur, $studentId) use ($previous, $dropPoints) {
-            $prev = $previous->get($studentId);
-
-            return $cur !== null && $prev !== null && $prev - $cur >= $dropPoints;
-        })->count();
-    }
-
-    private function previousTerm(?Term $term): ?Term
-    {
-        if (! $term) {
-            return null;
-        }
-
-        $prev = Term::where('academic_year_id', $term->academic_year_id)
-            ->where('starts_on', '<', $term->starts_on)
-            ->orderByDesc('starts_on')
-            ->first();
-
-        if ($prev) {
-            return $prev;
-        }
-
-        $prevYear = AcademicYear::where('starts_on', '<', $term->academicYear->starts_on)
-            ->latest('starts_on')
-            ->first();
-
-        if (! $prevYear) {
-            return null;
-        }
-
-        return $prevYear->terms()->where('name', $term->name)->first()
-            ?? $prevYear->terms()->latest('starts_on')->first();
-    }
-
-    /**
      * The watchlist the dashboard shows: conditions worth a staff glance,
      * each with a severity and - for the central admin - how it splits per unit.
      *
+     * @param  Collection  $watch  WatchlistService rows keyed by student id
      * @return array<int, array{id:string,label:string,detail:string,count:int,severity:string,href:?string,units:array<int,array{code:string,label:string,count:int}>}>
      */
     private function buildAlerts(
@@ -472,9 +394,8 @@ class DashboardSummaryController extends Controller
         Collection $studentById,
         Collection $units,
         ?Term $term,
-        Collection $grades,
         Collection $achievements,
-        Collection $points,
+        Collection $watch,
     ): array {
         $perUnit = function (Collection $grouped) use ($units) {
             return $units
@@ -522,31 +443,30 @@ class DashboardSummaryController extends Controller
         );
 
         // 3. High absenteeism (rollup alpa on current-year enrollment)
-        $highAlpa = $enrollments->filter(fn (Enrollment $e) => $e->absent_count >= self::HIGH_ABSENTEEISM_ALPA);
+        $highAlpa = $watch->filter(fn (array $row) => in_array('absenteeism', $row['reasons'], true));
         $alerts[] = $this->alert(
             id: 'absenteeism',
             label: 'Siswa absensi tinggi',
-            detail: sprintf('Alpa %d kali atau lebih di tahun ajaran berjalan', self::HIGH_ABSENTEEISM_ALPA),
+            detail: sprintf('Alpa %d kali atau lebih di tahun ajaran berjalan', WatchlistService::HIGH_ABSENTEEISM_ALPA),
             count: $highAlpa->count(),
             severity: 'bad',
-            href: '/admin/laporan',
-            grouped: $highAlpa->map(fn (Enrollment $e) => $unitOf($e->student_id))->countBy(fn ($unitId) => $unitId),
+            href: '/admin/perhatian?reason=absenteeism',
+            grouped: $highAlpa->map(fn (array $row) => $unitOf($row['student_id']))->countBy(fn ($unitId) => $unitId),
             perUnit: $perUnit,
             units: $units,
         );
 
         // 4. Grades below KKM (current term)
         if ($term) {
-            $cur = $this->finalScores($grades, $term->id);
-            $belowKkm = $cur->filter(fn (?float $s) => $s !== null && $s < self::KKM);
+            $belowKkm = $watch->filter(fn (array $row) => in_array('below_kkm', $row['reasons'], true));
             $alerts[] = $this->alert(
                 id: 'grades',
                 label: 'Nilai akhir di bawah KKM',
-                detail: sprintf('Rata-rata nilai akhir semester berjalan di bawah %d', self::KKM),
+                detail: sprintf('Rata-rata nilai akhir semester berjalan di bawah %d', WatchlistService::KKM),
                 count: $belowKkm->count(),
                 severity: 'warn',
-                href: '/admin/nilai',
-                grouped: $belowKkm->keys()->map(fn ($id) => $unitOf($id))->countBy(fn ($unitId) => $unitId),
+                href: '/admin/perhatian?reason=below_kkm',
+                grouped: $belowKkm->map(fn (array $row) => $unitOf($row['student_id']))->countBy(fn ($unitId) => $unitId),
                 perUnit: $perUnit,
                 units: $units,
             );
@@ -567,7 +487,7 @@ class DashboardSummaryController extends Controller
         );
 
         // 6. Point violations this term
-        $violationStudents = $points->filter(fn ($p) => (int) $p->points < 0)->pluck('student_id')->unique();
+        $violationStudents = $watch->filter(fn (array $row) => in_array('point_violation', $row['reasons'], true));
         $alerts[] = $this->alert(
             id: 'points',
             label: 'Siswa dengan pelanggaran poin',
@@ -575,7 +495,7 @@ class DashboardSummaryController extends Controller
             count: $violationStudents->count(),
             severity: 'bad',
             href: '/admin/poin',
-            grouped: $violationStudents->map(fn ($id) => $unitOf($id))->countBy(fn ($unitId) => $unitId),
+            grouped: $violationStudents->map(fn (array $row) => $unitOf($row['student_id']))->countBy(fn ($unitId) => $unitId),
             perUnit: $perUnit,
             units: $units,
         );
@@ -590,7 +510,7 @@ class DashboardSummaryController extends Controller
             detail: 'Belum memiliki rombel aktif pada tahun ajaran berjalan',
             count: $unplaced->count(),
             severity: 'warn',
-            href: '/admin/kelas',
+            href: '/admin/siswa?placement=none',
             grouped: $unplaced->map(fn (Student $s) => $s->school_unit_id),
             perUnit: $perUnit,
             units: $units,

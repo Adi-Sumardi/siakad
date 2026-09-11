@@ -94,6 +94,9 @@ function AdminStudentsContent() {
   const [unitFilter, setUnitFilter] = useState(searchParams.get("unit") ?? "");
   const [jenjangFilter, setJenjangFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
+  // The dashboard's "belum ditempatkan di kelas" alert lands here with
+  // placement=none - kept as a toggle so the filter survives further edits.
+  const [placementNone, setPlacementNone] = useState(searchParams.get("placement") === "none");
 
   // Import Modal
   const [showImportModal, setShowImportModal] = useState(false);
@@ -122,6 +125,7 @@ function AdminStudentsContent() {
     if (unitFilter) params.set("unit", unitFilter);
     if (jenjangFilter) params.set("jenjang", jenjangFilter);
     if (statusFilter) params.set("status", statusFilter);
+    if (placementNone) params.set("placement", "none");
     if (selectedYear) params.set("academic_year", selectedYear);
 
     api
@@ -158,7 +162,7 @@ function AdminStudentsContent() {
     if (selectedYear) {
       loadStudents();
     }
-  }, [selectedYear, unitFilter, jenjangFilter, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedYear, unitFilter, jenjangFilter, statusFilter, placementNone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -468,6 +472,25 @@ function AdminStudentsContent() {
             <Button type="submit" size="sm" variant="outline" className="h-9 px-3 text-xs">
               <RefreshCw className="size-3.5" />
             </Button>
+          </div>
+
+          {/* Tujuan link "belum ditempatkan di kelas" dari dashboard (T22) -
+              toggle terpisah dari status karena berlaku untuk tahun ajaran
+              terpilih, bukan status siswa. */}
+          <div className="sm:col-span-2 lg:col-span-5">
+            <button
+              type="button"
+              onClick={() => setPlacementNone(!placementNone)}
+              aria-pressed={placementNone}
+              className={`h-9 w-full sm:w-auto rounded-md border px-3.5 text-xs font-bold shadow-2xs transition-colors ${
+                placementNone
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-input bg-card text-muted-foreground hover:bg-muted"
+              }`}
+              title="Hanya siswa tanpa rombel aktif pada tahun ajaran terpilih"
+            >
+              {placementNone ? "✓ Hanya yang belum punya rombel" : "Filter: belum punya rombel"}
+            </button>
           </div>
         </form>
       </Card>

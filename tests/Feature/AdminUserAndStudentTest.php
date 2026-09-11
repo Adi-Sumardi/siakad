@@ -159,6 +159,40 @@ class AdminUserAndStudentTest extends TestCase
             ->assertJsonPath('students.data.0.nama_lengkap', 'Anak SD');
     }
 
+    /**
+     * placement=none is where the dashboard's "belum ditempatkan di kelas"
+     * alert lands: active students without an active rombel in the selected
+     * year - the same definition the alert counts, so the number and the
+     * list it opens agree.
+     */
+    public function test_placement_none_lists_students_without_an_active_rombel(): void
+    {
+        $classroom = Classroom::create([
+            'school_unit_id' => $this->unit->id, 'academic_year_id' => $this->year->id,
+            'tingkat' => 1, 'name' => '1A',
+        ]);
+
+        $placed = Student::create(['nama_lengkap' => 'Sudah Ditempatkan', 'jenis_kelamin' => 'L', 'school_unit_id' => $this->unit->id, 'status' => 'active']);
+        Enrollment::create([
+            'student_id' => $placed->id, 'classroom_id' => $classroom->id,
+            'academic_year_id' => $this->year->id, 'status' => 'active', 'joined_on' => '2026-07-01',
+        ]);
+        Student::create(['nama_lengkap' => 'Belum Ditempatkan', 'jenis_kelamin' => 'P', 'school_unit_id' => $this->unit->id, 'status' => 'active']);
+
+        // Default list shows both.
+        $this->actingAs($this->admin)
+            ->getJson('/api/admin/students')
+            ->assertOk()
+            ->assertJsonCount(2, 'students.data');
+
+        $this->actingAs($this->admin)
+            ->getJson('/api/admin/students?placement=none')
+            ->assertOk()
+            ->assertJsonCount(1, 'students.data')
+            ->assertJsonPath('students.data.0.nama_lengkap', 'Belum Ditempatkan')
+            ->assertJsonPath('students.data.0.classroom', null);
+    }
+
     public function test_the_student_list_shows_the_guardians_actual_name_and_phone(): void
     {
         $student = Student::create([
