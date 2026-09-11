@@ -276,7 +276,7 @@ export default function UserManagementPage() {
 
         <Button onClick={openCreate} className="gap-2 font-bold shadow-xs">
           <UserPlus className="size-4" />
-          <span>{isUnitAdmin ? "Tambah Guru" : "Tambah Pengguna"}</span>
+          <span>Tambah Pengguna</span>
         </Button>
       </div>
 
