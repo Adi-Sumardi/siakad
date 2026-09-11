@@ -17,7 +17,7 @@ import type { PointRecord } from "@/lib/types/kesiswaan";
 
 type StudentRow = { ulid: string; nama_lengkap: string; nis: string | null; point_balance: number | null };
 type Rule = { ulid: string; code: string; name: string; type: "violation" | "merit"; category: string; points: number; requires_evidence: boolean };
-type TodaySchedule = { ulid: string; subject: string; teacher: string | null; start_time: string; end_time: string };
+type TodaySchedule = { ulid: string; subject: string; teacher: string | null; is_mine: boolean; start_time: string; end_time: string };
 type RecapRow = { ulid: string; nama_lengkap: string; nis: string | null; hadir: number; sakit: number; izin: number; alpa: number };
 type GradeSubject = { ulid: string; name: string };
 type GradeScore = { tugas: number | null; uts: number | null; uas: number | null; final: number | null };
@@ -272,9 +272,16 @@ function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
                 {s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)}{s.teacher ? ` · ${s.teacher}` : ""}
               </p>
             </div>
-            <Button size="sm" onClick={() => openAttendance(s.ulid)} disabled={opening === s.ulid} className="text-xs">
-              {opening === s.ulid ? "Membuka…" : "Buka Presensi"}
-            </Button>
+            {s.is_mine ? (
+              <Button size="sm" onClick={() => openAttendance(s.ulid)} disabled={opening === s.ulid} className="text-xs">
+                {opening === s.ulid ? "Membuka…" : "Buka Presensi"}
+              </Button>
+            ) : (
+              // Opening roll call is restricted to the assigned teacher
+              // (the API would reject anyone else with a 404), so periods
+              // taught by colleagues are listed for awareness only.
+              <span className="shrink-0 text-[11px] text-muted-foreground">Bukan jadwal Anda</span>
+            )}
           </div>
         ))}
       </div>

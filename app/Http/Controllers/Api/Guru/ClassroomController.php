@@ -149,12 +149,18 @@ class ClassroomController extends Controller
             ->orderBy('start_time')
             ->get();
 
+        // Every period of the class's day is shown (a homeroom teacher wants
+        // the whole picture), but only the assigned teacher may open roll
+        // call (AttendanceSessionController::open() enforces teacher_id) -
+        // so flag ownership and let the frontend hide the button for periods
+        // that would only 404.
         return response()->json([
             'classroom' => ['ulid' => $classroom->ulid, 'name' => $classroom->name],
             'schedules' => $schedules->map(fn ($s) => [
                 'ulid' => $s->ulid,
                 'subject' => $s->subject->name,
                 'teacher' => $s->teacher?->name,
+                'is_mine' => $s->teacher_id === $request->user()->id,
                 'start_time' => $s->start_time,
                 'end_time' => $s->end_time,
             ]),
