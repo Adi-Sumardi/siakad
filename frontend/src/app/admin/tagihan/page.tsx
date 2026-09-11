@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Download, Filter, Receipt, RefreshCw, Search, ShieldAlert, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -32,15 +33,18 @@ function statusBadge(bill: Bill) {
 
 type Action = { bill: Bill; kind: "bayar" | "bebaskan" | "batalkan" };
 
-export default function AdminBillsPage() {
+function AdminBillsContent() {
   const { user } = useAuth();
   const isCentral = user?.role === "admin";
+  const searchParams = useSearchParams();
 
   const [bills, setBills] = useState<Paginated<Bill> | null>(null);
   const [status, setStatus] = useState("open");
   const [q, setQ] = useState("");
   const [unitCode, setUnitCode] = useState("");
-  const [academicYear, setAcademicYear] = useState("");
+  // The dashboard's money alerts land here with ?year= of the period their
+  // count came from (T23) - the dropdown starts from it so numbers line up.
+  const [academicYear, setAcademicYear] = useState(searchParams.get("year") ?? "");
   const [units, setUnits] = useState<Option[]>([]);
   const [years, setYears] = useState<{ ulid: string; year: string; is_active: boolean }[]>([]);
   const [action, setAction] = useState<Action | null>(null);
@@ -424,5 +428,13 @@ export default function AdminBillsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AdminBillsPage() {
+  return (
+    <Suspense fallback={null}>
+      <AdminBillsContent />
+    </Suspense>
   );
 }

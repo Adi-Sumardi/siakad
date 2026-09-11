@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\DashboardSummaryRequest;
 use App\Models\AcademicYear;
 use App\Models\Achievement;
 use App\Models\Bill;
@@ -17,7 +18,6 @@ use App\Models\Term;
 use App\Models\User;
 use App\Services\Academic\WatchlistService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -33,10 +33,17 @@ use Illuminate\Support\Facades\DB;
  */
 class DashboardSummaryController extends Controller
 {
-    public function summary(Request $request, WatchlistService $watchlist): JsonResponse
+    public function summary(DashboardSummaryRequest $request, WatchlistService $watchlist): JsonResponse
     {
         $user = $request->user();
         $year = AcademicYear::current() ?? AcademicYear::latest('starts_on')->first();
+
+        // Which period the money numbers cover (T23): the running academic
+        // year by default, or every bill ever with ?billing_period=all.
+        $billingPeriod = $request->input('billing_period') === 'all' ? 'all' : 'year';
+        $billingLabel = $billingPeriod === 'year' && $year?->year
+            ? 'TA '.$year->year
+            : 'Semua periode';
         $term = $year?->activeTerm() ?? $year?->terms()->latest('starts_on')->first();
         $prevTerm = $watchlist->previousTerm($term);
 
@@ -72,9 +79,13 @@ class DashboardSummaryController extends Controller
             ->get(['id', 'school_unit_id']);
 
         // ---- Billing --------------------------------------------------------
+        // Scoped like the rest of the payload (T23): the year view only sums
+        // bills issued for the running academic year, so a leftover open
+        // receivable from a previous year cannot colour this year's numbers.
         $bills = Bill::query()
             ->visibleTo($user)
             ->whereNotIn('status', ['cancelled'])
+            ->when($billingPeriod === 'year' && $year, fn ($q) => $q->where('academic_year_id', $year->id))
             ->with('student:id,school_unit_id')
             ->get(['id', 'student_id', 'total_amount', 'paid_amount', 'remaining_amount', 'status', 'due_date']);
 
@@ -289,8 +300,14 @@ class DashboardSummaryController extends Controller
             : null;
 
         // ---- Alerts / watchlist ----------------------------------------------
+        // Money alerts link to the tagihan list pre-scoped to the same period
+        // the dashboard counts came from, so the numbers line up on arrival.
+        $tagihanHref = $billingPeriod === 'year' && $year?->year
+            ? '/admin/tagihan?year='.rawurlencode($year->year)
+            : '/admin/tagihan';
         $alerts = $this->buildAlerts(
             $bills, $enrollments, $studentById, $units, $term, $achievements, $watch,
+            $billingLabel, $tagihanHref,
         );
 
         return response()->json([
@@ -299,6 +316,10 @@ class DashboardSummaryController extends Controller
                 'term' => $term?->name,
                 'term_label' => $term ? ucfirst($term->name).' '.$year?->year : null,
                 'term_ulid' => $term?->ulid,
+                // What the billing numbers below cover - the UI quotes this
+                // instead of labelling them with the semester (T23).
+                'billing_scope' => $billingPeriod,
+                'billing_label' => $billingLabel,
             ],
             // What the watchlist conditions above were measured against - the
             // tiles quote these, and T24 may turn them into per-unit config.
@@ -396,6 +417,8 @@ class DashboardSummaryController extends Controller
         ?Term $term,
         Collection $achievements,
         Collection $watch,
+        string $billingLabel,
+        string $tagihanHref,
     ): array {
         $perUnit = function (Collection $grouped) use ($units) {
             return $units
@@ -419,10 +442,10 @@ class DashboardSummaryController extends Controller
         $alerts[] = $this->alert(
             id: 'overdue',
             label: 'Tagihan lewat jatuh tempo',
-            detail: 'Masih tersisa dan belum dilunasi setelah tanggal jatuh tempo',
+            detail: "Masih tersisa dan belum dilunasi setelah jatuh tempo - cakupan {$billingLabel}",
             count: $overdueBills->count(),
             severity: 'bad',
-            href: '/admin/tagihan',
+            href: $tagihanHref,
             grouped: $overdueBills->countBy(fn (Bill $b) => $b->student?->school_unit_id),
             perUnit: $perUnit,
             units: $units,
@@ -433,10 +456,10 @@ class DashboardSummaryController extends Controller
         $alerts[] = $this->alert(
             id: 'outstanding',
             label: 'Siswa dengan sisa piutang',
-            detail: 'Memiliki tagihan terbuka yang belum lunas',
+            detail: "Memiliki tagihan terbuka yang belum lunas - cakupan {$billingLabel}",
             count: $debtorStudentIds->count(),
             severity: 'warn',
-            href: '/admin/tagihan',
+            href: $tagihanHref,
             grouped: $debtorStudentIds->map(fn ($id) => $unitOf($id))->countBy(fn ($unitId) => $unitId),
             perUnit: $perUnit,
             units: $units,

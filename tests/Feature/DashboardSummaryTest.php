@@ -121,4 +121,78 @@ class DashboardSummaryTest extends TestCase
             $this->assertSame(0, $unit['points_violation_records']);
         }
     }
+
+    /**
+     * T23: the money numbers are scoped to the running academic year by
+     * default, so a leftover open bill from a previous year cannot colour
+     * this year's overview - and the payload says which period it used.
+     */
+    public function test_billing_numbers_are_scoped_to_the_running_year_by_default(): void
+    {
+        $year = $this->year();
+        $oldYear = AcademicYear::create([
+            'year' => '2025/2026', 'starts_on' => '2025-07-01', 'ends_on' => '2026-06-30',
+        ]);
+        $sd = $this->unit('SD-13', 'SD Islam Al Azhar 13', 'sd');
+
+        $this->studentWithBill($year, $sd, '000010', 500000);
+        $this->studentWithBill($oldYear, $sd, '000011', 300000);
+
+        $admin = User::create([
+            'name' => 'Pusat', 'email' => 'pusat-billing-period@example.com', 'phone' => '081111111203',
+            'role' => 'admin', 'is_active' => true,
+        ]);
+
+        $body = $this->actingAs($admin)->getJson('/api/admin/dashboard/summary')->assertOk()->json();
+
+        $this->assertSame('year', $body['period']['billing_scope']);
+        $this->assertSame('TA 2026/2027', $body['period']['billing_label']);
+        $this->assertSame(1, $body['kpi']['billing']['bill_count']);
+        $this->assertSame(500000.0, (float) $body['kpi']['billing']['total_outstanding']);
+        $this->assertSame(1, collect($body['alerts'])->firstWhere('id', 'outstanding')['count']);
+        // Money alerts land on the tagihan list pre-scoped to the same year,
+        // so the counts line up on arrival.
+        $this->assertSame('/admin/tagihan?year=2026%2F2027', collect($body['alerts'])->firstWhere('id', 'overdue')['href']);
+    }
+
+    public function test_billing_period_all_restores_the_all_time_numbers(): void
+    {
+        $year = $this->year();
+        $oldYear = AcademicYear::create([
+            'year' => '2025/2026', 'starts_on' => '2025-07-01', 'ends_on' => '2026-06-30',
+        ]);
+        $sd = $this->unit('SD-13', 'SD Islam Al Azhar 13', 'sd');
+
+        $this->studentWithBill($year, $sd, '000012', 500000);
+        $this->studentWithBill($oldYear, $sd, '000013', 300000);
+
+        $admin = User::create([
+            'name' => 'Pusat', 'email' => 'pusat-billing-all@example.com', 'phone' => '081111111204',
+            'role' => 'admin', 'is_active' => true,
+        ]);
+
+        $body = $this->actingAs($admin)->getJson('/api/admin/dashboard/summary?billing_period=all')->assertOk()->json();
+
+        $this->assertSame('all', $body['period']['billing_scope']);
+        $this->assertSame('Semua periode', $body['period']['billing_label']);
+        $this->assertSame(2, $body['kpi']['billing']['bill_count']);
+        $this->assertSame(800000.0, (float) $body['kpi']['billing']['total_outstanding']);
+        $this->assertSame(2, collect($body['alerts'])->firstWhere('id', 'outstanding')['count']);
+        $this->assertSame('/admin/tagihan', collect($body['alerts'])->firstWhere('id', 'overdue')['href']);
+    }
+
+    public function test_billing_period_must_be_a_known_value(): void
+    {
+        $this->year();
+
+        $admin = User::create([
+            'name' => 'Pusat', 'email' => 'pusat-billing-invalid@example.com', 'phone' => '081111111205',
+            'role' => 'admin', 'is_active' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->getJson('/api/admin/dashboard/summary?billing_period=semester')
+            ->assertStatus(422)
+            ->assertInvalid('billing_period');
+    }
 }

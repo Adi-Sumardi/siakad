@@ -81,6 +81,10 @@ type SummaryResponse = {
     term: string | null;
     term_label: string | null;
     term_ulid: string | null;
+    // What the billing numbers (KPI kas/piutang, rekap, grafik) cover -
+    // "year" = running academic year, "all" = every bill ever (T23).
+    billing_scope: "year" | "all";
+    billing_label: string;
   };
   // What the watchlist conditions were measured against - quoted by the
   // tiles instead of hardcoded numbers.
@@ -125,17 +129,41 @@ export default function AdminHomePage() {
   const { user } = useAuth();
   const [data, setData] = useState<SummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  // Which period the money numbers cover - the summary refetches on switch,
+  // and every billing tile/grafik/alert follows it (T23).
+  const [billingPeriod, setBillingPeriod] = useState<"year" | "all">("year");
+  const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     api
-      .get<SummaryResponse>("/api/admin/dashboard/summary")
-      .then(setData)
+      .get<SummaryResponse>(`/api/admin/dashboard/summary?billing_period=${billingPeriod}`)
+      .then((res) => {
+        if (!cancelled) setData(res);
+      })
       .catch(() => toast.error("Gagal memuat ringkasan dashboard."))
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+          setSwitching(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [billingPeriod]);
+
+  const switchBillingPeriod = (next: "year" | "all") => {
+    if (next === billingPeriod || switching) return;
+    setSwitching(true);
+    setBillingPeriod(next);
+  };
 
   const isCentral = data?.scope.is_central ?? true;
   const kpi = data?.kpi;
+  // Honest label for every money number: the backend reports the period the
+  // bills query was actually scoped to, so the UI never guesses (T23).
+  const billingLabel = data?.period.billing_label ?? "tahun ajaran berjalan";
 
   const maxBilled = useMemo(
     () => (data?.units.length ? Math.max(...data.units.map((u) => u.billed), 1) : 1),
@@ -210,21 +238,21 @@ export default function AdminHomePage() {
           <KpiCard
             label="Penerimaan Kas"
             value={rupiah(kpi.billing.total_paid)}
-            sub={`Tingkat pelunasan ${kpi.billing.collection_rate}%`}
+            sub={`${billingLabel} · Tingkat pelunasan ${kpi.billing.collection_rate}%`}
             icon={<TrendingUp className="size-5 text-good" />}
             tone="good"
           />
           <KpiCard
             label="Sisa Piutang"
             value={rupiah(kpi.billing.total_outstanding)}
-            sub={`${num(kpi.billing.bill_count)} tagihan · ${num(kpi.billing.overdue_bills)} lewat jatuh tempo`}
+            sub={`${billingLabel} · ${num(kpi.billing.bill_count)} tagihan · ${num(kpi.billing.overdue_bills)} lewat jatuh tempo`}
             icon={<TrendingDown className="size-5 text-destructive" />}
             tone="bad"
           />
           <KpiCard
             label="Tagihan Jatuh Tempo"
             value={`${num(kpi.billing.overdue_bills)} Tagihan`}
-            sub={kpi.billing.overdue_amount > 0 ? `Senilai ${rupiah(kpi.billing.overdue_amount)} perlu ditindaklanjuti` : "Tidak ada tunggakan jatuh tempo"}
+            sub={kpi.billing.overdue_amount > 0 ? `${billingLabel} · Senilai ${rupiah(kpi.billing.overdue_amount)} perlu ditindaklanjuti` : `${billingLabel} · Tidak ada tunggakan jatuh tempo`}
             icon={<Receipt className="size-5 text-warn" />}
             tone="warn"
           />
@@ -380,7 +408,7 @@ export default function AdminHomePage() {
             <Building2 className="size-5 text-primary" />
             <div>
               <h2 className="text-lg font-bold text-foreground">Rekap per Unit Sekolah</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Indikator kunci setiap unit dalam satu pandangan - untuk mengenali unit mana yang perlu pendampingan lebih.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Indikator kunci setiap unit dalam satu pandangan - angka keuangan mengacu {billingLabel}.</p>
             </div>
           </div>
           <div className="mt-4 overflow-x-auto">
@@ -434,14 +462,17 @@ export default function AdminHomePage() {
       {/* =================================================================== */}
       <Card className="p-6 border-border/80 shadow-md">
         <div className="border-b border-border/70 pb-4">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="size-5 text-primary" />
-            <h2 className="text-lg font-bold text-foreground">
-              {isCentral ? "Grafik Arus Tagihan & Piutang per Unit Sekolah" : "Arus Tagihan & Piutang Unit Anda"}
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="size-5 text-primary" />
+              <h2 className="text-lg font-bold text-foreground">
+                {isCentral ? "Grafik Arus Tagihan & Piutang per Unit Sekolah" : "Arus Tagihan & Piutang Unit Anda"}
+              </h2>
+            </div>
+            <BillingPeriodToggle value={billingPeriod} disabled={switching || loading} onChange={switchBillingPeriod} />
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Perbandingan tagihan terbit, kas masuk, dan sisa piutang pada {data?.period.term_label ?? "tahun ajaran berjalan"}.
+            Perbandingan tagihan terbit, kas masuk, dan sisa piutang pada {billingLabel} - KPI kas dan piutang di atas mengikuti pilihan ini.
           </p>
         </div>
 
@@ -534,6 +565,47 @@ function KpiCard({
       <div className={cn("mt-2 text-xl sm:text-2xl font-black leading-tight", toneClass)}>{value}</div>
       <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{sub}</p>
     </Card>
+  );
+}
+
+/**
+ * Switches which period the dashboard's money numbers cover (T23): the
+ * running academic year (default) or every bill ever. KPI kas/piutang,
+ * rekap per unit, grafik, dan alert keuangan semuanya mengikuti pilihan ini.
+ */
+function BillingPeriodToggle({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: "year" | "all";
+  disabled: boolean;
+  onChange: (next: "year" | "all") => void;
+}) {
+  const options = [
+    { key: "year" as const, label: "TA Berjalan" },
+    { key: "all" as const, label: "Semua Periode" },
+  ];
+
+  return (
+    <div className="flex items-center gap-1 p-1 rounded-xl bg-muted/60 border border-border/60">
+      {options.map((opt) => (
+        <button
+          key={opt.key}
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(opt.key)}
+          className={cn(
+            "rounded-lg px-3 py-1.5 text-xs font-bold transition-colors disabled:opacity-50",
+            value === opt.key
+              ? "bg-card text-foreground shadow-2xs"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
