@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Guru;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Guru\DateRangeRequest;
 use App\Models\AttendanceRecord;
+use App\Models\ClassSchedule;
 use App\Models\Classroom;
 use App\Models\Term;
 use App\Services\Points\PointLedger;
@@ -29,6 +30,19 @@ class ClassroomController extends Controller
             ->orderBy('tingkat')->orderBy('name')
             ->get();
 
+        // Same Asia/Jakarta day-of-week reasoning as schedulesToday() below:
+        // a bare Carbon::now() reports the wrong day for 00:00-07:00 WIB.
+        $today = Carbon::now('Asia/Jakarta')->dayOfWeekIso; // 1 = Senin ... 7 = Minggu
+
+        // One query for every listed classroom's periods today, so the
+        // dashboard can float "classes with lessons today" to its own section
+        // without N+1-ing the schedule per card.
+        $todaySchedules = ClassSchedule::query()
+            ->whereIn('classroom_id', $classrooms->pluck('id'))
+            ->where('day_of_week', $today)
+            ->get()
+            ->groupBy('classroom_id');
+
         return response()->json([
             'classrooms' => $classrooms->map(fn (Classroom $c) => [
                 'ulid' => $c->ulid,
@@ -37,8 +51,27 @@ class ClassroomController extends Controller
                 'is_homeroom' => $c->homeroom_teacher_id === $request->user()->id,
                 'homeroom_teacher' => $c->homeroomTeacher?->name,
                 'student_count' => $c->enrollments()->where('status', 'active')->count(),
+                'schedules_today' => $this->summarizeToday($todaySchedules->get($c->id), $request->user()->id),
             ]),
         ]);
+    }
+
+    /**
+     * The dashboard's "has lessons today" signal: how many periods the class
+     * runs today, which of those the requesting teacher teaches themselves,
+     * and the day's first/last bell. start/end times are plain "HH:MM:SS"
+     * strings, so min()/max() compare correctly as strings.
+     */
+    private function summarizeToday($schedules, int $userId): array
+    {
+        $schedules ??= collect();
+
+        return [
+            'total' => $schedules->count(),
+            'mine' => $schedules->where('teacher_id', $userId)->count(),
+            'first_start' => $schedules->min('start_time'),
+            'last_end' => $schedules->max('end_time'),
+        ];
     }
 
     /** The roster, each student's running point balance for the term alongside it. */
