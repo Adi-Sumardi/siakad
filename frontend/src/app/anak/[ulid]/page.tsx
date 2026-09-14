@@ -78,8 +78,18 @@ function AttendanceHistory({ attendance }: { attendance: AttendanceOverview }) {
       {attendance.records.map((record) => (
         <div key={record.ulid} className="flex items-start justify-between gap-4 px-5 py-3.5">
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-foreground">{tanggal(record.occurred_on)}</p>
-            {record.description && <p className="text-xs text-muted-foreground mt-0.5">{record.description}</p>}
+            <p className="text-sm font-semibold text-foreground">
+              {tanggal(record.date)}
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {record.type === "pulang" ? "Pulang" : "Masuk"}
+              </span>
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {record.is_late && "Terlambat"}
+              {record.is_late && record.checked_in_at && " · "}
+              {record.checked_in_at && `pukul ${record.checked_in_at} WIB`}
+              {!record.checked_in_at && !record.is_late && record.description}
+            </p>
           </div>
           <Badge
             variant={

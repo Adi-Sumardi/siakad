@@ -18,6 +18,7 @@ use App\Models\Term;
 use App\Models\User;
 use App\Services\Academic\WatchlistService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -90,27 +91,37 @@ class DashboardSummaryController extends Controller
             ->get(['id', 'student_id', 'total_amount', 'paid_amount', 'remaining_amount', 'status', 'due_date']);
 
         // ---- Attendance (term-to-date, aggregated in SQL) -------------------
+        // The daily layer is the official source (T14 §8): these counts are
+        // DAYS present/sick/absent, not lesson periods, so a PG/TK unit with
+        // no subject schedule counts the same as an SMA one. Masuk windows
+        // only - a pulang row retells the same day.
         $scopeUnitIds = $units->pluck('id')->all();
 
         $attendanceRows = $term
-            ? (new Collection(DB::table('attendance_records')
-                ->join('students', 'students.id', '=', 'attendance_records.student_id')
-                ->where('attendance_records.term_id', $term->id)
-                ->where('attendance_records.record_status', 'recorded')
-                ->whereIn('students.school_unit_id', $scopeUnitIds)
-                ->selectRaw('students.school_unit_id, attendance_records.attendance_status, count(*) as total')
-                ->groupBy('students.school_unit_id', 'attendance_records.attendance_status')
+            ? (new Collection(DB::table('daily_records')
+                ->join('daily_sessions', 'daily_sessions.id', '=', 'daily_records.daily_session_id')
+                ->where('daily_records.term_id', $term->id)
+                ->where('daily_records.record_status', 'recorded')
+                ->where('daily_sessions.type', 'masuk')
+                ->whereIn('daily_sessions.school_unit_id', $scopeUnitIds)
+                ->selectRaw('daily_sessions.school_unit_id, daily_records.attendance_status, count(*) as total')
+                ->groupBy('daily_sessions.school_unit_id', 'daily_records.attendance_status')
                 ->get()))
             : collect();
 
-        // "Kehadiran hari ini" - same per-session tally but restricted to today's date.
-        $attendanceToday = (new Collection(DB::table('attendance_records')
-            ->join('students', 'students.id', '=', 'attendance_records.student_id')
-            ->where('attendance_records.occurred_on', now()->toDateString())
-            ->where('attendance_records.record_status', 'recorded')
-            ->whereIn('students.school_unit_id', $scopeUnitIds)
-            ->selectRaw('students.school_unit_id, attendance_records.attendance_status, count(*) as total')
-            ->groupBy('students.school_unit_id', 'attendance_records.attendance_status')
+        // "Kehadiran hari ini" - same tally restricted to today's Jakarta
+        // calendar date (the daily layer's date IS the Jakarta date, never
+        // the UTC one app.timezone would pick). whereDate, not a bare
+        // equality string: the column may store a midnight time component
+        // depending on the driver.
+        $attendanceToday = (new Collection(DB::table('daily_records')
+            ->join('daily_sessions', 'daily_sessions.id', '=', 'daily_records.daily_session_id')
+            ->whereDate('daily_records.date', Carbon::now('Asia/Jakarta')->toDateString())
+            ->where('daily_records.record_status', 'recorded')
+            ->where('daily_sessions.type', 'masuk')
+            ->whereIn('daily_sessions.school_unit_id', $scopeUnitIds)
+            ->selectRaw('daily_sessions.school_unit_id, daily_records.attendance_status, count(*) as total')
+            ->groupBy('daily_sessions.school_unit_id', 'daily_records.attendance_status')
             ->get()));
 
         // ---- Grades (current + previous term, for KKM & decline alerts) -----

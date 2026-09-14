@@ -3,24 +3,22 @@
 namespace Tests\Feature;
 
 use App\Models\AcademicYear;
-use App\Models\AttendanceRecord;
-use App\Models\AttendanceSession;
-use App\Models\ClassSchedule;
 use App\Models\Classroom;
+use App\Models\DailyRecord;
+use App\Models\DailySession;
 use App\Models\Enrollment;
 use App\Models\SchoolUnit;
 use App\Models\Student;
-use App\Models\Subject;
 use App\Models\Term;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
  * The class-wide H/S/I/A recap - the teacher's answer to "who in my class
- * keeps missing school". Three things must hold: revoked marks never count
- * (they are corrections, not absences), every roster student is listed zeros
+ * keeps missing school". Since T14 the recap reads the DAILY layer (§8), so
+ * these are DAYS. Three things must hold: revoked marks never count (they
+ * are corrections, not absences), every roster student is listed zeros
  * included (a blank row is itself a finding), and another unit's classroom
  * is a 404, not a 403.
  */
@@ -34,7 +32,6 @@ class GuruAttendanceRecapTest extends TestCase
     private Student $andi;
     private Student $budi;
     private User $guru;
-    private AttendanceSession $session;
 
     protected function setUp(): void
     {
@@ -67,17 +64,6 @@ class GuruAttendanceRecapTest extends TestCase
             'name' => 'Guru SD', 'email' => 'guru'.uniqid().'@yapinet.id', 'role' => 'guru',
             'school_unit_id' => $this->sd->id, 'is_active' => true, 'activated_at' => now(),
         ]);
-
-        $mapel = Subject::create(['school_unit_id' => $this->sd->id, 'code' => 'MTK', 'name' => 'Matematika']);
-        $jadwal = ClassSchedule::create([
-            'classroom_id' => $this->kelas->id, 'subject_id' => $mapel->id, 'teacher_id' => $this->guru->id,
-            'day_of_week' => 1, 'start_time' => '07:00', 'end_time' => '08:00',
-        ]);
-
-        $this->session = AttendanceSession::create([
-            'class_schedule_id' => $jadwal->id, 'occurred_on' => '2026-09-01',
-            'token' => Str::random(64), 'opened_at' => now(), 'expires_at' => now()->addHour(),
-        ]);
     }
 
     private function student(string $nama): Student
@@ -89,16 +75,24 @@ class GuruAttendanceRecapTest extends TestCase
         ]);
     }
 
-    private function mark(Student $siswa, string $status, string $tanggal, array $extra = []): AttendanceRecord
+    private function mark(Student $siswa, string $status, string $tanggal, array $extra = []): DailyRecord
     {
-        return AttendanceRecord::create([
+        // One masuk window per day for the unit, exactly what the scheduler
+        // would have opened - the recap groups by the record's denormalized
+        // date + classroom, so no service calls needed here.
+        $session = DailySession::firstOrCreate(
+            ['school_unit_id' => $this->sd->id, 'date' => $tanggal, 'type' => 'masuk'],
+            ['opens_at' => "{$tanggal} 06:30:00", 'closes_at' => "{$tanggal} 08:00:00", 'status' => 'closed'],
+        );
+
+        return DailyRecord::create([
+            'daily_session_id' => $session->id,
             'student_id' => $siswa->id,
-            'attendance_session_id' => $this->session->id,
             'classroom_id' => $this->kelas->id,
             'term_id' => Term::first()->id,
+            'date' => $tanggal,
             'attendance_status' => $status,
-            'occurred_on' => $tanggal,
-            'source' => 'guru',
+            'source' => 'wali_kelas',
             'recorded_by' => $this->guru->id,
             ...$extra,
         ]);

@@ -62,3 +62,15 @@ Schedule::command('payments:poll-billing-va')
     ->withoutOverlapping()
     ->description('Periksa status pelunasan Virtual Account Bank Muamalat (e-SPP)');
 
+// The daily attendance heartbeat (T14): opens each unit's masuk/pulang
+// sessions from its own settings and closes windows that have ended -
+// closing a morning window sweeps unmarked students into alpa + WhatsApp.
+// Idempotent both ways: the (unit, date, type) unique stops double opens,
+// the status column stops double closes. Every few minutes rather than
+// fixed hours so a mid-morning settings edit applies the same day.
+Schedule::command('attendance:daily-sweep')
+    ->everyFiveMinutes()
+    ->name('sweep-daily-attendance')
+    ->withoutOverlapping()
+    ->description('Buka/tutup sesi presensi harian sesuai setting unit');
+

@@ -101,6 +101,12 @@ class Student extends Model
         return $this->hasMany(AttendanceRecord::class);
     }
 
+    /** The daily layer's marks (T14) - the official attendance source since §8. */
+    public function dailyRecords(): HasMany
+    {
+        return $this->hasMany(DailyRecord::class);
+    }
+
     public function extracurricularMemberships(): HasMany
     {
         return $this->hasMany(ExtracurricularMember::class);

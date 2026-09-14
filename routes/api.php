@@ -4,6 +4,8 @@ use App\Http\Controllers\Api\Admin\AchievementController as AdminAchievementCont
 use App\Http\Controllers\Api\Admin\AnnouncementController as AdminAnnouncementController;
 use App\Http\Controllers\Api\Admin\BillController as AdminBillController;
 use App\Http\Controllers\Api\Admin\BillingRunController;
+use App\Http\Controllers\Api\Admin\DailyAttendanceSessionController;
+use App\Http\Controllers\Api\Admin\DailyAttendanceSettingController;
 use App\Http\Controllers\Api\Admin\FeeSettingController;
 use App\Http\Controllers\Api\Admin\PointController as AdminPointController;
 use App\Http\Controllers\Api\Admin\PointRuleController;
@@ -17,9 +19,11 @@ use App\Http\Controllers\Api\FileController;
 use App\Http\Controllers\Api\Guru\AchievementController as GuruAchievementController;
 use App\Http\Controllers\Api\Guru\AttendanceSessionController as GuruAttendanceSessionController;
 use App\Http\Controllers\Api\Guru\ClassroomController as GuruClassroomController;
+use App\Http\Controllers\Api\Guru\DailyAttendanceController as GuruDailyAttendanceController;
 use App\Http\Controllers\Api\Guru\GradeController as GuruGradeController;
 use App\Http\Controllers\Api\Guru\PointController as GuruPointController;
 use App\Http\Controllers\Api\Public\AttendancePresensiController;
+use App\Http\Controllers\Api\Public\DailyGateController;
 use App\Http\Controllers\Api\Wali\AchievementController as WaliAchievementController;
 use App\Http\Controllers\Api\Wali\AnnouncementController as WaliAnnouncementController;
 use App\Http\Controllers\Api\Wali\AttendanceController as WaliAttendanceController;
@@ -88,6 +92,18 @@ Route::prefix('presensi')->middleware('throttle:300,1')->group(function () {
     Route::post('/{token}/check-in', [AttendancePresensiController::class, 'checkIn']);
 });
 
+// The daily gate check-in (T14 mode gerbang, DESAIN-PRESENSI-HARIAN.md §5D).
+// Same unauthenticated shape as /presensi above: the unit's public_slug is
+// the only credential, and the whole morning can scan in over one school
+// WiFi egress IP - hence the shared 300/min bucket, not the usual 60.
+// GET only reads today's window; it never lazily creates one - sessions are
+// written by the scheduler and the staff boards, never by anonymous traffic.
+Route::prefix('absen')->middleware('throttle:300,1')->group(function () {
+    Route::get('/{slug}', [DailyGateController::class, 'show']);
+    Route::post('/{slug}/lookup', [DailyGateController::class, 'lookup']);
+    Route::post('/{slug}/check-in', [DailyGateController::class, 'checkIn']);
+});
+
 Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(function () {
     Route::get('/students', [WaliDashboardController::class, 'index']);
 
@@ -130,6 +146,12 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     // Term-to-date H/S/I/A per student - the class-wide view the live
     // session roster can never give (it only ever shows one lesson period).
     Route::get('/classrooms/{ulid}/attendance', [GuruClassroomController::class, 'attendanceRecap']);
+
+    // Daily attendance (T14, mode wali_kelas): the homeroom teacher's
+    // marking board - today's masuk/pulang windows over their own roster,
+    // re-marking supersedes so a correction is one tap.
+    Route::get('/daily-attendance/today', [GuruDailyAttendanceController::class, 'today']);
+    Route::post('/daily-attendance/sessions/{ulid}/records', [GuruDailyAttendanceController::class, 'mark']);
 
     Route::get('/point-rules', [GuruPointController::class, 'rules']);
     Route::get('/students/{ulid}/points', [GuruPointController::class, 'studentLedger']);
@@ -304,6 +326,20 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 
     Route::get('/grades', [\App\Http\Controllers\Api\Admin\GradeController::class, 'index']);
     Route::get('/students/{ulid}/rapor', [\App\Http\Controllers\Api\Admin\GradeController::class, 'rapor']);
+
+    // Daily attendance (T14, DESAIN-PRESENSI-HARIAN.md): a unit's own bells
+    // and gate policy plus today's monitoring board. A per-unit admin edits
+    // only their unit's row - the controller forces the unit rather than
+    // trusting the parameter (the BillingRun line).
+    Route::get('/daily-attendance/settings', [DailyAttendanceSettingController::class, 'index']);
+    Route::patch('/daily-attendance/settings', [DailyAttendanceSettingController::class, 'update']);
+    Route::get('/daily-attendance/today', [DailyAttendanceSessionController::class, 'today']);
+    // Gate mode: the unit's public check-in link (issue once, rotate on a
+    // leak), the rotating QR the TU screen polls, and the manual mark lane.
+    Route::post('/daily-attendance/public-link', [DailyAttendanceSettingController::class, 'issuePublicLink']);
+    Route::post('/daily-attendance/public-link/reset', [DailyAttendanceSettingController::class, 'resetPublicLink']);
+    Route::get('/daily-attendance/sessions/{ulid}/gate-qr', [DailyAttendanceSessionController::class, 'gateQr']);
+    Route::post('/daily-attendance/sessions/{ulid}/records', [DailyAttendanceSessionController::class, 'mark']);
 });
 
 /*

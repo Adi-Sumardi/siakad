@@ -4,7 +4,7 @@ namespace App\Services\Academic;
 
 use App\Models\Student;
 use App\Models\Term;
-use App\Services\Attendance\AttendanceLedger;
+use App\Services\Attendance\DailyAttendanceService;
 use App\Services\Points\PointLedger;
 use Barryvdh\DomPDF\Facade\Pdf;
 
@@ -13,8 +13,9 @@ use Barryvdh\DomPDF\Facade\Pdf;
  * point summaries those two features already compute, so a rapor reads as
  * one coherent picture instead of three separate exports. Same
  * generate-on-request shape as BillPdfService: nothing is stored, this
- * builds the PDF fresh from grades/attendance_records/point_records every
- * time it's requested.
+ * builds the PDF fresh from grades/daily_records/point_records every
+ * time it's requested. Attendance counts DAYS (the daily layer, §8) -
+ * "Hadir 120 hari", never lesson periods.
  */
 class RaporPdfService
 {
@@ -33,7 +34,7 @@ class RaporPdfService
             'term' => $term,
             'kelas' => $student->currentEnrollment()?->classroom?->name,
             'subjects' => $grades->summaryForRapor($student, $term),
-            'attendance' => app(AttendanceLedger::class)->summary($student, $term),
+            'attendance' => app(DailyAttendanceService::class)->summary($student, $term),
             'pointBalance' => app(PointLedger::class)->balance($student, $term),
             'schoolName' => config('app.name'),
             'logoBase64' => $logoBase64,

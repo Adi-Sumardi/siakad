@@ -4,9 +4,9 @@ namespace App\Http\Controllers\Api\Guru;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Guru\DateRangeRequest;
-use App\Models\AttendanceRecord;
 use App\Models\ClassSchedule;
 use App\Models\Classroom;
+use App\Models\DailyRecord;
 use App\Models\Term;
 use App\Services\Points\PointLedger;
 use Illuminate\Http\JsonResponse;
@@ -135,14 +135,20 @@ class ClassroomController extends Controller
             ->sortBy('nama_lengkap')
             ->values();
 
-        $tallies = AttendanceRecord::query()
+        $tallies = DailyRecord::query()
             ->active()
-            // classroom_id + occurred_on are denormalized onto every record
-            // exactly so a report like this never joins through the schedule;
-            // occurred_on carries a time component, so bound with
-            // start/end-of-day timestamps (same note as the admin report).
+            // The daily layer is the official source (§8): these are DAYS a
+            // student was present/sick/absent, not lesson periods - the same
+            // numbers the rapor and the watchlist quote. classroom_id + date
+            // are denormalized onto every row so this never joins through
+            // the session. date can carry a midnight time component
+            // depending on the driver, so bound with full start/end-of-day
+            // timestamps (same note as the admin report). Pulang windows are
+            // excluded: they retell the same day's story, they don't add a
+            // second day of it.
             ->where('classroom_id', $classroom->id)
-            ->whereBetween('occurred_on', [$from, $to])
+            ->whereBetween('date', [$from, $to])
+            ->whereHas('dailySession', fn ($q) => $q->where('type', 'masuk'))
             ->selectRaw('student_id, attendance_status, count(*) as n')
             ->groupBy('student_id', 'attendance_status')
             ->get()

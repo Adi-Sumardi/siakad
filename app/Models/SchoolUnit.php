@@ -45,6 +45,11 @@ class SchoolUnit extends Model
         return $this->hasMany(Student::class);
     }
 
+    public function dailyAttendanceSetting()
+    {
+        return $this->hasOne(DailyAttendanceSetting::class);
+    }
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);

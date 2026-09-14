@@ -5,7 +5,6 @@ namespace App\Services\Attendance;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\ClassSchedule;
-use App\Models\Student;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -73,22 +72,13 @@ class AttendanceSessionService
         }
     }
 
-    /** Closes the session and syncs the enrollment rollup once for every student touched in it - self check-ins never sync per-scan, so this is where that catches up. */
-    public function close(AttendanceSession $session, AttendanceLedger $ledger): void
+    /** Closes the session. The enrollment rollup is no longer synced here: since the daily layer (T14) became the official attendance source, that rollup is fed by DailyAttendanceService - lesson-period data never touches it. */
+    public function close(AttendanceSession $session): void
     {
         $session->forceFill([
             'status' => 'closed',
             'closed_at' => now(),
         ])->save();
-
-        $students = Student::whereIn('id', AttendanceRecord::where('attendance_session_id', $session->id)
-            ->active()
-            ->pluck('student_id')
-            ->unique())->get();
-
-        foreach ($students as $student) {
-            $ledger->syncEnrollmentRollup($student);
-        }
     }
 
     /** Roster for the guru panel: every active student in the schedule's classroom, plus who has checked in. */

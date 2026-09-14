@@ -7,6 +7,8 @@ use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\Classroom;
 use App\Models\ClassSchedule;
+use App\Models\DailyRecord;
+use App\Models\DailySession;
 use App\Models\Enrollment;
 use App\Models\SchoolUnit;
 use App\Models\Student;
@@ -58,6 +60,26 @@ class AttendanceSessionTest extends TestCase
             'school_unit_id' => $unit->id,
             'academic_year_id' => $this->term->academic_year_id,
             'name' => '1-A', 'tingkat' => 1,
+        ]);
+    }
+
+    /** A daily-layer mark (the official report source since T14 §8), seeded straight - the service paths have their own DailyAttendanceTest. */
+    private function dailyMark(Student $student, Classroom $classroom, string $status, string $date): DailyRecord
+    {
+        $session = DailySession::firstOrCreate(
+            ['school_unit_id' => $classroom->school_unit_id, 'date' => $date, 'type' => 'masuk'],
+            ['opens_at' => "{$date} 06:30:00", 'closes_at' => "{$date} 08:00:00", 'status' => 'closed'],
+        );
+
+        return DailyRecord::create([
+            'daily_session_id' => $session->id,
+            'student_id' => $student->id,
+            'classroom_id' => $classroom->id,
+            'term_id' => $this->term->id,
+            'date' => $date,
+            'attendance_status' => $status,
+            'source' => 'tu',
+            'record_status' => 'recorded',
         ]);
     }
 
@@ -358,8 +380,12 @@ class AttendanceSessionTest extends TestCase
             'student_id' => $sakit->id, 'attendance_status' => 'sakit', 'source' => 'guru',
         ]);
 
+        // Since the daily layer (T14) became the official attendance source,
+        // lesson data no longer feeds the enrollment rollup the watchlist
+        // reads - a lesson-period sakit is detail, not a day. The rollup's
+        // daily-fed counterpart is covered in DailyAttendanceTest.
         $enrollment = $sakit->currentEnrollment();
-        $this->assertSame(1, $enrollment->fresh()->sick_count);
+        $this->assertSame(0, $enrollment->fresh()->sick_count);
     }
 
     // --- Ledger internals ----------------------------------------------------
@@ -396,42 +422,33 @@ class AttendanceSessionTest extends TestCase
     }
 
     // --- Admin report ----------------------------------------------------
+    // Since T14 the admin report reads the DAILY layer (§8): DAYS present,
+    // grouped by class and unit. Per-lesson detail stays with the teacher's
+    // session screens and never reaches this cross-unit report anymore.
 
-    public function test_the_admin_attendance_report_aggregates_by_class_and_subject_within_the_date_range(): void
+    public function test_the_admin_attendance_report_aggregates_by_class_and_unit_within_the_date_range(): void
     {
         $classroom = $this->classroomIn($this->sd);
-        $this->studentIn($classroom, nis: '20014');
-        $schedule = $this->scheduleFor($classroom, $this->subject());
-        $guru = $this->staff('guru', $this->sd);
+        $student = $this->studentIn($classroom, nis: '20014');
         $admin = $this->staff('admin_unit', $this->sd);
-        $session = $this->openSession($schedule, $guru);
 
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20014']);
+        $this->dailyMark($student, $classroom, 'hadir', Carbon::today()->toDateString());
 
         $response = $this->actingAs($admin)->getJson('/api/admin/reports/attendance')->assertStatus(200);
 
         $this->assertSame(1, $response->json('summary.hadir'));
         $this->assertSame(1, $response->json('summary.total_records'));
         $this->assertSame($classroom->name, $response->json('by_class.0.kelas'));
-        $this->assertSame('Bahasa Indonesia', $response->json('by_subject.0.mata_pelajaran'));
+        $this->assertSame('SD Sakinah', $response->json('by_unit.0.unit'));
     }
 
-    /**
-     * Regression test: occurred_on is stored with a time component even
-     * though it is conceptually date-only (Eloquent's `date` cast), so a
-     * naive whereBetween(occurred_on, [$from->toDateString(), $to->toDateString()])
-     * would sort a same-day record's "00:00:00" timestamp after the
-     * date-only upper bound string and silently drop it from the range.
-     */
     public function test_a_record_that_occurred_today_is_included_when_the_report_range_ends_today(): void
     {
         $classroom = $this->classroomIn($this->sd);
-        $this->studentIn($classroom, nis: '20015');
-        $schedule = $this->scheduleFor($classroom, $this->subject());
-        $guru = $this->staff('guru', $this->sd);
+        $student = $this->studentIn($classroom, nis: '20015');
         $admin = $this->staff('admin_unit', $this->sd);
-        $session = $this->openSession($schedule, $guru);
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20015']);
+
+        $this->dailyMark($student, $classroom, 'hadir', Carbon::today()->toDateString());
 
         $today = Carbon::today()->toDateString();
         $response = $this->actingAs($admin)
@@ -468,18 +485,13 @@ class AttendanceSessionTest extends TestCase
     public function test_an_admin_unit_only_sees_attendance_for_their_own_units_students_in_the_report(): void
     {
         $sdClassroom = $this->classroomIn($this->sd);
-        $this->studentIn($sdClassroom, nis: '20017');
-        $sdSchedule = $this->scheduleFor($sdClassroom, $this->subject());
-        $sdGuru = $this->staff('guru', $this->sd);
-        $sdSession = $this->openSession($sdSchedule, $sdGuru);
-        $this->postJson("/api/presensi/{$sdSession->token}/check-in", ['nis' => '20017']);
-
+        $sdStudent = $this->studentIn($sdClassroom, nis: '20017');
         $smpClassroom = $this->classroomIn($this->smp);
-        $this->studentIn($smpClassroom, nis: '20018');
-        $smpSchedule = $this->scheduleFor($smpClassroom, $this->subject());
-        $smpGuru = $this->staff('guru', $this->smp);
-        $smpSession = $this->openSession($smpSchedule, $smpGuru);
-        $this->postJson("/api/presensi/{$smpSession->token}/check-in", ['nis' => '20018']);
+        $smpStudent = $this->studentIn($smpClassroom, nis: '20018');
+
+        $today = Carbon::today()->toDateString();
+        $this->dailyMark($sdStudent, $sdClassroom, 'hadir', $today);
+        $this->dailyMark($smpStudent, $smpClassroom, 'hadir', $today);
 
         $sdAdmin = $this->staff('admin_unit', $this->sd);
 

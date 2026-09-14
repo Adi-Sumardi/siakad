@@ -131,7 +131,7 @@ class AttendanceSessionController extends Controller
             }
         }
 
-        $sessions->close($session, $ledger);
+        $sessions->close($session);
 
         ActivityLog::record($request->user(), 'attendance.session_completed', $session, [
             'manual_records' => $entries->count(),
