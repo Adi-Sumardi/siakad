@@ -21,13 +21,29 @@ type RosterResponse = {
 const MANUAL_STATUS_OPTIONS: AttendanceStatus[] = ["sakit", "izin", "alpa", "hadir"];
 
 /**
- * The roll-call screen's rotating QR - the same 30-second HMAC window the
- * gate uses (RotatingQrService). THIS is the credential that gets a student
- * counted; the static URL QR beside it only opens the form. Tampilkan di
- * proyektor/laptop dan biarkan terbuka - kode berganti sendiri tiap ±30
- * detik, jadi foto yang disebar mati dalam semenit.
+ * The API builds checkin_url from config('app.frontend_url'), which in a
+ * tunnel/ngrok field test disagrees with the origin the teacher's browser is
+ * actually on (localhost vs the tunnel host) - a QR baked from it is dead on
+ * a student's phone. This page is already on an origin that reaches the app,
+ * so keep only the path and rebase it onto the current origin.
  */
-function RotatingQrPanel({ sessionUlid }: { sessionUlid: string }) {
+function publicCheckinUrl(rawUrl: string): string {
+  try {
+    return window.location.origin + new URL(rawUrl).pathname;
+  } catch {
+    return rawUrl;
+  }
+}
+
+/**
+ * The roll-call screen's ONE QR - the same 30-second HMAC window the gate
+ * uses (RotatingQrService), carrying the session URL too: scanning it with
+ * the phone's own camera opens the check-in page AND delivers the fresh
+ * window code in the URL hash, so there is no separate static URL QR to
+ * share (a photographed one outlives the lesson; this one dies in ±a
+ * minute). The 8 characters below are the manual-typing fallback.
+ */
+function RotatingQrPanel({ sessionUlid, checkinUrl }: { sessionUlid: string; checkinUrl: string }) {
   const [qr, setQr] = useState<{ code: string; rotates_in: number } | null>(null);
   const [closed, setClosed] = useState(false);
 
@@ -72,18 +88,19 @@ function RotatingQrPanel({ sessionUlid }: { sessionUlid: string }) {
   return (
     <Card className="flex flex-col items-center gap-2 p-6">
       <p className="text-xs font-medium text-muted-foreground">
-        Langkah 2 — setelah NIS, siswa scan QR ini untuk tercatat hadir
+        Siswa scan QR ini dengan kamera HP — halaman presensi terbuka langsung
       </p>
       {qr ? (
         <>
-          <QRCodeSVG value={qr.code} size={180} className="rounded-lg bg-white p-2" />
+          <QRCodeSVG value={`${checkinUrl}#${qr.code}`} size={208} className="rounded-lg bg-white p-2" />
           <p className="font-mono text-lg font-bold tracking-[0.25em]">{qr.code}</p>
           <p className="text-xs text-muted-foreground">
-            Berganti otomatis tiap ±{qr.rotates_in} detik — biarkan halaman ini terbuka.
+            Berganti otomatis tiap ±{qr.rotates_in} detik — biarkan halaman ini terbuka. Kode 8 karakter di atas
+            untuk siswa yang kamera HP-nya bermasalah.
           </p>
         </>
       ) : (
-        <Skeleton className="h-44 w-44" />
+        <Skeleton className="h-52 w-52" />
       )}
     </Card>
   );
@@ -202,17 +219,7 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
       </div>
 
       {roster?.session.is_open ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <RotatingQrPanel sessionUlid={sessionUlid} />
-          <Card className="flex flex-col items-center justify-center gap-3 p-6">
-            <p className="text-xs font-medium text-muted-foreground">Langkah 1 — siswa buka halaman presensi</p>
-            {roster ? <QRCodeSVG value={roster.checkin_url} size={140} /> : <Skeleton className="size-35" />}
-            <p className="text-xs text-muted-foreground">
-              Scan ini (atau buka link dari grup) membuka form NIS — baru dihitung hadir setelah menyelesaikan
-              langkah 2.
-            </p>
-          </Card>
-        </div>
+        <RotatingQrPanel sessionUlid={sessionUlid} checkinUrl={publicCheckinUrl(roster.checkin_url)} />
       ) : (
         <Card className="flex flex-col items-center gap-3 p-6">
           <p className="text-xs font-medium text-muted-foreground">Sesi ditutup — QR tidak lagi diterbitkan</p>

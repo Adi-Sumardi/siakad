@@ -43,6 +43,25 @@ export default function PresensiPage({ params }: { params: Promise<{ token: stri
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // A native-camera scan of the teacher's rotating QR opens this page with
+  // the window code in the URL hash - read it up front (it never affects
+  // the first paint, both server and client render the loading screen), and
+  // clear it below so a refresh never resubmits a code that has since
+  // expired. A slow NIS typer may still outrun the ~60 s code life; that
+  // path falls through to the in-page scanner.
+  const [presetCode, setPresetCode] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const hash = window.location.hash.replace(/^#/, "").trim().toUpperCase();
+
+    return /^[0-9A-F]{8}$/.test(hash) ? hash : null;
+  });
+
+  useEffect(() => {
+    if (window.location.hash) {
+      history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
+
   // Same stale-closure dance as the gate page: the scanner submits the
   // moment it reads a code, through a ref that always sees the latest screen.
   const screenRef = useRef(screen);
@@ -97,15 +116,20 @@ export default function PresensiPage({ params }: { params: Promise<{ token: stri
     }
   }
 
-  /** The one write - fires the instant a code arrives, from camera, gallery or keyboard. */
+  /** The one write - fires the instant a code arrives, from camera, gallery, keyboard or the native-scan hash. */
   async function submitCheckIn(code: string, confirmedNis: string, name: string) {
     setBusy(true);
     setError("");
 
+    // The teacher's QR carries "{url}#{code}" - the in-page camera and the
+    // gallery decoder hand that whole string back; only the code after the
+    // last # is the credential.
+    const normalized = code.includes("#") ? (code.split("#").pop() ?? code) : code;
+
     try {
       const result = await api.post<{ student: { nama_panggilan: string } }>(`/api/presensi/${token}/check-in`, {
         nis: confirmedNis,
-        qr_code: code,
+        qr_code: normalized,
         device_id: deviceId(),
       });
 
@@ -113,11 +137,17 @@ export default function PresensiPage({ params }: { params: Promise<{ token: stri
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setScreen({ step: "already", name });
-      } else {
+      } else if (screenRef.current.step === "scan") {
         // Show it right on the scan step and re-arm the camera - an expired
         // window just means "point at the screen again".
         setError(err instanceof ApiError ? err.message : "Presensi gagal diproses. Coba lagi.");
         rearm();
+      } else {
+        // Most often a stale preset code from the native-camera scan: drop
+        // to the in-page scanner so the student re-reads the screen.
+        setPresetCode(null);
+        setError(err instanceof ApiError ? err.message : "Presensi gagal diproses. Coba lagi.");
+        setScreen({ step: "scan", nis: confirmedNis, name });
       }
     } finally {
       setBusy(false);
@@ -211,6 +241,11 @@ export default function PresensiPage({ params }: { params: Promise<{ token: stri
             <p className="text-sm text-muted-foreground">Konfirmasi kehadiran</p>
             <p className="text-2xl font-bold">{screen.name}</p>
             <p className="text-xs text-muted-foreground">NIS {screen.nis}</p>
+            {presetCode && (
+              <p className="text-xs text-muted-foreground">
+                Kode QR dari kamera sudah terbawa — cukup konfirmasi, tidak perlu scan lagi.
+              </p>
+            )}
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setScreen({ step: "idle" })} disabled={busy}>
                 Bukan saya
@@ -218,9 +253,23 @@ export default function PresensiPage({ params }: { params: Promise<{ token: stri
               <Button
                 className="flex-1"
                 disabled={busy}
-                onClick={() => setScreen({ step: "scan", nis: screen.nis, name: screen.name })}
+                onClick={() => {
+                  if (presetCode) {
+                    submitCheckIn(presetCode, screen.nis, screen.name);
+                  } else {
+                    setScreen({ step: "scan", nis: screen.nis, name: screen.name });
+                  }
+                }}
               >
-                <ScanLine className="size-4" /> Ya, scan QR
+                {busy ? (
+                  "Menyimpan…"
+                ) : presetCode ? (
+                  "Ya, ini saya"
+                ) : (
+                  <>
+                    <ScanLine className="size-4" /> Ya, scan QR
+                  </>
+                )}
               </Button>
             </div>
           </div>
