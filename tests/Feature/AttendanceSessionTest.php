@@ -143,9 +143,14 @@ class AttendanceSessionTest extends TestCase
         $guru = $this->staff('guru', $this->sd);
         $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
 
-        $this->actingAs($guru)->postJson("/api/guru/schedules/{$schedule->ulid}/attendance-sessions")
+        $response = $this->actingAs($guru)->postJson("/api/guru/schedules/{$schedule->ulid}/attendance-sessions")
             ->assertStatus(200)
-            ->assertJsonStructure(['session' => ['ulid', 'token', 'expires_at'], 'checkin_url']);
+            ->assertJsonStructure(['session' => ['ulid', 'token', 'expires_at'], 'checkin_path']);
+
+        // Path-only by design (T28): the server cannot know the caller's
+        // public origin (dev proxy / ngrok tunnel / production), so it must
+        // never bake an absolute URL - callers rebase onto their own origin.
+        $this->assertSame('/presensi/'.$response->json('session.token'), $response->json('checkin_path'));
 
         $this->assertDatabaseCount('attendance_sessions', 1);
     }

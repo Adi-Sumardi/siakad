@@ -11,8 +11,8 @@ import { api, ApiError } from "@/lib/api";
 
 /**
  * The per-lesson check-in (SMP/SMA mapel). The teacher's screen shows ONE
- * rotating QR carrying "{checkin_url}#{code}" - scanning it with the phone's
- * own camera opens this page AND delivers the fresh window code, which is
+ * rotating QR carrying "{origin}{checkin_path}#{code}" - scanning it with the
+ * phone's own camera opens this page AND delivers the fresh window code, which is
  * the real credential (the URL alone proves nothing). Phones that have
  * checked in before also remember their NIS, so that scan lands straight on
  * a one-tap confirm - "langsung hadir" after the first ever typing. A URL

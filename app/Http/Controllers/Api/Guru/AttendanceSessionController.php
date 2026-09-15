@@ -48,7 +48,7 @@ class AttendanceSessionController extends Controller
                 'token' => $session->token,
                 'expires_at' => $session->expires_at,
             ],
-            'checkin_url' => rtrim((string) config('app.frontend_url'), '/').'/presensi/'.$session->token,
+            'checkin_path' => $this->checkinPath($session),
         ]);
     }
 
@@ -91,7 +91,7 @@ class AttendanceSessionController extends Controller
             // ClassSchedule::visibleTo(), so only a teacher already
             // authorized for this classroom sees it - the QR still needs to
             // survive a page reload without re-opening the session.
-            'checkin_url' => rtrim((string) config('app.frontend_url'), '/').'/presensi/'.$session->token,
+            'checkin_path' => $this->checkinPath($session),
             'students' => $sessions->roster($session),
         ]);
     }
@@ -175,5 +175,17 @@ class AttendanceSessionController extends Controller
             'classSchedule',
             fn ($q) => $q->visibleTo($request->user())->where('teacher_id', $request->user()->id)
         )->where('ulid', $sessionUlid)->firstOrFail();
+    }
+
+    /**
+     * Path-only on purpose: the server cannot know which origin reaches the
+     * frontend for a given caller (dev proxy, ngrok tunnel, production domain
+     * all differ), and an absolute URL baked from app.frontend_url produced
+     * dead QR codes in the 2026-09-15 tunnel test. Callers rebase this path
+     * onto their own origin - only they know it.
+     */
+    private function checkinPath(AttendanceSession $session): string
+    {
+        return '/presensi/'.$session->token;
     }
 }

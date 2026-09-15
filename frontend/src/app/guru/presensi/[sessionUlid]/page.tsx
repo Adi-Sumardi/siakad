@@ -14,25 +14,20 @@ import { ATTENDANCE_STATUS_LABEL, type AttendanceRosterEntry, type AttendanceSta
 
 type RosterResponse = {
   session: { ulid: string; is_open: boolean; expires_at: string };
-  checkin_url: string;
+  checkin_path: string;
   students: AttendanceRosterEntry[];
 };
 
 const MANUAL_STATUS_OPTIONS: AttendanceStatus[] = ["sakit", "izin", "alpa", "hadir"];
 
 /**
- * The API builds checkin_url from config('app.frontend_url'), which in a
- * tunnel/ngrok field test disagrees with the origin the teacher's browser is
- * actually on (localhost vs the tunnel host) - a QR baked from it is dead on
- * a student's phone. This page is already on an origin that reaches the app,
- * so keep only the path and rebase it onto the current origin.
+ * The API returns only the check-in PATH (/presensi/{token}): the server
+ * cannot know which origin reaches the app for a given caller (localhost vs
+ * an ngrok tunnel host in the 2026-09-15 field test). This page is already
+ * on an origin that reaches the app, so it prefixes its own.
  */
-function publicCheckinUrl(rawUrl: string): string {
-  try {
-    return window.location.origin + new URL(rawUrl).pathname;
-  } catch {
-    return rawUrl;
-  }
+function publicCheckinUrl(path: string): string {
+  return window.location.origin + path;
 }
 
 /**
@@ -219,7 +214,7 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
       </div>
 
       {roster?.session.is_open ? (
-        <RotatingQrPanel sessionUlid={sessionUlid} checkinUrl={publicCheckinUrl(roster.checkin_url)} />
+        <RotatingQrPanel sessionUlid={sessionUlid} checkinUrl={publicCheckinUrl(roster.checkin_path)} />
       ) : (
         <Card className="flex flex-col items-center gap-3 p-6">
           <p className="text-xs font-medium text-muted-foreground">Sesi ditutup — QR tidak lagi diterbitkan</p>
