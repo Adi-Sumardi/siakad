@@ -783,6 +783,72 @@ class AttendanceSessionTest extends TestCase
         }
     }
 
+    public function test_todays_periods_report_their_realtime_status_and_the_dashboard_counts_mine(): void
+    {
+        $classroom = $this->classroomIn($this->sd);
+        $guru = $this->staff('guru', $this->sd);
+
+        // 07:00-08:30 taught by the guru; 09:00-10:00 owned by nobody - the
+        // "Belum ada guru" data gap the panel now names instead of dressing
+        // it up as "bukan jadwal Anda".
+        $mine = ClassSchedule::create([
+            'classroom_id' => $classroom->id, 'subject_id' => $this->subject()->id, 'teacher_id' => $guru->id,
+            'day_of_week' => Carbon::now('Asia/Jakarta')->dayOfWeekIso, 'start_time' => '07:00', 'end_time' => '08:30',
+        ]);
+        ClassSchedule::create([
+            'classroom_id' => $classroom->id, 'subject_id' => $this->subject()->id, 'teacher_id' => null,
+            'day_of_week' => Carbon::now('Asia/Jakarta')->dayOfWeekIso, 'start_time' => '09:00', 'end_time' => '10:00',
+        ]);
+
+        // Jump the clock without changing the day-of-week the queries read.
+        $at = fn (string $time) => Carbon::setTestNow(
+            Carbon::now('Asia/Jakarta')->copy()->setTimeFromTimeString($time)->utc()
+        );
+
+        try {
+            $statusOf = function (array $schedules, string $ulid) {
+                return collect($schedules)->firstWhere('ulid', $ulid)['status'];
+            };
+
+            // Before the first bell: everything upcoming, nothing ongoing.
+            $at('06:00');
+            $response = $this->actingAs($guru)
+                ->getJson("/api/guru/classrooms/{$classroom->ulid}/schedules/today")->assertStatus(200);
+            $this->assertSame('upcoming', $statusOf($response->json('schedules'), $mine->ulid));
+            $unassigned = collect($response->json('schedules'))->first(fn ($s) => str_starts_with($s['start_time'], '09:00'));
+            $this->assertNull($unassigned['teacher']);
+            $this->assertFalse($unassigned['is_mine']);
+            $summary = collect($this->actingAs($guru)->getJson('/api/guru/classrooms')->json('classrooms'))
+                ->firstWhere('ulid', $classroom->ulid)['schedules_today'];
+            $this->assertSame(1, $summary['mine_upcoming']);
+            $this->assertSame(0, $summary['mine_ongoing']);
+
+            // Mid-lesson: the period is ongoing and the dashboard says so.
+            $at('07:10');
+            $response = $this->actingAs($guru)
+                ->getJson("/api/guru/classrooms/{$classroom->ulid}/schedules/today")->assertStatus(200);
+            $this->assertSame('ongoing', $statusOf($response->json('schedules'), $mine->ulid));
+            $summary = collect($this->actingAs($guru)->getJson('/api/guru/classrooms')->json('classrooms'))
+                ->firstWhere('ulid', $classroom->ulid)['schedules_today'];
+            $this->assertSame(0, $summary['mine_upcoming']);
+            $this->assertSame(1, $summary['mine_ongoing']);
+
+            // After the last bell of the teacher's own period: done, and the
+            // dashboard no longer glows "Anda Mengajar" for it.
+            $at('09:30');
+            $response = $this->actingAs($guru)
+                ->getJson("/api/guru/classrooms/{$classroom->ulid}/schedules/today")->assertStatus(200);
+            $this->assertSame('done', $statusOf($response->json('schedules'), $mine->ulid));
+            $summary = collect($this->actingAs($guru)->getJson('/api/guru/classrooms')->json('classrooms'))
+                ->firstWhere('ulid', $classroom->ulid)['schedules_today'];
+            $this->assertSame(1, $summary['mine']);
+            $this->assertSame(0, $summary['mine_upcoming']);
+            $this->assertSame(0, $summary['mine_ongoing']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_check_in_is_rejected_cleanly_when_there_is_no_active_term(): void
     {
         $this->term->update(['is_active' => false]);

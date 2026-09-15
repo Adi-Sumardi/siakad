@@ -58,20 +58,40 @@ class ClassroomController extends Controller
 
     /**
      * The dashboard's "has lessons today" signal: how many periods the class
-     * runs today, which of those the requesting teacher teaches themselves,
-     * and the day's first/last bell. start/end times are plain "HH:MM:SS"
-     * strings, so min()/max() compare correctly as strings.
+     * runs today, which of those the requesting teacher teaches themselves
+     * (split by realtime status, so "Anda Mengajar" can stop glowing on a
+     * period that ended hours ago), and the day's first/last bell. start/end
+     * times are plain "HH:MM:SS" strings, so min()/max() compare correctly
+     * as strings.
      */
     private function summarizeToday($schedules, int $userId): array
     {
         $schedules ??= collect();
+        $mine = $schedules->where('teacher_id', $userId);
 
         return [
             'total' => $schedules->count(),
-            'mine' => $schedules->where('teacher_id', $userId)->count(),
+            'mine' => $mine->count(),
+            'mine_ongoing' => $mine->filter(fn ($s) => $this->periodIs($s, 'ongoing'))->count(),
+            'mine_upcoming' => $mine->filter(fn ($s) => $this->periodIs($s, 'upcoming'))->count(),
             'first_start' => $schedules->min('start_time'),
             'last_end' => $schedules->max('end_time'),
         ];
+    }
+
+    /** The period's realtime state - upcoming/ongoing/done - judged on the Jakarta wall clock ("HH:MM:SS" strings compare correctly). */
+    private function periodStatus(ClassSchedule $schedule): string
+    {
+        $now = Carbon::now('Asia/Jakarta')->format('H:i:s');
+        $start = substr((string) $schedule->start_time, 0, 8);
+        $end = substr((string) $schedule->end_time, 0, 8);
+
+        return $now < $start ? 'upcoming' : ($now > $end ? 'done' : 'ongoing');
+    }
+
+    private function periodIs(ClassSchedule $schedule, string $want): bool
+    {
+        return $this->periodStatus($schedule) === $want;
     }
 
     /** The roster, each student's running point balance for the term alongside it. */
@@ -191,8 +211,8 @@ class ClassroomController extends Controller
         // Every period of the class's day is shown (a homeroom teacher wants
         // the whole picture), but only the assigned teacher may open roll
         // call (AttendanceSessionController::open() enforces teacher_id) -
-        // so flag ownership and let the frontend hide the button for periods
-        // that would only 404.
+        // so flag ownership and realtime state, and let the frontend hide
+        // the button for periods that would only 404 or are already over.
         return response()->json([
             'classroom' => ['ulid' => $classroom->ulid, 'name' => $classroom->name],
             'schedules' => $schedules->map(fn ($s) => [
@@ -200,6 +220,7 @@ class ClassroomController extends Controller
                 'subject' => $s->subject->name,
                 'teacher' => $s->teacher?->name,
                 'is_mine' => $s->teacher_id === $request->user()->id,
+                'status' => $this->periodStatus($s),
                 'start_time' => $s->start_time,
                 'end_time' => $s->end_time,
             ]),

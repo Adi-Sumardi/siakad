@@ -10,7 +10,14 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
 
-type TodayInfo = { total: number; mine: number; first_start: string | null; last_end: string | null };
+type TodayInfo = {
+  total: number;
+  mine: number;
+  mine_ongoing: number;
+  mine_upcoming: number;
+  first_start: string | null;
+  last_end: string | null;
+};
 type Classroom = {
   ulid: string;
   name: string;
@@ -67,11 +74,24 @@ function ClassroomCard({ classroom, today = false }: { classroom: Classroom; tod
             </span>
 
             <div className="flex flex-col items-end gap-1">
-              {today && c.schedules_today.mine > 0 && (
+              {today && c.schedules_today.mine_ongoing > 0 && (
+                <Badge variant="primary" className="text-[10px] font-bold">
+                  Sedang Mengajar
+                </Badge>
+              )}
+              {today && c.schedules_today.mine_ongoing === 0 && c.schedules_today.mine_upcoming > 0 && (
                 <Badge variant="primary" className="text-[10px] font-bold">
                   Anda Mengajar
                 </Badge>
               )}
+              {today &&
+                c.schedules_today.mine > 0 &&
+                c.schedules_today.mine_ongoing === 0 &&
+                c.schedules_today.mine_upcoming === 0 && (
+                  <Badge variant="default" className="text-[10px] font-bold">
+                    Selesai Mengajar
+                  </Badge>
+                )}
               {c.is_homeroom && (
                 <Badge variant="default" className="gap-1 text-[10px] font-bold">
                   <Star className="size-3 fill-current" />

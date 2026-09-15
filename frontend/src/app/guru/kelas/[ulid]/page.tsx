@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CalendarCheck, Check, ChevronDown, ChevronUp, ClipboardList, FileText, Loader2, Sparkles, UserCheck, Users } from "lucide-react";
+import { ArrowLeft, CalendarCheck, Check, ChevronDown, ChevronUp, ClipboardList, FileText, Loader2, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,21 @@ import type { PointRecord } from "@/lib/types/kesiswaan";
 
 type StudentRow = { ulid: string; nama_lengkap: string; nis: string | null; point_balance: number | null };
 type Rule = { ulid: string; code: string; name: string; type: "violation" | "merit"; category: string; points: number; requires_evidence: boolean };
-type TodaySchedule = { ulid: string; subject: string; teacher: string | null; is_mine: boolean; start_time: string; end_time: string };
+type TodaySchedule = {
+  ulid: string;
+  subject: string;
+  teacher: string | null;
+  is_mine: boolean;
+  status: "upcoming" | "ongoing" | "done";
+  start_time: string;
+  end_time: string;
+};
+
+const PERIOD_STATUS: Record<TodaySchedule["status"], { label: string; className: string }> = {
+  ongoing: { label: "Berlangsung", className: "bg-good/10 text-good" },
+  upcoming: { label: "Akan datang", className: "bg-muted text-muted-foreground" },
+  done: { label: "Selesai", className: "bg-muted/60 text-muted-foreground" },
+};
 type RecapRow = { ulid: string; nama_lengkap: string; nis: string | null; hadir: number; sakit: number; izin: number; alpa: number };
 type GradeSubject = { ulid: string; name: string };
 type GradeScore = { tugas: number | null; uts: number | null; uas: number | null; final: number | null };
@@ -272,26 +286,48 @@ function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
         </p>
       ) : (
         <div className="flex flex-col gap-2">
-        {schedules.map((s) => (
+        {schedules.map((s) => {
+          const status = PERIOD_STATUS[s.status] ?? PERIOD_STATUS.upcoming;
+
+          return (
           <div key={s.ulid} className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 p-2.5">
             <div>
-              <p className="text-sm font-semibold">{s.subject}</p>
+              <p className="flex items-center gap-1.5 text-sm font-semibold">
+                {s.subject}
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${status.className}`}>
+                  {status.label}
+                </span>
+              </p>
               <p className="text-xs text-muted-foreground">
-                {s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)}{s.teacher ? ` · ${s.teacher}` : ""}
+                {s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)}{s.teacher ? ` · ${s.teacher}` : " · belum ada guru"}
               </p>
             </div>
             {s.is_mine ? (
-              <Button size="sm" onClick={() => openAttendance(s.ulid)} disabled={opening === s.ulid} className="text-xs">
-                {opening === s.ulid ? "Membuka…" : "Buka Presensi"}
-              </Button>
+              // A finished period still opens - but as the manual-completion
+              // lane (mark the roster, no scan can land: the window is past),
+              // so it must not present itself as the primary action.
+              s.status === "done" ? (
+                <Button variant="outline" size="sm" onClick={() => openAttendance(s.ulid)} disabled={opening === s.ulid} className="text-xs">
+                  {opening === s.ulid ? "Membuka…" : "Lengkapi"}
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => openAttendance(s.ulid)} disabled={opening === s.ulid} className="text-xs">
+                  {opening === s.ulid ? "Membuka…" : "Buka Presensi"}
+                </Button>
+              )
             ) : (
               // Opening roll call is restricted to the assigned teacher
               // (the API would reject anyone else with a 404), so periods
-              // taught by colleagues are listed for awareness only.
-              <span className="shrink-0 text-[11px] text-muted-foreground">Bukan jadwal Anda</span>
+              // taught by colleagues are listed for awareness only - and an
+              // UNASSIGNED period says so, because "bukan jadwal Anda" over
+              // a period nobody owns reads like a bug when it is a data gap.
+              <span className="shrink-0 text-[11px] text-muted-foreground">
+                {s.teacher ? "Bukan jadwal Anda" : "Belum ada guru"}
+              </span>
             )}
           </div>
-        ))}
+          );
+        })}
         </div>
       )}
     </Card>
@@ -538,8 +574,6 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
       setSelected(new Set(students.map((s) => s.ulid)));
     }
   }
-
-  const bulkRuleData = rules.find((r) => r.ulid === bulkRule);
 
   async function submitBulk() {
     setBulkSubmitting(true);
