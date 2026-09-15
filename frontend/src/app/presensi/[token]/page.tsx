@@ -135,7 +135,11 @@ export default function PresensiPage({ params }: { params: Promise<{ token: stri
 
       setScreen({ step: "success", name: result.student.nama_panggilan });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
+      // Only the student-already-marked 409 is the "already" screen - the
+      // device-once rejection is also a 409 but means "this phone already
+      // checked someone in this session", which no rescan can fix and must
+      // not masquerade as a recorded attendance.
+      if (err instanceof ApiError && err.status === 409 && err.message.includes("Sudah tercatat")) {
         setScreen({ step: "already", name });
       } else if (screenRef.current.step === "scan") {
         // Show it right on the scan step and re-arm the camera - an expired
