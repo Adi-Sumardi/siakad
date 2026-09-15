@@ -6,6 +6,7 @@ use App\Models\Bill;
 use App\Models\Payment;
 use App\Models\PaymentAllocation;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -23,6 +24,9 @@ use RuntimeException;
  */
 class PaymentAllocator
 {
+    public function __construct(
+        private PaymentReceiptNotifier $receipts,
+    ) {}
     /**
      * Records what a payment is meant to settle.
      *
@@ -81,6 +85,17 @@ class PaymentAllocator
         });
 
         $this->recomputeFor($payment->allocations()->pluck('bill_id')->all());
+
+        // Best-effort by design: money that already arrived must never be
+        // rolled back because a notification gateway hiccuped - the receipt
+        // simply doesn't go out, the payment is still settled.
+        try {
+            $this->receipts->notify($payment->fresh());
+        } catch (\Throwable $e) {
+            Log::warning('[PaymentAllocator] Receipt notification failed: '.$e->getMessage(), [
+                'payment' => $payment->payment_number,
+            ]);
+        }
     }
 
     /** A failed or expired checkout releases the bills it was holding. */
