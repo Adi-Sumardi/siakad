@@ -77,7 +77,13 @@ class ImportController extends Controller
             };
         }, $header);
 
-        $requiredCols = ['nama_lengkap', 'unit_code'];
+        // The unit template a per-unit admin downloads carries no unit_code
+        // column (their rows land in their own unit, the column would be
+        // ignored) - demanding it anyway would reject the app's own template.
+        // Only the central admin's file must name a unit per row.
+        $requiredCols = $caller->isUnitScoped()
+            ? ['nama_lengkap']
+            : ['nama_lengkap', 'unit_code'];
         foreach ($requiredCols as $req) {
             if (! in_array($req, $normalizedHeader, true)) {
                 fclose($handle);

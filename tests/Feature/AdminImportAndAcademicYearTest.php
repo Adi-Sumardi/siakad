@@ -377,6 +377,22 @@ class AdminImportAndAcademicYearTest extends TestCase
         $this->assertSame($this->unit->id, Student::first()->school_unit_id);
     }
 
+    public function test_a_unit_admin_imports_the_template_shape_without_a_unit_column(): void
+    {
+        // Exactly the file the app's own template download hands a per-unit
+        // admin: no unit_code column anywhere. Requiring it anyway rejected
+        // the template itself with "Kolom wajib 'unit_code' tidak ditemukan".
+        $csvContent = "nama_lengkap,nis,nisn,jenis_kelamin,kelas,wali_nama,wali_phone,wali_email,status\n".
+            "Siswa Unit SD,27021,0012345601,L,1-A,Bambang Sutrisno,081234567890,bambang@gmail.com,active\n";
+
+        $response = $this->actingAs($this->unitAdmin())->postJson('/api/admin/import/students', [
+            'file' => UploadedFile::fake()->createWithContent('students.csv', $csvContent),
+        ]);
+
+        $response->assertOk()->assertJsonPath('imported_count', 1);
+        $this->assertSame($this->unit->id, Student::first()->school_unit_id);
+    }
+
     public function test_a_unit_admin_gets_a_student_template_without_the_unit_column(): void
     {
         // Their import forces their own unit, so a unit column in their
