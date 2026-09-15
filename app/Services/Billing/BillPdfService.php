@@ -25,11 +25,9 @@ class BillPdfService
             ->unique('id')
             ->values();
 
-        $logoPath = public_path('images/logo-yapi.png');
-        $logoBase64 = '';
-        if (file_exists($logoPath)) {
-            $logoBase64 = 'data:image/png;base64,'.base64_encode(file_get_contents($logoPath));
-        }
+        $logoBase64 = $this->logoDataUri(public_path('images/logo-yapi.png'));
+        // The kop's second logo (YPIA), printed beside logo-yapi in the header.
+        $ypiaLogoBase64 = $this->logoDataUri(public_path('images/Logo-YPIA.png'));
 
         return Pdf::loadView('pdf.bill', [
             'bill' => $bill,
@@ -38,6 +36,7 @@ class BillPdfService
             'kelas' => $bill->student->currentEnrollment()?->classroom?->name,
             'schoolName' => config('app.name'),
             'logoBase64' => $logoBase64,
+            'logoYpiaBase64' => $ypiaLogoBase64,
             // A deterministic, real VA number - not one of the three
             // unverified bank accounts this used to print (never confirmed
             // as YAPI's real accounts, and stale since the gateway moved to
@@ -52,5 +51,58 @@ class BillPdfService
         $prefix = $bill->status === 'paid' ? 'Kuitansi' : 'Tagihan';
 
         return $prefix.'-'.str_replace('/', '-', $bill->bill_number).'.pdf';
+    }
+
+    /**
+     * A kop logo as a data URI, downscaled first when the source is huge.
+     *
+     * Logo-YPIA.png arrives at 2481x2481: dompdf's Cpdf buffers the decoded
+     * bitmap and that one image alone eats ~100MB - a hard OOM against the
+     * default 128MB limit. The print slot is 64px CSS (~17mm), so a 512px
+     * cap still renders sharper than the printer can show. Falls back to the
+     * raw bytes if GD cannot decode the file.
+     */
+    private function logoDataUri(string $path): string
+    {
+        if (! file_exists($path)) {
+            return '';
+        }
+
+        $image = @imagecreatefrompng($path);
+
+        if ($image === false) {
+            return 'data:image/png;base64,'.base64_encode(file_get_contents($path));
+        }
+
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $scale = min(1, 512 / max($width, $height));
+
+        if ($scale >= 1) {
+            // Already small enough - pass the file's own bytes through. A GD
+            // round-trip here would DROP the alpha channel (imagesavealpha is
+            // off by default on a loaded image) and every transparent pixel
+            // comes back opaque black: the "black box behind each logo" on
+            // the printed kop.
+            imagedestroy($image);
+
+            return 'data:image/png;base64,'.base64_encode(file_get_contents($path));
+        }
+
+        $resized = imagecreatetruecolor((int) round($width * $scale), (int) round($height * $scale));
+        // Blending OFF so both the transparent fill and the resampled pixels
+        // REPLACE the canvas instead of compositing onto its default opaque
+        // black - the other way a resize used to bake a black background in.
+        imagealphablending($resized, false);
+        imagesavealpha($resized, true);
+        imagefill($resized, 0, 0, imagecolorallocatealpha($resized, 0, 0, 0, 127));
+        imagecopyresampled($resized, $image, 0, 0, 0, 0, imagesx($resized), imagesy($resized), $width, $height);
+        imagedestroy($image);
+
+        ob_start();
+        imagepng($resized, null, 6);
+        imagedestroy($resized);
+
+        return 'data:image/png;base64,'.base64_encode((string) ob_get_clean());
     }
 }
