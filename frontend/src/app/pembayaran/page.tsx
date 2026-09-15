@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -9,12 +9,9 @@ import {
   CheckCircle2,
   Clock,
   Copy,
-  ExternalLink,
   Info,
-  QrCode,
   Receipt,
   RotateCcw,
-  ShieldCheck,
   Wallet,
   X,
 } from "lucide-react";
@@ -63,25 +60,45 @@ function PaymentsContent() {
   const [payments, setPayments] = useState<Payment[] | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [simulating, setSimulating] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const data = await api.get<{ payments: Payment[] }>("/api/wali/payments");
-      setPayments(data.payments);
-
-      // Auto-open modal if requested via URL param
-      if (initialPaymentUlid && !selectedPayment) {
-        const found = data.payments.find((p) => p.ulid === initialPaymentUlid);
-        if (found) setSelectedPayment(found);
-      }
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Gagal memuat riwayat transaksi.");
-    }
-  }, [initialPaymentUlid, selectedPayment]);
+  // Bumped by handleSimulateSettle so the effect below owns the only fetch of
+  // this list (same shape as the guru dashboard's own reload-on-action).
+  const [reloadKey, setReloadKey] = useState(0);
+  // The ?payment= param opens its modal exactly once per visit. Gating on
+  // selectedPayment instead made every dismissal re-run the load effect and
+  // re-open the modal - the "closed popup keeps coming back" loop.
+  const autoOpenedRef = useRef(false);
 
   useEffect(() => {
-    if (user?.role === "orangtua") load();
-  }, [user, load]);
+    if (user?.role !== "orangtua") return;
+
+    let cancelled = false;
+
+    const load = () => {
+      api
+        .get<{ payments: Payment[] }>("/api/wali/payments")
+        .then((data) => {
+          if (cancelled) return;
+          setPayments(data.payments);
+
+          if (initialPaymentUlid && !autoOpenedRef.current) {
+            autoOpenedRef.current = true;
+            const found = data.payments.find((p) => p.ulid === initialPaymentUlid);
+            if (found) setSelectedPayment(found);
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            toast.error(err instanceof ApiError ? err.message : "Gagal memuat riwayat transaksi.");
+          }
+        });
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, initialPaymentUlid, reloadKey]);
 
   function copyToClipboard(text: string, label: string) {
     navigator.clipboard.writeText(text);
@@ -97,7 +114,7 @@ function PaymentsContent() {
       );
       toast.success(res.message);
       setSelectedPayment(res.payment);
-      await load();
+      setReloadKey((k) => k + 1);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menyelesaikan simulasi.");
     } finally {
@@ -149,7 +166,12 @@ function PaymentsContent() {
             </p>
           </div>
 
-          <Button variant="outline" size="sm" onClick={load} className="gap-2 self-start sm:self-auto font-semibold">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="gap-2 self-start sm:self-auto font-semibold"
+          >
             <RotateCcw className="size-3.5" />
             <span>Segarkan Data</span>
           </Button>
@@ -162,7 +184,7 @@ function PaymentsContent() {
             <div>
               <p className="font-bold">Terdapat tagihan/Virtual Account yang belum selesai dibayar.</p>
               <p className="text-amber-800 dark:text-amber-300 mt-0.5">
-                Silakan klik tombol <strong>Bayar Sekarang</strong> pada transaksi di bawah untuk melihat nomor Virtual Account atau QRIS pembayaran Anda.
+                Silakan klik tombol <strong>Bayar Sekarang</strong> pada transaksi di bawah untuk melihat nomor Virtual Account pembayaran Anda.
               </p>
             </div>
           </div>

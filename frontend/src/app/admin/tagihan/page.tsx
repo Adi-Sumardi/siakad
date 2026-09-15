@@ -379,7 +379,6 @@ function AdminBillsContent() {
                       >
                         <option value="cash">Tunai (Front Desk)</option>
                         <option value="bank_transfer">Transfer Bank</option>
-                        <option value="qris">QRIS</option>
                         <option value="other">Lainnya</option>
                       </select>
                     </div>
