@@ -136,10 +136,33 @@ export default function GuruClassroomsPage() {
   const dayName = useDayNameToday();
 
   useEffect(() => {
-    api
-      .get<{ classrooms: Classroom[] }>("/api/guru/classrooms")
-      .then((d) => setClassrooms(d.classrooms))
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar kelas."));
+    let cancelled = false;
+
+    // The "Sedang/Anda/Selesai Mengajar" badges are decided by the server at
+    // fetch time, so a dashboard left open would keep wearing yesterday's
+    // state as the bell moves. Refresh every minute; a failed refresh keeps
+    // the cards on screen (only the first load toasts on failure) so a
+    // network blip never blanks the portal.
+    const load = (initial: boolean) => {
+      api
+        .get<{ classrooms: Classroom[] }>("/api/guru/classrooms")
+        .then((d) => {
+          if (!cancelled) setClassrooms(d.classrooms);
+        })
+        .catch((err) => {
+          if (initial && !cancelled) {
+            toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar kelas.");
+          }
+        });
+    };
+
+    load(true);
+    const interval = setInterval(() => load(false), 60_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   // Classes with at least one period today, the day's earliest bell first -

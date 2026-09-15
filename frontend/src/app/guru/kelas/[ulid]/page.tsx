@@ -251,10 +251,31 @@ function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
   const [opening, setOpening] = useState<string | null>(null);
 
   useEffect(() => {
-    api
-      .get<{ schedules: TodaySchedule[] }>(`/api/guru/classrooms/${classroomUlid}/schedules/today`)
-      .then((d) => setSchedules(d.schedules))
-      .catch(() => setSchedules([]));
+    let cancelled = false;
+
+    // Status chips are computed server-side at fetch time - without this
+    // refresh, a panel left open all morning keeps calling a 07:00 period
+    // "Akan datang" halfway through it. A minute is plenty: chips only ever
+    // move at bell times. A failed refresh keeps the previous list; only the
+    // initial load may land on the empty state.
+    const load = (initial: boolean) => {
+      api
+        .get<{ schedules: TodaySchedule[] }>(`/api/guru/classrooms/${classroomUlid}/schedules/today`)
+        .then((d) => {
+          if (!cancelled) setSchedules(d.schedules);
+        })
+        .catch(() => {
+          if (initial && !cancelled) setSchedules([]);
+        });
+    };
+
+    load(true);
+    const interval = setInterval(() => load(false), 60_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [classroomUlid]);
 
   async function openAttendance(scheduleUlid: string) {
