@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Download, Filter, Receipt, RefreshCw, Search, ShieldAlert, Wallet } from "lucide-react";
+import { Download, Filter, RefreshCw, Search, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,19 +55,20 @@ function AdminBillsContent() {
   const [payMethod, setPayMethod] = useState("cash");
   const [reason, setReason] = useState("");
 
-  const load = useCallback(async () => {
+  // .then() chains (not async/await) so setState only ever runs in an async
+  // callback - the effect below calls this synchronously, and awaiting first
+  // still trips react-hooks/set-state-in-effect's analysis.
+  const load = useCallback(() => {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (q) params.set("q", q);
     if (unitCode) params.set("unit", unitCode);
     if (academicYear) params.set("year", academicYear);
 
-    try {
-      const d = await api.get<{ bills: Paginated<Bill> }>(`/api/admin/bills?${params}`);
-      setBills(d.bills);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan.");
-    }
+    api
+      .get<{ bills: Paginated<Bill> }>(`/api/admin/bills?${params}`)
+      .then((d) => setBills(d.bills))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan."));
   }, [status, q, unitCode, academicYear]);
 
   useEffect(() => {

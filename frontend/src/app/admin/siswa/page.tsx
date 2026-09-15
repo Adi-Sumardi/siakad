@@ -6,22 +6,17 @@ import { useSearchParams } from "next/navigation";
 import {
   BadgePercent,
   Calendar,
-  ChevronRight,
   Download,
   Edit2,
   FileSpreadsheet,
-  Filter,
   GraduationCap,
   Percent,
   Phone,
-  Plus,
   RefreshCw,
   Search,
   Sparkles,
   Trash2,
   UploadCloud,
-  User,
-  Users,
   Wallet,
   X,
 } from "lucide-react";
@@ -87,7 +82,6 @@ function AdminStudentsContent() {
   const [units, setUnits] = useState<SchoolUnit[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [selectedYear, setSelectedYear] = useState<string>("");
-  const [loading, setLoading] = useState(true);
 
   // Filters
   const [search, setSearch] = useState("");
@@ -118,8 +112,11 @@ function AdminStudentsContent() {
   const [formStatus, setFormStatus] = useState("active");
   const [submitting, setSubmitting] = useState(false);
 
+  // No separate loading flag: `students === null` IS the first-load state, so a
+  // refetch (filter/search change) keeps the previous rows on screen instead of
+  // flashing a skeleton - and nothing ever calls setState synchronously in the
+  // effect below.
   function loadStudents() {
-    setLoading(true);
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (unitFilter) params.set("unit", unitFilter);
@@ -135,8 +132,7 @@ function AdminStudentsContent() {
       .then((d) => {
         setStudents(d.students.data);
       })
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data siswa."))
-      .finally(() => setLoading(false));
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data siswa."));
   }
 
   useEffect(() => {
@@ -512,7 +508,7 @@ function AdminStudentsContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {loading && (
+              {students === null && (
                 <tr>
                   <td colSpan={isAdministrator ? 8 : 7} className="p-5">
                     <Skeleton className="h-24 w-full rounded-xl" />
@@ -520,7 +516,7 @@ function AdminStudentsContent() {
                 </tr>
               )}
 
-              {!loading && students?.length === 0 && (
+              {students?.length === 0 && (
                 <tr>
                   <td colSpan={isAdministrator ? 8 : 7} className="p-8 text-center text-muted-foreground">
                     Tidak ada data siswa yang ditemukan untuk kriteria filter ini.
@@ -528,8 +524,7 @@ function AdminStudentsContent() {
                 </tr>
               )}
 
-              {!loading &&
-                students?.map((s) => {
+              {students?.map((s) => {
                   const hasDiscounts = (s.pricing?.discounts?.length ?? 0) > 0;
 
                   return (
