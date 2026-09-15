@@ -418,9 +418,19 @@ class DailyAttendanceService
                     throw new RuntimeException('Sudah tercatat hadir sebelumnya.');
                 }
 
-                if ($deviceHash && DailyRecord::where('daily_session_id', $session->id)
-                    ->where('device_hash', $deviceHash)->active()->exists()) {
-                    throw new RuntimeException('Perangkat ini sudah dipakai untuk absen hari ini.');
+                if ($deviceHash && DailyRecord::query()
+                    ->where('device_hash', $deviceHash)
+                    ->active()
+                    ->whereDate('date', $session->date)
+                    ->where('student_id', '!=', $student->id)
+                    ->exists()) {
+                    // One phone, one NIS per day, across BOTH windows (masuk
+                    // and pulang are separate sessions, so a plain per-session
+                    // device check let a phone check a friend in at pulang
+                    // after checking its owner in at masuk). The owner's own
+                    // repeat check-in at pulang is exempt - the rule binds the
+                    // device to one student, not to one scan.
+                    throw new RuntimeException('Perangkat ini sudah dipakai absen siswa lain hari ini.');
                 }
 
                 return DailyRecord::create([
@@ -446,7 +456,7 @@ class DailyAttendanceService
                 throw new RuntimeException('Sudah tercatat hadir sebelumnya.');
             }
 
-            throw new RuntimeException('Perangkat ini sudah dipakai untuk absen hari ini.');
+            throw new RuntimeException('Perangkat ini sudah dipakai absen siswa lain hari ini.');
         }
 
         $this->notifier->recorded($record);

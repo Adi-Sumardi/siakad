@@ -147,7 +147,8 @@ SISWA TIBA:
   5. server memeriksa SEMUA:
        ✓ QR masih segar (belum lewat ±60 detik)?
        ✓ posisi dalam radius?
-       ✓ perangkat ini belum dipakai absen hari ini?   ← anti "1 HP banyak NIS"
+       ✓ perangkat ini belum dipakai NIS lain hari ini?   ← anti "1 HP banyak NIS"
+         (NIS yang sama = pemilik HP — bebas absen ulang: masuk, pulang, tiap mapel)
        ✓ NIS ini belum absen hari ini?
   6. LOLOS → HADIR pukul 07:02 (+ "terlambat 17 menit" bila lewat batas)
            → WA langsung ke wali murid
@@ -204,7 +205,7 @@ aturan R2/D6). Sejarah koreksi selalu bisa diaudit.
 |---|---|---|---|
 | 1 | **QR berputar ±30 detik** di layar TU | Scan dari rumah (foto/link) | Foto QR basi dalam semenit; anak di rumah tidak bisa melihat layar gerbang |
 | 2 | **Radius GPS** (default 100 m, diset admin unit) | Scan dari luar sekolah | Server hitung jarak posisi HP ke titik gerbang; di luar lingkaran = tolak |
-| 3 | **Perangkat sekali** (baru — permintaan 2026-09-12) | "1 HP absenin banyak teman" | Tiap perangkat punya tanda ter-hash; satu perangkat = satu absen per hari. NIS kedua dari HP yang sama ditolak |
+| 3 | **Perangkat sekali** (baru — permintaan 2026-09-12) | "1 HP absenin banyak teman" | Tiap perangkat punya tanda ter-hash; **satu HP = satu NIS per hari** — NIS kedua dari HP yang sama ditolak sepanjang hari (lapis gerbang & mapel masing-masing). NIS yang sama (pemilik HP) bebas absen berkali-kali: masuk, pulang, tiap mapel. Ditegakkan lintas-sesi sehari di lapisan aplikasi; partial unique per-sesi tetap jadi jangkar race |
 | 4 | **Manusia saksi** | Semua jenis | TU di gerbang / wali kelas di kelas bisa input manual & koreksi |
 | 5 | **Alarm pola aneh** | Proksi yang lolos | Sistem mencatat perangkat+IP; beberapa NIS dari perangkat/IP mirip → layar TU menampilkan peringatan "periksa siswa ini" |
 
@@ -243,7 +244,9 @@ Aturan unik yang ditegakkan **database** (bukan cuma kode — pembelajaran T5:
 partial index ditulis raw SQL):
 
 - 1 baris aktif per (siswa, hari, tipe) — NIS tidak bisa absen dua kali
-- 1 baris aktif per (sesi, perangkat) — satu HP tidak bisa absen dua NIS
+- 1 baris aktif per (sesi, perangkat) — jangkar race di dalam satu sesi; aturan penuhnya
+  **satu HP = satu NIS per hari** dan ditegakkan di lapisan aplikasi lintas sesi
+  (partial unique tak bisa menyatakan "kecuali siswa yang sama")
 - 1 sesi per (unit, hari, tipe) — scheduler dobel tidak mengapa
 
 Aturan lama tetap dipatuhi: ID yang keluar dari sistem selalu ULID (R4);
@@ -316,3 +319,4 @@ Data lama tidak diubah/hilang — hanya ada dua "satuan" dalam sejarah.
 3. ✅ **Mode Gerbang** (SMP/SMA): link publik + layar QR di HP TU + scanner + radius + perangkat-sekali + halaman sesi TU
 4. ✅ **Integrasi laporan** — rapor, watchlist, rekap kelas beralih ke sumber harian
 5. ✅ **Polesan** — alarm pola perangkat+IP (bendera di papan TU), toggle notifikasi; pengecualian tanggal libur menyusul bila perlu (§9 no. 2)
+| 2026-09-15 | **Aturan perangkat dirapatkan: "satu HP = satu NIS per hari"** (laporan user "absen satu device sekali itu rancu"). Dua temuan: (a) kata "per hari" di docs/pesan error menyesatkan pembaca jadi takut alur sah terblokir — padahal implementasi lama per-SESI sehingga (b) celahnya justru terbuka: HP bisa absen NIS A di satu sesi lalu NIS B di sesi lain (pulang/mapel berikutnya). Semantik final: perangkat terikat ke satu NIS sepanjang hari per lapis (gerbang & mapel masing-masing); NIS pemilik bebas absen ulang kapan pun; besok HP bebas lagi. Pesan error diganti jujur ("…sudah dipakai presensi/absen siswa lain hari ini"); 3 test baru (rotasi antar-mapel ditolak + pemilik bebas; batas hari di gerbang; pesan baru), 388/388 lulus | Iwan |

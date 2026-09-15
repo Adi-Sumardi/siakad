@@ -65,9 +65,20 @@ class AttendanceLedger
                     throw new RuntimeException('Sudah tercatat hadir sebelumnya.');
                 }
 
-                if ($deviceHash && AttendanceRecord::where('attendance_session_id', $session->id)
-                    ->where('device_hash', $deviceHash)->active()->exists()) {
-                    throw new RuntimeException('Perangkat ini sudah dipakai untuk presensi sesi ini.');
+                // One phone, one NIS per day: a device that already checked a
+                // DIFFERENT student in today (any lesson period) is done for
+                // the day - the owner may keep checking in themselves for
+                // every remaining period, but a friend's NIS is closed. The
+                // old per-session scoping let one phone rotate a fresh friend
+                // through every period; the student check above (same NIS) is
+                // deliberately exempt so legitimate repeat use is unlimited.
+                if ($deviceHash && AttendanceRecord::query()
+                    ->where('device_hash', $deviceHash)
+                    ->active()
+                    ->whereDate('occurred_on', $session->occurred_on)
+                    ->where('student_id', '!=', $student->id)
+                    ->exists()) {
+                    throw new RuntimeException('Perangkat ini sudah dipakai presensi siswa lain hari ini.');
                 }
 
                 $schedule = $session->classSchedule;
@@ -94,7 +105,7 @@ class AttendanceLedger
             // The device partial unique won a race the pre-check missed -
             // the student pre-check cannot race itself (same student, same
             // lock), so the collision is the device index by elimination.
-            throw new RuntimeException('Perangkat ini sudah dipakai untuk presensi sesi ini.');
+            throw new RuntimeException('Perangkat ini sudah dipakai presensi siswa lain hari ini.');
         }
     }
 

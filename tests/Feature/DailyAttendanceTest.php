@@ -14,6 +14,7 @@ use App\Models\Student;
 use App\Models\Term;
 use App\Models\User;
 use App\Services\Attendance\DailyAttendanceService;
+use RuntimeException;
 use App\Services\Attendance\RotatingQrService;
 use App\Services\Notification\NotificationResult;
 use App\Services\Notification\WhatsAppGateway;
@@ -610,7 +611,7 @@ class DailyAttendanceTest extends TestCase
         // The buddy punch: a second NIS from the same phone.
         $this->postJson('/api/absen/publik-smp/check-in', $payload('20024', 'shared-phone'))
             ->assertStatus(409)
-            ->assertJsonPath('message', 'Perangkat ini sudah dipakai untuk absen hari ini.');
+            ->assertJsonPath('message', 'Perangkat ini sudah dipakai absen siswa lain hari ini.');
 
         // The double scan: the same NIS again, even from a different phone.
         $this->postJson('/api/absen/publik-smp/check-in', $payload('20023', 'other-phone'))
@@ -622,6 +623,62 @@ class DailyAttendanceTest extends TestCase
 
         $this->assertSame(1, DailyRecord::where('device_hash', hash('sha256', 'shared-phone'))->count());
         $this->assertSame(2, DailyRecord::where('daily_session_id', $session->id)->count());
+    }
+
+    public function test_the_device_rule_binds_one_nis_for_one_day_not_forever(): void
+    {
+        $this->gateSetting();
+        $classroom = $this->classroomIn($this->smp);
+        $student = $this->studentIn($classroom, 'Siti', '20025');
+        $friend = $this->studentIn($classroom, 'Budi', '20026');
+
+        /** @var DailyAttendanceService $service */
+        $service = app(DailyAttendanceService::class);
+        $masuk = $service->ensureSessionsForDate($service->ensureSettings($this->smp), $this->monday)
+            ->firstWhere('type', 'masuk');
+
+        // Yesterday this phone already checked a different NIS in - seeded
+        // straight, the service path has its own tests.
+        $yesterday = $this->monday->copy()->subDay();
+        $ySession = DailySession::create([
+            'school_unit_id' => $this->smp->id,
+            'date' => $yesterday->toDateString(),
+            'type' => 'masuk',
+            'opens_at' => $yesterday->copy()->setTime(6, 30),
+            'closes_at' => $yesterday->copy()->setTime(8, 0),
+            'status' => 'closed',
+        ]);
+        DailyRecord::create([
+            'daily_session_id' => $ySession->id,
+            'student_id' => $friend->id,
+            'term_id' => $this->term->id,
+            'date' => $yesterday->toDateString(),
+            'attendance_status' => 'hadir',
+            'source' => 'self',
+            'device_hash' => hash('sha256', 'siti-phone'),
+            'record_status' => 'recorded',
+        ]);
+
+        $input = [
+            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($masuk->ulid)),
+            'lat' => -6.2000100, 'lng' => 106.8000100,
+            'device_id' => 'siti-phone', 'ip' => '10.0.0.9',
+        ];
+
+        // Today the phone is free again - the rule is per day, yesterday's
+        // different NIS must not follow the device around forever.
+        $service->selfCheckIn($masuk, $student, $input);
+
+        // But from this check-in on, the phone is bound to its owner's NIS
+        // for the rest of TODAY: a friend's NIS is closed.
+        try {
+            $service->selfCheckIn($masuk, $friend, $input);
+            $this->fail('NIS teman dari HP yang sama harus ditolak pada hari yang sama.');
+        } catch (RuntimeException $e) {
+            $this->assertSame('Perangkat ini sudah dipakai absen siswa lain hari ini.', $e->getMessage());
+        }
+
+        $this->assertSame(2, DailyRecord::count());
     }
 
     public function test_a_wali_kelas_unit_rejects_gate_check_ins(): void

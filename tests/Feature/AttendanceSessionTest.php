@@ -334,7 +334,7 @@ class AttendanceSessionTest extends TestCase
         // The buddy punch: a second NIS from the same phone.
         $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20103', 'qr_code' => $code, 'device_id' => 'one-phone'])
             ->assertStatus(409)
-            ->assertJsonPath('message', 'Perangkat ini sudah dipakai untuk presensi sesi ini.');
+            ->assertJsonPath('message', 'Perangkat ini sudah dipakai presensi siswa lain hari ini.');
 
         // A different phone for the second student is fine - the rule is per device, not per seat.
         $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20103', 'qr_code' => $code, 'device_id' => 'other-phone'])
@@ -343,6 +343,37 @@ class AttendanceSessionTest extends TestCase
         $this->assertDatabaseCount('attendance_records', 2);
         // The device token is stored hashed, never raw.
         $this->assertDatabaseHas('attendance_records', ['device_hash' => hash('sha256', 'one-phone')]);
+    }
+
+    public function test_one_device_serves_one_nis_for_the_whole_day_across_periods(): void
+    {
+        $classroom = $this->classroomIn($this->smp);
+        $guru = $this->staff('guru', $this->smp);
+        $first = $this->openSession($this->scheduleFor($classroom, $this->subject(), $guru), $guru);
+        $second = $this->openSession($this->scheduleFor($classroom, $this->subject(), $guru), $guru);
+        $this->studentIn($classroom, 'Ani', '20201');
+        $this->studentIn($classroom, 'Budi', '20202');
+
+        // The owner's own phone: period 1, then period 2 - both fine. The
+        // rule binds a device to one STUDENT, it is never once-per-day-per-
+        // scan (the confusion "device sekali" caused when read as per-day).
+        $this->postJson("/api/presensi/{$first->token}/check-in", ['nis' => '20201', 'qr_code' => $this->rollCode($first), 'device_id' => 'ani-phone'])
+            ->assertStatus(200);
+        $this->postJson("/api/presensi/{$second->token}/check-in", ['nis' => '20201', 'qr_code' => $this->rollCode($second), 'device_id' => 'ani-phone'])
+            ->assertStatus(200);
+
+        // A friend's NIS on that phone in a LATER period stays closed for the
+        // day - the old per-session scoping let one phone rotate a fresh
+        // friend through every period.
+        $this->postJson("/api/presensi/{$second->token}/check-in", ['nis' => '20202', 'qr_code' => $this->rollCode($second), 'device_id' => 'ani-phone'])
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'Perangkat ini sudah dipakai presensi siswa lain hari ini.');
+
+        // The friend's own phone is unaffected.
+        $this->postJson("/api/presensi/{$second->token}/check-in", ['nis' => '20202', 'qr_code' => $this->rollCode($second), 'device_id' => 'budi-phone'])
+            ->assertStatus(200);
+
+        $this->assertDatabaseCount('attendance_records', 3);
     }
 
     // --- Guru session panel --------------------------------------------------
