@@ -74,6 +74,7 @@ export type Subject = {
   school_unit: string | null;
   code: string;
   name: string;
+  is_active?: boolean;
 };
 
 export type ClassSchedule = {

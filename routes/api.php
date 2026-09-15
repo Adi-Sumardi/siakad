@@ -240,6 +240,8 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 
     Route::get('/subjects', [\App\Http\Controllers\Api\Admin\SubjectController::class, 'index']);
     Route::post('/subjects', [\App\Http\Controllers\Api\Admin\SubjectController::class, 'store']);
+    Route::patch('/subjects/{subject}', [\App\Http\Controllers\Api\Admin\SubjectController::class, 'update']);
+    Route::delete('/subjects/{subject}', [\App\Http\Controllers\Api\Admin\SubjectController::class, 'destroy']);
 
     Route::get('/classrooms/{classroomUlid}/schedules', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'index']);
     Route::post('/classrooms/{classroomUlid}/schedules', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'store']);
