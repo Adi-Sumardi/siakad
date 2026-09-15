@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { CalendarCheck2, Copy, Link2, RefreshCw, ShieldAlert } from "lucide-react";
+import { CalendarCheck2, Copy, Link2, RefreshCw, ShieldAlert, Split } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,12 @@ type TodaySession = {
   tally: Record<string, number>;
   roster: RosterRow[];
   suspected: string[];
+  recent: { ulid: string; nama_lengkap: string; nis: string; checked_in_at: string; is_late: boolean }[];
+  discrepancy: {
+    available: boolean;
+    no_lesson: { nama_lengkap: string; nis: string }[];
+    no_gate: { nama_lengkap: string; nis: string }[];
+  };
 };
 
 const DAY_LABEL = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"];
@@ -281,6 +287,14 @@ export default function AdminDailyAttendancePage() {
                     <p className="text-xs text-muted-foreground">
                       Radius minimal 30 m — GPS ponsel meleset ±10–50 m; radius terlalu kecil menolak siswa jujur.
                     </p>
+
+                    {!settings.geo.required && (
+                      <p className="rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">
+                        Tanpa radius GPS, satu-satunya penjaga adalah QR yang harus terlihat di gerbang — foto QR
+                        yang dikirim lewat <em>video call</em> masih bisa lolos. Sangat disarankan menyalakan radius
+                        GPS untuk unit gerbang.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -423,6 +437,48 @@ export default function AdminDailyAttendancePage() {
                   <div className="mt-3 grid gap-4 lg:grid-cols-2">
                     <GateQrPanel sessionUlid={session.ulid} query={query} />
                     <ManualMark session={session} query={query} onDone={load} />
+                  </div>
+                )}
+
+                {settings.intake_mode === "gerbang" && session.type === "masuk" && session.recent.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-border p-3">
+                    <p className="text-xs font-medium text-muted-foreground">Check-in terakhir (pantau nama yang lewat)</p>
+                    <div className="mt-2 flex flex-col divide-y divide-border/60">
+                      {session.recent.map((r) => (
+                        <div key={r.ulid + r.checked_in_at} className="flex items-center justify-between gap-2 py-1.5 text-sm">
+                          <span>
+                            {r.nama_lengkap}
+                            <span className="ml-2 text-xs text-muted-foreground">{r.nis}</span>
+                            {r.is_late && <span className="ml-2 text-xs text-warn">terlambat</span>}
+                          </span>
+                          <span className="font-mono text-xs text-muted-foreground">{r.checked_in_at}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {session.type === "masuk" && session.discrepancy.available === true && (session.discrepancy.no_lesson.length > 0 || session.discrepancy.no_gate.length > 0) && (
+                  <div className="mt-3 flex items-start gap-2 rounded-lg bg-warn/10 p-3 text-sm text-warn">
+                    <Split className="mt-0.5 size-4 shrink-0" />
+                    <div className="flex flex-col gap-1">
+                      {session.discrepancy.no_lesson.length > 0 && (
+                        <p>
+                          Tercatat hadir di gerbang tetapi tidak ada di presensi mapel mana pun hari ini —{" "}
+                          <strong>
+                            {session.discrepancy.no_lesson.map((s) => `${s.nama_lengkap} (${s.nis})`).join(", ")}
+                          </strong>
+                        </p>
+                      )}
+                      {session.discrepancy.no_gate.length > 0 && (
+                        <p>
+                          Hadir di presensi mapel tetapi hari ini tidak tercatat hadir —{" "}
+                          <strong>
+                            {session.discrepancy.no_gate.map((s) => `${s.nama_lengkap} (${s.nis})`).join(", ")}
+                          </strong>
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
 

@@ -1,8 +1,8 @@
 "use client";
 
 import { use, useEffect, useRef, useState } from "react";
-import jsQR from "jsqr";
 import { AlertTriangle, CheckCircle2, Clock, ImageUp, MapPin, QrCode, ScanLine, School } from "lucide-react";
+import { decodeQrFromFile, deviceId, getPosition, useQrScanner } from "@/lib/absen-qr";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -43,80 +43,27 @@ type Screen =
   | { step: "success"; name: string; late: boolean; jam: string }
   | { step: "already"; name: string };
 
-function deviceId(): string {
-  // The device-once rule's token. localStorage survives visits; incognito
-  // starts fresh - which is exactly what the IP-sharing flag on the TU board
-  // is there to catch (§6 layer 5).
-  let id = localStorage.getItem("absen-device-id");
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem("absen-device-id", id);
-  }
-  return id;
-}
-
-function getPosition(): Promise<{ lat: number; lng: number } | null> {
-  return new Promise((resolve) => {
-    if (!("geolocation" in navigator)) return resolve(null);
-
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
-    );
-  });
-}
-
-/** Decodes a QR from a gallery photo onto the same code string a live scan yields. */
-function decodeQrFromFile(file: File): Promise<string | null> {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-
-      const scale = Math.min(1, 1200 / Math.max(img.width, img.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(img.width * scale));
-      canvas.height = Math.max(1, Math.round(img.height * scale));
-
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) return resolve(null);
-
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const found = jsQR(frame.data, frame.width, frame.height, { inversionAttempts: "attemptBoth" });
-
-      resolve(found?.data?.trim() || null);
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(null);
-    };
-
-    img.src = url;
-  });
-}
-
 export default function GateCheckInPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
 
   const [info, setInfo] = useState<GateInfo | null>(null);
   const [screen, setScreen] = useState<Screen>({ step: "loading" });
-  const [position, setPosition] = useState<{ lat: number; lng: number } | null>(null);
+  const [position, setPosition] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
   const [nis, setNis] = useState("");
   const [manualCode, setManualCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const videoRef = useRef<HTMLVideoElement>(null);
 
-  // The camera loop needs to call submitCheckIn the moment it reads a code,
-  // but that closure goes stale the moment state changes - keep the latest
-  // one behind a ref instead of re-running the stream for every keystroke.
+  // The scanner needs to submit the moment it reads a code, but that closure
+  // goes stale the moment state changes - the hook keeps the latest callback
+  // behind a ref instead of re-running the stream for every keystroke.
+  const screenRef = useRef(screen);
   const submitRef = useRef<(code: string) => Promise<void>>(async () => {});
-  const submitRefDone = useRef(false);
+
+  const { videoRef, cameraError, rearm } = useQrScanner(screen.step === "scan", (code) => {
+    const current = screenRef.current;
+    if (current.step === "scan") submitRef.current(code);
+  });
 
   useEffect(() => {
     api
@@ -140,59 +87,6 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
       })
       .catch(() => setScreen({ step: "unavailable", reason: "Link absen tidak dikenali atau sudah tidak berlaku." }));
   }, [slug]);
-
-  // The camera scan loop: back camera, jsQR over canvas frames, and the
-  // decode hands straight to submitRef - no intermediate screen, no delay
-  // for the rotating code to go stale in. Runs only on the scan step and
-  // tears the stream down the moment the step changes.
-  useEffect(() => {
-    if (screen.step !== "scan") return;
-
-    let stream: MediaStream | null = null;
-    let raf = 0;
-    let stopped = false;
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-
-    (async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        const video = videoRef.current;
-        if (!video || stopped) return;
-        video.srcObject = stream;
-        await video.play();
-
-        const tick = () => {
-          if (stopped) return;
-
-          if (video.readyState === video.HAVE_ENOUGH_DATA && ctx && !submitRefDone.current) {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0);
-            const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const found = jsQR(frame.data, frame.width, frame.height, { inversionAttempts: "dontInvert" });
-
-            if (found?.data) {
-              submitRefDone.current = true; // stop later frames from double-firing
-              submitRef.current(found.data.trim());
-              return;
-            }
-          }
-
-          raf = requestAnimationFrame(tick);
-        };
-        raf = requestAnimationFrame(tick);
-      } catch {
-        setError("Kamera tidak dapat diakses — gunakan pilih foto atau ketik kode manual di bawah.");
-      }
-    })();
-
-    return () => {
-      stopped = true;
-      cancelAnimationFrame(raf);
-      stream?.getTracks().forEach((t) => t.stop());
-    };
-  }, [screen.step]);
 
   async function start() {
     setError("");
@@ -244,7 +138,6 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
 
   /** The one write - fires the instant a code arrives, from camera, gallery or keyboard. */
   async function submitCheckIn(code: string, confirmedNis: string, name: string) {
-    submitRefDone.current = true; // one in-flight submission, whichever lane started it
     setBusy(true);
     setError("");
 
@@ -258,6 +151,7 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
         qr_code: info?.qr_required && code ? code : undefined,
         lat: info?.geo.required && position ? position.lat : undefined,
         lng: info?.geo.required && position ? position.lng : undefined,
+        accuracy: info?.geo.required && position ? position.accuracy : undefined,
         device_id: deviceId(),
       });
 
@@ -266,22 +160,25 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
     } catch (err) {
       // Whatever went wrong is shown right here on the scan step - never a
       // silent bounce back to another screen (the bug that made confirmations
-      // "do nothing" in the first field tests).
+      // "do nothing" in the first field tests). A rejected code (wrong QR,
+      // expired window) re-arms the camera for another go.
       if (err instanceof ApiError && err.status === 409 && err.message.includes("Sudah tercatat")) {
         setScreen({ step: "already", name });
       } else {
         setError(err instanceof ApiError ? err.message : "Absen gagal diproses. Coba lagi.");
+        rearm();
       }
     } finally {
       setBusy(false);
-      submitRefDone.current = false;
     }
   }
 
   useEffect(() => {
+    screenRef.current = screen;
     submitRef.current = async (code: string) => {
-      if (screen.step === "scan") {
-        await submitCheckIn(code, screen.nis, screen.name);
+      const current = screenRef.current;
+      if (current.step === "scan") {
+        await submitCheckIn(code, current.nis, current.name);
       }
     };
   });
@@ -400,9 +297,7 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
                 className="flex-1"
                 disabled={busy}
                 onClick={() =>
-                  info?.qr_required
-                    ? setScreen({ step: "scan", nis: screen.nis, name: screen.name })
-                    : submitCheckIn("", screen.nis, screen.name)
+                  setScreen({ step: "scan", nis: screen.nis, name: screen.name })
                 }
               >
                 <ScanLine className="size-4" /> Ya, scan QR
@@ -422,6 +317,12 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
               <video ref={videoRef} playsInline muted className="size-full object-cover" />
               <div className="pointer-events-none absolute inset-6 rounded-lg border-2 border-primary/70" />
             </div>
+
+            {cameraError && (
+              <p className="text-xs text-muted-foreground">
+                Kamera tidak dapat diakses — gunakan pilih foto atau ketik kode manual di bawah.
+              </p>
+            )}
 
             {errorBox}
 

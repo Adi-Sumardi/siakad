@@ -11,6 +11,7 @@ use App\Models\AttendanceSession;
 use App\Models\ClassSchedule;
 use App\Services\Attendance\AttendanceLedger;
 use App\Services\Attendance\AttendanceSessionService;
+use App\Services\Attendance\RotatingQrService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -48,6 +49,29 @@ class AttendanceSessionController extends Controller
                 'expires_at' => $session->expires_at,
             ],
             'checkin_url' => rtrim((string) config('app.frontend_url'), '/').'/presensi/'.$session->token,
+        ]);
+    }
+
+    /**
+     * The roll-call screen's rotating code - the same HMAC window scheme the
+     * gate uses (RotatingQrService), scoped to this lesson session. A code
+     * scanned anywhere the teacher's screen is NOT visible is dead within a
+     * minute, so the session's static check-in URL stops being a shareable
+     * "absen dari kantin" credential: the URL gets you to the page, the
+     * rotating code gets you counted.
+     */
+    public function rotatingQr(Request $request, string $sessionUlid, RotatingQrService $qr): JsonResponse
+    {
+        $session = $this->ownSession($request, $sessionUlid);
+
+        if (! $session->isOpen()) {
+            return response()->json(['message' => 'Sesi presensi ini sudah ditutup.'], 410);
+        }
+
+        return response()->json([
+            'code' => $qr->code(RotatingQrService::lessonScope($session->ulid)),
+            'rotates_in' => $qr->secondsUntilRotation(),
+            'window_seconds' => RotatingQrService::WINDOW_SECONDS,
         ]);
     }
 

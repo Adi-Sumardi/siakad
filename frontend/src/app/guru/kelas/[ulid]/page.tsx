@@ -255,7 +255,6 @@ function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
   }
 
   if (schedules === null) return <Skeleton className="h-14 w-full rounded-xl" />;
-  if (schedules.length === 0) return null;
 
   return (
     <Card className="p-4">
@@ -263,7 +262,16 @@ function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
         <UserCheck className="size-4" />
         Jadwal Hari Ini
       </h2>
-      <div className="flex flex-col gap-2">
+      {/* Presensi per mapel dibuka dari sini - a panel that vanishes on
+          schedule-less days reads as "the feature is gone", not "no lessons
+          today" (a confusion the first field walkthrough hit for real). */}
+      {schedules.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Tidak ada jam pelajaran terjadwal untuk kelas ini hari ini — presensi mapel dibuka dari daftar jadwal di
+          panel ini.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
         {schedules.map((s) => (
           <div key={s.ulid} className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 p-2.5">
             <div>
@@ -284,7 +292,8 @@ function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
             )}
           </div>
         ))}
-      </div>
+        </div>
+      )}
     </Card>
   );
 }

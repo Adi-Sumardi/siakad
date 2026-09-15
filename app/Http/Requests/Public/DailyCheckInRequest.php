@@ -25,6 +25,7 @@ class DailyCheckInRequest extends FormRequest
             'device_id' => ['nullable', 'string', 'max:64'],
             'lat' => ['nullable', 'numeric', 'between:-90,90'],
             'lng' => ['nullable', 'numeric', 'between:-180,180'],
+            'accuracy' => ['nullable', 'numeric', 'min:0'],
             'qr_code' => ['nullable', 'string', 'max:32'],
         ];
     }

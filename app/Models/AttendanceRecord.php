@@ -12,7 +12,7 @@ class AttendanceRecord extends Model
 
     protected $fillable = [
         'student_id', 'attendance_session_id', 'classroom_id', 'term_id',
-        'attendance_status', 'occurred_on', 'source', 'description',
+        'attendance_status', 'occurred_on', 'source', 'device_hash', 'description',
         'recorded_by', 'record_status', 'revoked_by', 'revoked_at', 'revoke_reason',
     ];
 

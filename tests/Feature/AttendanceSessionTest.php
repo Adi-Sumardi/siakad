@@ -17,6 +17,8 @@ use App\Models\Term;
 use App\Models\User;
 use App\Services\Attendance\AttendanceLedger;
 use App\Services\Attendance\AttendanceSessionService;
+use App\Services\Attendance\DailyAttendanceService;
+use App\Services\Attendance\RotatingQrService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\TestCase;
@@ -127,6 +129,12 @@ class AttendanceSessionTest extends TestCase
         return app(AttendanceSessionService::class)->open($schedule, Carbon::today(), $openedBy);
     }
 
+    /** The rotating code a student's scan submits - proof the teacher's roll-call screen was in sight. */
+    private function rollCode(AttendanceSession $session): string
+    {
+        return app(RotatingQrService::class)->code(RotatingQrService::lessonScope($session->ulid));
+    }
+
     // --- Session lifecycle -------------------------------------------------
 
     public function test_a_guru_opens_a_session_for_their_own_schedule_via_the_api(): void
@@ -229,7 +237,7 @@ class AttendanceSessionTest extends TestCase
         $guru = $this->staff('guru', $this->sd);
         $session = $this->openSession($schedule, $guru);
 
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20002'])
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20002', 'qr_code' => $this->rollCode($session)])
             ->assertStatus(200)
             ->assertJsonPath('student.nama_panggilan', $student->nama_panggilan);
 
@@ -247,7 +255,7 @@ class AttendanceSessionTest extends TestCase
         $guru = $this->staff('guru', $this->sd);
         $session = $this->openSession($schedule, $guru);
 
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20003']);
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20003', 'qr_code' => $this->rollCode($session)]);
 
         $this->postJson("/api/presensi/{$session->token}/lookup", ['nis' => '20003'])
             ->assertJson(['already_checked_in' => true]);
@@ -261,8 +269,9 @@ class AttendanceSessionTest extends TestCase
         $guru = $this->staff('guru', $this->sd);
         $session = $this->openSession($schedule, $guru);
 
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20004'])->assertStatus(200);
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20004'])->assertStatus(409);
+        $code = $this->rollCode($session);
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20004', 'qr_code' => $code])->assertStatus(200);
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20004', 'qr_code' => $code])->assertStatus(409);
 
         $this->assertDatabaseCount('attendance_records', 1);
     }
@@ -276,7 +285,59 @@ class AttendanceSessionTest extends TestCase
         $session = $this->openSession($schedule, $guru);
         $session->forceFill(['status' => 'closed'])->save();
 
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20005'])->assertStatus(410);
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20005', 'qr_code' => $this->rollCode($session)])->assertStatus(410);
+    }
+
+    public function test_check_in_without_or_with_a_stale_rotating_code_is_rejected(): void
+    {
+        $classroom = $this->classroomIn($this->sd);
+        $this->studentIn($classroom, nis: '20101');
+        $schedule = $this->scheduleFor($classroom, $this->subject());
+        $guru = $this->staff('guru', $this->sd);
+        $session = $this->openSession($schedule, $guru);
+
+        // No code at all: the static token URL alone must not be a credential.
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20101'])
+            ->assertStatus(422);
+
+        // A code from two windows ago is dead - a photographed or shared QR
+        // is worthless within a minute.
+        $stale = app(RotatingQrService::class)->code(
+            RotatingQrService::lessonScope($session->ulid),
+            Carbon::now('Asia/Jakarta')->copy()->subSeconds(120),
+        );
+
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20101', 'qr_code' => $stale])
+            ->assertStatus(422);
+
+        $this->assertDatabaseCount('attendance_records', 0);
+    }
+
+    public function test_one_device_cannot_check_in_two_students_in_the_same_lesson_session(): void
+    {
+        $classroom = $this->classroomIn($this->sd);
+        $this->studentIn($classroom, nis: '20102');
+        $this->studentIn($classroom, nis: '20103');
+        $schedule = $this->scheduleFor($classroom, $this->subject());
+        $guru = $this->staff('guru', $this->sd);
+        $session = $this->openSession($schedule, $guru);
+        $code = $this->rollCode($session);
+
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20102', 'qr_code' => $code, 'device_id' => 'one-phone'])
+            ->assertStatus(200);
+
+        // The buddy punch: a second NIS from the same phone.
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20103', 'qr_code' => $code, 'device_id' => 'one-phone'])
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'Perangkat ini sudah dipakai untuk presensi sesi ini.');
+
+        // A different phone for the second student is fine - the rule is per device, not per seat.
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20103', 'qr_code' => $code, 'device_id' => 'other-phone'])
+            ->assertStatus(200);
+
+        $this->assertDatabaseCount('attendance_records', 2);
+        // The device token is stored hashed, never raw.
+        $this->assertDatabaseHas('attendance_records', ['device_hash' => hash('sha256', 'one-phone')]);
     }
 
     // --- Guru session panel --------------------------------------------------
@@ -289,7 +350,7 @@ class AttendanceSessionTest extends TestCase
         $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
         $session = $this->openSession($schedule, $guru);
 
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20006']);
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20006', 'qr_code' => $this->rollCode($session)]);
 
         $response = $this->actingAs($guru)->getJson("/api/guru/attendance-sessions/{$session->ulid}/roster")
             ->assertStatus(200);
@@ -301,6 +362,33 @@ class AttendanceSessionTest extends TestCase
         $this->assertNotNull($aisyah['checked_in_at']);
     }
 
+    public function test_the_assigned_teacher_can_fetch_the_rotating_code_but_others_cannot(): void
+    {
+        $classroom = $this->classroomIn($this->sd);
+        $assigned = $this->staff('guru', $this->sd);
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $assigned);
+        $session = $this->openSession($schedule, $assigned);
+
+        $response = $this->actingAs($assigned)
+            ->getJson("/api/guru/attendance-sessions/{$session->ulid}/rotating-qr")
+            ->assertStatus(200);
+
+        $this->assertSame($this->rollCode($session), $response->json('code'));
+        $this->assertGreaterThan(0, $response->json('rotates_in'));
+
+        // A guru not assigned to this schedule gets a 404, never the code.
+        $this->actingAs($this->staff('guru', $this->sd))
+            ->getJson("/api/guru/attendance-sessions/{$session->ulid}/rotating-qr")
+            ->assertStatus(404);
+
+        // And a closed session stops minting codes.
+        $session->forceFill(['status' => 'closed'])->save();
+
+        $this->actingAs($assigned)
+            ->getJson("/api/guru/attendance-sessions/{$session->ulid}/rotating-qr")
+            ->assertStatus(410);
+    }
+
     public function test_a_guru_revokes_a_check_in_from_the_session_panel(): void
     {
         $classroom = $this->classroomIn($this->sd);
@@ -309,7 +397,7 @@ class AttendanceSessionTest extends TestCase
         $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
         $session = $this->openSession($schedule, $guru);
 
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20007']);
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20007', 'qr_code' => $this->rollCode($session)]);
         $record = AttendanceRecord::where('student_id', $student->id)->firstOrFail();
 
         $this->actingAs($guru)->patchJson(
@@ -330,7 +418,7 @@ class AttendanceSessionTest extends TestCase
         $schedule = $this->scheduleFor($classroom, $this->subject());
         $guru = $this->staff('guru', $this->sd);
         $session = $this->openSession($schedule, $guru);
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20008']);
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20008', 'qr_code' => $this->rollCode($session)]);
         $record = AttendanceRecord::where('student_id', $student->id)->firstOrFail();
 
         $this->actingAs($guru)->patchJson(
@@ -347,7 +435,7 @@ class AttendanceSessionTest extends TestCase
         $guru = $this->staff('guru', $this->sd);
         $otherGuru = $this->staff('guru', $this->smp);
         $session = $this->openSession($schedule, $guru);
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20009']);
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20009', 'qr_code' => $this->rollCode($session)]);
         $record = AttendanceRecord::where('student_id', $student->id)->firstOrFail();
 
         $this->actingAs($otherGuru)->patchJson(
@@ -365,7 +453,7 @@ class AttendanceSessionTest extends TestCase
         $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
         $session = $this->openSession($schedule, $guru);
 
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20010']);
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20010', 'qr_code' => $this->rollCode($session)]);
 
         $this->actingAs($guru)->postJson("/api/guru/attendance-sessions/{$session->ulid}/complete", [
             'records' => [
@@ -398,7 +486,7 @@ class AttendanceSessionTest extends TestCase
         $guru = $this->staff('guru', $this->sd);
         $session = $this->openSession($schedule, $guru);
 
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20012']);
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20012', 'qr_code' => $this->rollCode($session)]);
 
         $record = AttendanceRecord::first();
         $this->assertSame($classroom->id, $record->classroom_id);
@@ -412,7 +500,7 @@ class AttendanceSessionTest extends TestCase
         $schedule = $this->scheduleFor($classroom, $this->subject());
         $guru = $this->staff('guru', $this->sd);
         $session = $this->openSession($schedule, $guru);
-        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20013']);
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20013', 'qr_code' => $this->rollCode($session)]);
         $record = AttendanceRecord::where('student_id', $student->id)->firstOrFail();
 
         app(AttendanceLedger::class)->revoke($record, $guru, 'Pertama.');
@@ -498,6 +586,59 @@ class AttendanceSessionTest extends TestCase
         $response = $this->actingAs($sdAdmin)->getJson('/api/admin/reports/attendance')->assertStatus(200);
 
         $this->assertSame(1, $response->json('summary.total_records'));
+    }
+
+    // --- Gate vs lesson discrepancy (anti "masuk gerbang, bolos mapel") ----
+
+    public function test_the_gate_vs_lesson_discrepancy_flags_both_directions(): void
+    {
+        $classroom = $this->classroomIn($this->smp);
+        $gateOnly = $this->studentIn($classroom, 'Bolos Mapel', '20104'); // hadir gerbang, nol mapel
+        $lessonOnly = $this->studentIn($classroom, 'Tak Lewat Gerbang', '20105'); // hadir mapel, tanpa catatan harian
+        $both = $this->studentIn($classroom, 'Anak Rajin', '20106'); // hadir di keduanya
+        $guru = $this->staff('guru', $this->smp);
+
+        $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
+        $session = $this->openSession($schedule, $guru);
+        $code = $this->rollCode($session);
+
+        foreach (['20105', '20106'] as $nis) {
+            $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => $nis, 'qr_code' => $code])
+                ->assertStatus(200);
+        }
+
+        $today = Carbon::today()->toDateString();
+        $gateMark = $this->dailyMark($gateOnly, $classroom, 'hadir', $today);
+        // Second mark for the same (unit, date, type) goes straight onto the
+        // session dailyMark just created - its firstOrCreate cannot re-find a
+        // datetime-cast date column on SQLite, so a second call would collide.
+        DailyRecord::create([
+            'daily_session_id' => $gateMark->daily_session_id,
+            'student_id' => $both->id,
+            'classroom_id' => $classroom->id,
+            'term_id' => $this->term->id,
+            'date' => $today,
+            'attendance_status' => 'hadir',
+            'source' => 'tu',
+            'record_status' => 'recorded',
+        ]);
+
+        $masuk = $gateMark->dailySession;
+        $report = app(DailyAttendanceService::class)->lessonDiscrepancy($masuk);
+
+        $this->assertTrue($report['available']);
+        $this->assertSame(['Bolos Mapel'], $report['no_lesson']->pluck('nama_lengkap')->all());
+        $this->assertSame(['Tak Lewat Gerbang'], $report['no_gate']->pluck('nama_lengkap')->all());
+
+        // Before any lesson has run, the report stays quiet - a morning board
+        // must not flag the whole school.
+        $emptyReport = app(DailyAttendanceService::class)->lessonDiscrepancy(
+            DailySession::create([
+                'school_unit_id' => $this->sd->id, 'date' => $today, 'type' => 'masuk',
+                'opens_at' => "{$today} 06:30:00", 'closes_at' => "{$today} 08:00:00", 'status' => 'open',
+            ]),
+        );
+        $this->assertFalse($emptyReport['available']);
     }
 
     // --- Regression: bugs found and closed in the debugging pass -----------
@@ -652,7 +793,7 @@ class AttendanceSessionTest extends TestCase
         $schedule = $this->scheduleFor($classroom, $this->subject(), $guru);
         $session = $this->openSession($schedule, $guru);
 
-        $response = $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20100']);
+        $response = $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20100', 'qr_code' => $this->rollCode($session)]);
 
         $response->assertStatus(503);
         $this->assertDatabaseCount('attendance_records', 0);

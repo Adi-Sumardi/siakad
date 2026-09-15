@@ -7,6 +7,7 @@ use App\Models\AttendanceSession;
 use App\Models\Student;
 use App\Models\Term;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +22,8 @@ use RuntimeException;
  */
 class AttendanceLedger
 {
+    public function __construct(private RotatingQrService $qr) {}
+
     /** Whether this student already has a live mark in this session - the "once per session" rule, enforced here so both lookup() and checkIn() controllers can ask the same question. */
     public function hasCheckedIn(AttendanceSession $session, Student $student): bool
     {
@@ -31,41 +34,68 @@ class AttendanceLedger
     }
 
     /**
-     * Self-service check-in. Locks the session row for the duration of the
+     * Self-service check-in. The rotating code from the teacher's screen is
+     * mandatory - without it the session's static token URL alone would be a
+     * shareable credential - and the device-once rule (one phone, one NIS per
+     * session, the same partial-index contract daily_records enforces) closes
+     * the buddy-punching lane. Locks the session row for the duration of the
      * check-then-insert so two near-simultaneous scans for the same student
      * (a flaky retry, a double-tap) can't both pass hasCheckedIn() before
      * either has written - the second waits for the lock and then sees the
      * first's row. Throws if there's no active term rather than writing a
      * term_id the schema does not allow to be null.
      */
-    public function checkIn(AttendanceSession $session, Student $student): AttendanceRecord
+    public function checkIn(AttendanceSession $session, Student $student, ?string $deviceId = null, ?string $qrCode = null): AttendanceRecord
     {
-        return DB::transaction(function () use ($session, $student) {
-            AttendanceSession::whereKey($session->id)->lockForUpdate()->first();
+        if (empty($qrCode)) {
+            throw new RuntimeException('Kode QR wajib - scan QR yang tampil di layar guru.');
+        }
 
-            if ($this->hasCheckedIn($session, $student)) {
-                throw new RuntimeException('Sudah tercatat hadir sebelumnya.');
-            }
+        if (! $this->qr->verify(RotatingQrService::lessonScope($session->ulid), (string) $qrCode)) {
+            throw new RuntimeException('Kode QR tidak dikenali atau sudah kedaluwarsa - scan ulang.');
+        }
 
-            $schedule = $session->classSchedule;
-            $term = Term::current();
+        $deviceHash = ! empty($deviceId) ? hash('sha256', (string) $deviceId) : null;
 
-            if (! $term) {
-                throw new RuntimeException('Tidak ada semester aktif - presensi tidak bisa dicatat saat ini.');
-            }
+        try {
+            return DB::transaction(function () use ($session, $student, $deviceHash) {
+                AttendanceSession::whereKey($session->id)->lockForUpdate()->first();
 
-            return AttendanceRecord::create([
-                'student_id' => $student->id,
-                'attendance_session_id' => $session->id,
-                'classroom_id' => $schedule->classroom_id,
-                'term_id' => $term->id,
-                'attendance_status' => 'hadir',
-                'occurred_on' => $session->occurred_on,
-                'source' => 'self',
-                'recorded_by' => null,
-                'record_status' => 'recorded',
-            ]);
-        });
+                if ($this->hasCheckedIn($session, $student)) {
+                    throw new RuntimeException('Sudah tercatat hadir sebelumnya.');
+                }
+
+                if ($deviceHash && AttendanceRecord::where('attendance_session_id', $session->id)
+                    ->where('device_hash', $deviceHash)->active()->exists()) {
+                    throw new RuntimeException('Perangkat ini sudah dipakai untuk presensi sesi ini.');
+                }
+
+                $schedule = $session->classSchedule;
+                $term = Term::current();
+
+                if (! $term) {
+                    throw new RuntimeException('Tidak ada semester aktif - presensi tidak bisa dicatat saat ini.');
+                }
+
+                return AttendanceRecord::create([
+                    'student_id' => $student->id,
+                    'attendance_session_id' => $session->id,
+                    'classroom_id' => $schedule->classroom_id,
+                    'term_id' => $term->id,
+                    'attendance_status' => 'hadir',
+                    'occurred_on' => $session->occurred_on,
+                    'source' => 'self',
+                    'device_hash' => $deviceHash,
+                    'recorded_by' => null,
+                    'record_status' => 'recorded',
+                ]);
+            });
+        } catch (QueryException) {
+            // The device partial unique won a race the pre-check missed -
+            // the student pre-check cannot race itself (same student, same
+            // lock), so the collision is the device index by elimination.
+            throw new RuntimeException('Perangkat ini sudah dipakai untuk presensi sesi ini.');
+        }
     }
 
     /**

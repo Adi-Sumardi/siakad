@@ -108,6 +108,7 @@ class DailyGateController extends Controller
                 'ip' => $request->ip(),
                 'lat' => $request->validated('lat') !== null ? (float) $request->validated('lat') : null,
                 'lng' => $request->validated('lng') !== null ? (float) $request->validated('lng') : null,
+                'accuracy' => $request->validated('accuracy') !== null ? (float) $request->validated('accuracy') : null,
                 'qr_code' => $request->validated('qr_code'),
             ]);
         } catch (RuntimeException $e) {
@@ -177,7 +178,7 @@ class DailyGateController extends Controller
         return match (true) {
             str_contains($message, 'semester aktif') => 503,
             str_contains($message, 'Sudah tercatat') || str_contains($message, 'Perangkat ini') => 409,
-            str_contains($message, 'QR') || str_contains($message, 'lokasi') || str_contains($message, 'area sekolah') => 422,
+            str_contains($message, 'QR') || str_contains($message, 'lokasi') || str_contains($message, 'area sekolah') || str_contains($message, 'akurat') => 422,
             default => 400,
         };
     }

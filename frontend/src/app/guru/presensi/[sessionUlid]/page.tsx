@@ -20,6 +20,75 @@ type RosterResponse = {
 
 const MANUAL_STATUS_OPTIONS: AttendanceStatus[] = ["sakit", "izin", "alpa", "hadir"];
 
+/**
+ * The roll-call screen's rotating QR - the same 30-second HMAC window the
+ * gate uses (RotatingQrService). THIS is the credential that gets a student
+ * counted; the static URL QR beside it only opens the form. Tampilkan di
+ * proyektor/laptop dan biarkan terbuka - kode berganti sendiri tiap ±30
+ * detik, jadi foto yang disebar mati dalam semenit.
+ */
+function RotatingQrPanel({ sessionUlid }: { sessionUlid: string }) {
+  const [qr, setQr] = useState<{ code: string; rotates_in: number } | null>(null);
+  const [closed, setClosed] = useState(false);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+
+    const tick = () => {
+      api
+        .get<{ code: string; rotates_in: number }>(`/api/guru/attendance-sessions/${sessionUlid}/rotating-qr`)
+        .then((d) => {
+          if (cancelled) return;
+          setQr(d);
+          timer = setTimeout(tick, Math.max(3, d.rotates_in) * 1000);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          if (err instanceof ApiError && err.status === 410) {
+            setClosed(true);
+            return;
+          }
+          timer = setTimeout(tick, 15000);
+        });
+    };
+
+    tick();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [sessionUlid]);
+
+  if (closed) {
+    return (
+      <div className="flex items-center justify-center rounded-lg border border-border p-6 text-sm text-muted-foreground">
+        Sesi sudah ditutup — QR tidak lagi diterbitkan.
+      </div>
+    );
+  }
+
+  return (
+    <Card className="flex flex-col items-center gap-2 p-6">
+      <p className="text-xs font-medium text-muted-foreground">
+        Langkah 2 — setelah NIS, siswa scan QR ini untuk tercatat hadir
+      </p>
+      {qr ? (
+        <>
+          <QRCodeSVG value={qr.code} size={180} className="rounded-lg bg-white p-2" />
+          <p className="font-mono text-lg font-bold tracking-[0.25em]">{qr.code}</p>
+          <p className="text-xs text-muted-foreground">
+            Berganti otomatis tiap ±{qr.rotates_in} detik — biarkan halaman ini terbuka.
+          </p>
+        </>
+      ) : (
+        <Skeleton className="h-44 w-44" />
+      )}
+    </Card>
+  );
+}
+
 function RevokeDialog({
   record, onClose, onConfirm,
 }: {
@@ -132,10 +201,23 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
         </p>
       </div>
 
-      <Card className="flex flex-col items-center gap-3 p-6">
-        <p className="text-xs font-medium text-muted-foreground">Siswa scan kode ini dengan HP mereka</p>
-        {roster ? <QRCodeSVG value={roster.checkin_url} size={200} /> : <Skeleton className="size-50" />}
-      </Card>
+      {roster?.session.is_open ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <RotatingQrPanel sessionUlid={sessionUlid} />
+          <Card className="flex flex-col items-center justify-center gap-3 p-6">
+            <p className="text-xs font-medium text-muted-foreground">Langkah 1 — siswa buka halaman presensi</p>
+            {roster ? <QRCodeSVG value={roster.checkin_url} size={140} /> : <Skeleton className="size-35" />}
+            <p className="text-xs text-muted-foreground">
+              Scan ini (atau buka link dari grup) membuka form NIS — baru dihitung hadir setelah menyelesaikan
+              langkah 2.
+            </p>
+          </Card>
+        </div>
+      ) : (
+        <Card className="flex flex-col items-center gap-3 p-6">
+          <p className="text-xs font-medium text-muted-foreground">Sesi ditutup — QR tidak lagi diterbitkan</p>
+        </Card>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>

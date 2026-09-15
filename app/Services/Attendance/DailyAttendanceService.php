@@ -2,6 +2,8 @@
 
 namespace App\Services\Attendance;
 
+use App\Models\AttendanceRecord;
+use App\Models\AttendanceSession;
 use App\Models\Classroom;
 use App\Models\DailyRecord;
 use App\Models\Enrollment;
@@ -42,7 +44,7 @@ class DailyAttendanceService
 
     public function __construct(
         private DailyAttendanceNotifier $notifier,
-        private GateQrService $qr,
+        private RotatingQrService $qr,
     ) {}
 
     /** First-or-create the unit's settings row, pre-filled with the jenjang's default mode and sane bells. */
@@ -344,7 +346,7 @@ class DailyAttendanceService
      * under a session row lock, so two scans racing each other cannot both
      * pass the pre-checks.
      *
-     * @param  array{device_id:?string, ip:?string, lat:?float, lng:?float, qr_code:?string}  $input
+     * @param  array{device_id:?string, ip:?string, lat:?float, lng:?float, accuracy:?float, qr_code:?string}  $input
      */
     public function selfCheckIn(DailySession $session, Student $student, array $input): DailyRecord
     {
@@ -369,7 +371,7 @@ class DailyAttendanceService
                 throw new RuntimeException('Kode QR wajib - scan QR yang tampil di gerbang.');
             }
 
-            if (! $this->qr->verify($session, (string) $input['qr_code'])) {
+            if (! $this->qr->verify(RotatingQrService::dailyScope($session->ulid), (string) $input['qr_code'])) {
                 throw new RuntimeException('Kode QR tidak dikenali atau sudah kedaluwarsa - scan ulang.');
             }
         }
@@ -386,6 +388,16 @@ class DailyAttendanceService
 
             if ($distance > (float) $setting->geo_radius_m) {
                 throw new RuntimeException('Posisi Anda terdeteksi di luar area sekolah.');
+            }
+
+            // The browser's own confidence in metres. A fix worse than half
+            // the radius cannot distinguish "at the gate" from "past it", and
+            // mock-location apps often hand out implausibly exact or absurdly
+            // wide values - either way the position is not evidence (§6 layer 2).
+            if (isset($input['accuracy']) && (float) $input['accuracy'] > (float) $setting->geo_radius_m / 2) {
+                throw new RuntimeException(
+                    'Sinyal GPS Anda kurang akurat (±'.round((float) $input['accuracy']).' m) - coba lagi di tempat terbuka.'
+                );
             }
         }
 
@@ -480,6 +492,87 @@ class DailyAttendanceService
             ->unique();
 
         return Student::whereIn('id', $suspectIds)->pluck('ulid');
+    }
+
+    /**
+     * The newest self check-ins of a session, newest first - the TU board's
+     * live feed (§6 layer 4: a human at the gate glancing at names going by
+     * is the cheapest fraud detector there is).
+     *
+     * @return Collection<int, array{ulid:string, nama_lengkap:string, nis:string, checked_in_at:string, is_late:bool}>
+     */
+    public function recentCheckIns(DailySession $session, int $limit = 8): Collection
+    {
+        return DailyRecord::where('daily_session_id', $session->id)
+            ->active()
+            ->where('source', 'self')
+            ->with('student:id,ulid,nama_lengkap,nis')
+            ->orderByDesc('checked_in_at')
+            ->limit($limit)
+            ->get()
+            ->map(fn (DailyRecord $record) => [
+                'ulid' => $record->student->ulid,
+                'nama_lengkap' => $record->student->nama_lengkap,
+                'nis' => $record->student->nis,
+                'checked_in_at' => $record->checked_in_at?->format('H:i') ?? '',
+                'is_late' => (bool) $record->is_late,
+            ]);
+    }
+
+    /**
+     * Cross-checks the two attendance layers for one masuk session: who was
+     * hadir at the gate but left no lesson record at all (masuk lalu bolos),
+     * and who has lesson records without a hadir day (masuk tanpa lewat
+     * gerbang / ditandai sakit tapi ikut pelajaran). Only meaningful once the
+     * unit actually ran lesson periods that day - a morning board before any
+     * lesson opened would otherwise flag the whole school.
+     *
+     * @return array{available:bool, no_lesson:Collection<int, array{nama_lengkap:string, nis:string}>, no_gate:Collection<int, array{nama_lengkap:string, nis:string}>}
+     */
+    public function lessonDiscrepancy(DailySession $session): array
+    {
+        $lessonRanToday = AttendanceSession::query()
+            ->whereDate('occurred_on', $session->date->toDateString())
+            ->whereHas('classSchedule.classroom', fn ($q) => $q->where('school_unit_id', $session->school_unit_id))
+            ->exists();
+
+        if (! $lessonRanToday) {
+            return ['available' => false, 'no_lesson' => collect(), 'no_gate' => collect()];
+        }
+
+        $dailyRecords = DailyRecord::where('daily_session_id', $session->id)
+            ->active()
+            ->get(['student_id', 'attendance_status'])
+            ->keyBy('student_id');
+
+        $lessonStudentIds = AttendanceRecord::query()
+            ->whereDate('occurred_on', $session->date->toDateString())
+            ->active()
+            ->whereHas('student', fn ($q) => $q->where('school_unit_id', $session->school_unit_id))
+            ->distinct()
+            ->pluck('student_id');
+
+        $students = Student::query()
+            ->whereIn('id', $dailyRecords->keys()->merge($lessonStudentIds)->unique())
+            ->get(['id', 'nama_lengkap', 'nis'])
+            ->keyBy('id');
+
+        $name = fn (int $id) => ['nama_lengkap' => $students[$id]->nama_lengkap, 'nis' => $students[$id]->nis];
+
+        return [
+            'available' => true,
+            // Present at the gate, absent from every lesson period.
+            'no_lesson' => $dailyRecords
+                ->filter(fn ($r, $id) => $r->attendance_status === 'hadir' && ! $lessonStudentIds->contains($id))
+                ->keys()
+                ->map($name)
+                ->values(),
+            // Present in lessons, but the day itself is not a hadir day.
+            'no_gate' => $lessonStudentIds
+                ->filter(fn (int $id) => ! $dailyRecords->has($id) || $dailyRecords[$id]->attendance_status !== 'hadir')
+                ->map($name)
+                ->values(),
+        ];
     }
 
     /**

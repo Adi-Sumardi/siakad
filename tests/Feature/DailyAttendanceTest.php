@@ -14,7 +14,7 @@ use App\Models\Student;
 use App\Models\Term;
 use App\Models\User;
 use App\Services\Attendance\DailyAttendanceService;
-use App\Services\Attendance\GateQrService;
+use App\Services\Attendance\RotatingQrService;
 use App\Services\Notification\NotificationResult;
 use App\Services\Notification\WhatsAppGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -497,7 +497,7 @@ class DailyAttendanceTest extends TestCase
 
         $this->postJson('/api/absen/publik-smp/check-in', [
             'nis' => '20020',
-            'qr_code' => app(GateQrService::class)->code($session),
+            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100, // ~1.5 m from the gate
             'device_id' => 'device-A',
         ])
@@ -529,7 +529,7 @@ class DailyAttendanceTest extends TestCase
 
         $this->postJson('/api/absen/publik-smp/check-in', [
             'nis' => '20021',
-            'qr_code' => app(GateQrService::class)->code($session),
+            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100,
             'device_id' => 'device-B',
         ])
@@ -548,8 +548,8 @@ class DailyAttendanceTest extends TestCase
         $student = $this->studentIn($classroom, '20022');
         $session = $this->masukSessionFor($this->smp);
 
-        $qr = app(GateQrService::class);
-        $stale = $qr->code($session, Carbon::now('Asia/Jakarta')->copy()->subSeconds(120));
+        $qr = app(RotatingQrService::class);
+        $stale = $qr->code(RotatingQrService::dailyScope($session->ulid), Carbon::now('Asia/Jakarta')->copy()->subSeconds(120));
 
         $this->postJson('/api/absen/publik-smp/check-in', [
             'nis' => '20022', 'qr_code' => $stale,
@@ -557,12 +557,38 @@ class DailyAttendanceTest extends TestCase
         ])->assertStatus(422);
 
         $this->postJson('/api/absen/publik-smp/check-in', [
-            'nis' => '20022', 'qr_code' => $qr->code($session),
+            'nis' => '20022', 'qr_code' => $qr->code(RotatingQrService::dailyScope($session->ulid)),
             'lat' => -6.2100000, 'lng' => 106.8000000, // ~1.1 km away
             'device_id' => 'device-C',
         ])->assertStatus(422);
 
         $this->assertDatabaseMissing('daily_records', ['student_id' => $student->id]);
+    }
+
+    public function test_a_low_confidence_gps_fix_is_rejected_but_a_tight_one_passes(): void
+    {
+        $this->gateSetting(); // radius 100 m, so the accuracy ceiling is 50 m
+        $classroom = $this->classroomIn($this->smp);
+        $student = $this->studentIn($classroom, '20035');
+        $session = $this->masukSessionFor($this->smp);
+
+        $payload = fn (float $accuracy) => [
+            'nis' => '20035',
+            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid)),
+            'lat' => -6.2000100, 'lng' => 106.8000100, // ~1.5 m from the gate
+            'accuracy' => $accuracy,
+            'device_id' => 'device-G',
+        ];
+
+        // A fix wider than half the radius cannot tell "at the gate" from
+        // "past it" - and no record is written for the try.
+        $this->postJson('/api/absen/publik-smp/check-in', $payload(120.0))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Sinyal GPS Anda kurang akurat (±120 m) - coba lagi di tempat terbuka.');
+
+        $this->postJson('/api/absen/publik-smp/check-in', $payload(20.0))->assertStatus(200);
+
+        $this->assertDatabaseHas('daily_records', ['student_id' => $student->id, 'attendance_status' => 'hadir']);
     }
 
     public function test_one_device_cannot_check_in_two_students_and_one_nis_cannot_check_in_twice(): void
@@ -572,7 +598,7 @@ class DailyAttendanceTest extends TestCase
         $first = $this->studentIn($classroom, '20023');
         $second = $this->studentIn($classroom, '20024');
         $session = $this->masukSessionFor($this->smp);
-        $code = app(GateQrService::class)->code($session);
+        $code = app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid));
 
         $payload = fn (string $nis, string $device) => [
             'nis' => $nis, 'qr_code' => $code,
@@ -625,7 +651,7 @@ class DailyAttendanceTest extends TestCase
         // The QR endpoint hands the TU screen today's code, same one a scan would verify.
         $qr = $this->actingAs($tu)->getJson("/api/admin/daily-attendance/sessions/{$session->ulid}/gate-qr")
             ->assertStatus(200);
-        $this->assertSame(app(GateQrService::class)->code($session), $qr->json('code'));
+        $this->assertSame(app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid)), $qr->json('code'));
         $this->assertGreaterThan(0, $qr->json('rotates_in'));
 
         // Another unit's TU gets a 404, never a 403.
@@ -652,7 +678,7 @@ class DailyAttendanceTest extends TestCase
         $b = $this->studentIn($classroom, '20028'); // default 127.0.0.1
         $c = $this->studentIn($classroom, '20029');
         $session = $this->masukSessionFor($this->smp);
-        $code = app(GateQrService::class)->code($session);
+        $code = app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid));
 
         $payload = fn (string $nis, string $device) => [
             'nis' => $nis, 'qr_code' => $code,
@@ -719,7 +745,7 @@ class DailyAttendanceTest extends TestCase
 
         $this->postJson('/api/absen/publik-smp/check-in', [
             'nis' => '20033',
-            'qr_code' => app(GateQrService::class)->code($session),
+            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100, 'device_id' => 'device-E',
         ])->assertStatus(200);
 
@@ -811,7 +837,7 @@ class DailyAttendanceTest extends TestCase
         // And the freed student can actually check in at the gate.
         $this->postJson('/api/absen/publik-smp/check-in', [
             'nis' => '20034',
-            'qr_code' => app(GateQrService::class)->code($masuk),
+            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($masuk->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100, 'device_id' => 'device-F',
         ])->assertStatus(200)->assertJsonPath('is_late', false);
 

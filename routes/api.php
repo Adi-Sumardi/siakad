@@ -167,6 +167,7 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
 
     Route::get('/classrooms/{ulid}/schedules/today', [GuruClassroomController::class, 'schedulesToday']);
     Route::post('/schedules/{ulid}/attendance-sessions', [GuruAttendanceSessionController::class, 'open']);
+    Route::get('/attendance-sessions/{ulid}/rotating-qr', [GuruAttendanceSessionController::class, 'rotatingQr']);
     Route::get('/attendance-sessions/{ulid}/roster', [GuruAttendanceSessionController::class, 'roster']);
     Route::patch('/attendance-sessions/{ulid}/records/{recordUlid}/revoke', [GuruAttendanceSessionController::class, 'revoke']);
     Route::post('/attendance-sessions/{ulid}/complete', [GuruAttendanceSessionController::class, 'complete']);

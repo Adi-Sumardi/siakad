@@ -83,9 +83,18 @@ class AttendancePresensiController extends Controller
         // for this student won the race in between - the pre-check here is
         // just a fast path for the common case, not the real guard.
         try {
-            $ledger->checkIn($session, $student);
+            $ledger->checkIn(
+                $session,
+                $student,
+                $request->validated('device_id'),
+                $request->validated('qr_code'),
+            );
         } catch (RuntimeException $e) {
-            $status = str_contains($e->getMessage(), 'semester aktif') ? 503 : 409;
+            $status = match (true) {
+                str_contains($e->getMessage(), 'semester aktif') => 503,
+                str_contains($e->getMessage(), 'QR') => 422,
+                default => 409,
+            };
 
             return response()->json(['message' => $e->getMessage()], $status);
         }
