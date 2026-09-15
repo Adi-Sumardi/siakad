@@ -2,7 +2,7 @@
 
 import { use, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock, ImageUp, MapPin, QrCode, ScanLine, School } from "lucide-react";
-import { decodeQrFromFile, deviceId, getPosition, useQrScanner } from "@/lib/absen-qr";
+import { decodeQrFromFile, deviceId, getPosition, rememberNis, useQrScanner } from "@/lib/absen-qr";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -119,6 +119,7 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
         `/api/absen/${slug}/lookup`,
         { nis },
       );
+      rememberNis(nis);
 
       if (result.already_checked_in) {
         setScreen({ step: "already", name: result.student.nama_panggilan });

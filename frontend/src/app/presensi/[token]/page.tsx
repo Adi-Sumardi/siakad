@@ -2,7 +2,7 @@
 
 import { use, useEffect, useRef, useState } from "react";
 import { CheckCircle2, ImageUp, ScanLine, School } from "lucide-react";
-import { decodeQrFromFile, deviceId, useQrScanner } from "@/lib/absen-qr";
+import { decodeQrFromFile, deviceId, rememberNis, rememberedNis, useQrScanner } from "@/lib/absen-qr";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,13 +10,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
 
 /**
- * The per-lesson check-in (SMP/SMA mapel). Same shape as the gate page, on
- * purpose: the static token URL in the QR that OPENS this page is no longer
- * the credential - the rotating code on the teacher's roll-call screen is.
- * A URL shared to the class group gets you to the form; without seeing the
- * teacher's screen within the last ~60 seconds, the check-in refuses. The
- * NIS is typed first (no deadline), the rotating QR is scanned last and
- * submitted the instant it reads - the gate flow's field-tested order.
+ * The per-lesson check-in (SMP/SMA mapel). The teacher's screen shows ONE
+ * rotating QR carrying "{checkin_url}#{code}" - scanning it with the phone's
+ * own camera opens this page AND delivers the fresh window code, which is
+ * the real credential (the URL alone proves nothing). Phones that have
+ * checked in before also remember their NIS, so that scan lands straight on
+ * a one-tap confirm - "langsung hadir" after the first ever typing. A URL
+ * without a fresh code, a code from a photo, or a slow typer who outruns the
+ * ~60 s code life falls through to the in-page scanner (camera, gallery
+ * photo, or typing the 8 characters) - the gate flow's field-tested order.
  */
 
 type SessionInfo = { subject: string; classroom: string; start_time: string; end_time: string };
@@ -91,6 +93,36 @@ export default function PresensiPage({ params }: { params: Promise<{ token: stri
     }
   }, [screen.step]);
 
+  // The "langsung hadir" lane: a native scan of the teacher's rotating QR
+  // carried a fresh code in the hash, and this phone remembers whose NIS it
+  // last checked in as - resolve that NIS straight to the one-tap confirm (or
+  // straight to "already"), skipping the typing step entirely. Tried once per
+  // visit; anything wrong (forgotten transfer, wrong NIS remembered) simply
+  // falls back to the ordinary typing form.
+  const autoTriedRef = useRef(false);
+
+  useEffect(() => {
+    if (screen.step !== "idle" || autoTriedRef.current) return;
+
+    const remembered = rememberedNis();
+    if (!presetCode || !remembered) return;
+
+    autoTriedRef.current = true;
+
+    api
+      .post<LookupResult>(`/api/presensi/${token}/lookup`, { nis: remembered })
+      .then((result) => {
+        if (result.already_checked_in) {
+          setScreen({ step: "already", name: result.student.nama_panggilan });
+        } else {
+          setScreen({ step: "confirm", nis: remembered, name: result.student.nama_panggilan });
+        }
+      })
+      .catch(() => {
+        // Not enrolled in this classroom / anything else - type it in.
+      });
+  }, [screen.step, presetCode, token]);
+
   async function submitNis(e: React.FormEvent) {
     e.preventDefault();
     if (!nis.trim() || busy) return;
@@ -99,6 +131,7 @@ export default function PresensiPage({ params }: { params: Promise<{ token: stri
 
     try {
       const result = await api.post<LookupResult>(`/api/presensi/${token}/lookup`, { nis });
+      rememberNis(nis);
       if (result.already_checked_in) {
         setScreen({ step: "already", name: result.student.nama_panggilan });
       } else {

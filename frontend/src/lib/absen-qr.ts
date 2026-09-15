@@ -22,6 +22,21 @@ export function deviceId(): string {
   return id;
 }
 
+/**
+ * The NIS this phone last checked in as - remembered after one successful
+ * lookup so the NEXT scan is one tap instead of a typing exercise. Stored
+ * client-side only, on the student's own phone; "Bukan saya" on the confirm
+ * screen falls back to the typing form and the retyped NIS overwrites it
+ * (a borrowed phone self-heals the same way).
+ */
+export function rememberedNis(): string | null {
+  return localStorage.getItem("absen-nis");
+}
+
+export function rememberNis(nis: string): void {
+  localStorage.setItem("absen-nis", nis);
+}
+
 /** One high-accuracy GPS fix, or null when denied/unavailable - never a rejection, the pages render their own retry states. */
 export function getPosition(): Promise<{ lat: number; lng: number; accuracy: number } | null> {
   return new Promise((resolve) => {

@@ -305,6 +305,7 @@ Data lama tidak diubah/hilang — hanya ada dua "satuan" dalam sejarah.
 | 2026-09-15 | **Papan TU: feed "check-in terakhir" + laporan diskrepansi gerbang-vs-mapel** — mata manusia di gerbang jadi lapis eksplisit; diskrepansi hanya dihitung setelah ≥1 sesi mapel hari itu agar papan pagi tidak menandai seisi sekolah; pengaturan gerbang tanpa radius GPS kini memunculkan peringatan lubang video-call | Iwan |
 | 2026-09-15 | **Panel "Jadwal Hari Ini" guru tetap tampil saat kosong** — sebelumnya `return null`, guru mengira fitur presensi mapel hilang; kini menjelaskan bahwa presensi mapel dibuka dari panel itu | Iwan |
 | 2026-09-15 | **Mapel: satu QR berputar, QR URL statis dihapus** (temuan uji ngrok: `checkin_url` dari `app.frontend_url` memuat `localhost` → QR statis mati di HP; QR 8 karakter bukan URL → kamera native tidak membuka apa pun). QR berputar kini berisi `URL_sesi#kode` dengan URL dari origin browser guru; scan native membuka halaman + kode di hash, halaman mengambilnya dan mengosongkan hash; bila kode basi saat submit → jatuh ke langkah scan dalam halaman | Iwan |
+| 2026-09-15 | **HP mengingat NIS pemiliknya** (`absen-nis` di localStorage, diingat setelah satu lookup sukses; halaman gerbang & mapel sama) — scan QR mapel berikutnya langsung ke konfirmasi satu tombol / layar "sudah hadir", tanpa mengetik ulang; "Bukan saya" kembali ke form ketik dan NIS baru menimpa yang lama (HP pinjaman menyembuhkan diri). Identitas tetap dikonfirmasi satu tap — tidak pernah auto-submit tanpa konfirmasi | Iwan |
 
 ---
 
