@@ -386,6 +386,11 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     // Read-only audit trail viewer - see the controller for why this is
     // central-admin only for now.
     Route::get('/activity-logs', [\App\Http\Controllers\Api\Admin\ActivityLogController::class, 'index']);
+
+    // Aggregates over failed notification sends - the alerting half of the
+    // notifications:retry-failed sweep. Central-admin only for the same
+    // reason as the activity log above.
+    Route::get('/notification-failures', [\App\Http\Controllers\Api\Admin\NotificationFailureController::class, 'summary']);
 });
 
 // Dev-only convenience for exercising checkout end to end without a live

@@ -80,8 +80,9 @@ class PointThresholdNotifier
 
         // Recorded before checking $result->success: a failed send that gets
         // retried tomorrow by the same daily job would otherwise need its own
-        // separate retry bookkeeping. Simpler to log the failure and let a
-        // human resend from the admin screen if it matters.
+        // separate retry bookkeeping. The failure row itself is what the
+        // notifications:retry-failed sweep picks up; the unique row here is
+        // what keeps that sweep from double-notifying.
         PointThresholdNotification::create([
             'student_id' => $student->id,
             'term_id' => $term->id,
@@ -93,6 +94,63 @@ class PointThresholdNotifier
         $this->log($student, $channel, $to, $data, $result);
 
         return $result->success;
+    }
+
+    /**
+     * The retry sweep's second chance for a threshold notice whose delivery
+     * failed.
+     *
+     * Replays the payload's event-time facts rather than re-deriving the
+     * balance: point_threshold_notifications froze balance_at_notification
+     * for a reason, and "poin saat ini" in a retried message should state
+     * the balance that crossed the band, not whatever the ledger says half a
+     * day later. Nothing in this payload is a credential. A row with no
+     * payload at all (defensive) falls back to the threshold-notification
+     * record written seconds before the log row. Never writes a
+     * NotificationLog row; the sweep updates the failed row in place.
+     */
+    public function resend(NotificationLog $log): NotificationResult
+    {
+        $data = $log->payload;
+
+        if (! $data) {
+            $student = $log->notifiable;
+
+            if (! $student instanceof Student) {
+                return NotificationResult::fail('Siswa sudah tidak ada.');
+            }
+
+            $notice = PointThresholdNotification::where('student_id', $student->id)
+                ->whereBetween('notified_at', [
+                    $log->created_at->copy()->subMinutes(5),
+                    $log->created_at->copy()->addMinutes(5),
+                ])
+                ->first();
+
+            if (! $notice) {
+                return NotificationResult::fail('Catatan notifikasi ambang tidak ditemukan.');
+            }
+
+            $guardian = $this->primaryGuardianFor($student);
+
+            if (! $guardian) {
+                return NotificationResult::fail('Siswa tanpa wali untuk diberitahu.');
+            }
+
+            $threshold = $notice->threshold ?? PointThreshold::find($notice->point_threshold_id);
+
+            $data = [
+                'guardian_name' => $guardian->nama,
+                'student_name' => $student->nama_panggilan ?: $student->nama_lengkap,
+                'balance' => (string) $notice->balance_at_notification,
+                'label' => $threshold?->label ?? '',
+                'action' => (string) ($threshold?->action ?? ''),
+            ];
+        }
+
+        return $log->channel === 'email'
+            ? $this->mail->send($log->recipient, 'point_threshold', $data)
+            : $this->whatsapp->sendMessage($log->recipient, $this->whatsappMessage($data));
     }
 
     private function primaryGuardianFor(Student $student): ?Guardian

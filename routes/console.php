@@ -74,3 +74,14 @@ Schedule::command('attendance:daily-sweep')
     ->withoutOverlapping()
     ->description('Buka/tutup sesi presensi harian sesuai setting unit');
 
+// The consumer half of notification_logs (audit C2): rows a Sendago send
+// refused get read back and retried, bounded at three attempts over 24 hours
+// - beyond that, the failure is a human's problem and the exhaustion digest
+// in the log plus the dashboard card are how a human notices. OTP rows are
+// excluded on purpose; see the command's docblock.
+Schedule::command('notifications:retry-failed')
+    ->everyThirtyMinutes()
+    ->name('retry-failed-notifications')
+    ->withoutOverlapping()
+    ->description('Coba ulang notifikasi email/WhatsApp yang gagal terkirim');
+

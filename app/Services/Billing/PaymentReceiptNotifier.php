@@ -81,6 +81,37 @@ class PaymentReceiptNotifier
     }
 
     /**
+     * The retry sweep's second chance for a receipt whose delivery failed.
+     * The data is re-derived from the payment itself, so it always states
+     * what actually happened; the delivery target stays frozen - the row's
+     * recipient is who the first attempt went to and who is still waiting
+     * for the confirmation (if the contact has since changed, the greeting
+     * name may differ from the address; that is cosmetic, the target is
+     * not). Never writes a NotificationLog row; the sweep updates the
+     * failed row in place.
+     */
+    public function resend(NotificationLog $log): NotificationResult
+    {
+        $payment = $log->notifiable;
+
+        if (! $payment instanceof Payment) {
+            return NotificationResult::fail('Pembayaran sudah tidak ada.');
+        }
+
+        $guardian = $payment->payer ?? $this->billingContactFor($payment);
+
+        if (! $guardian) {
+            return NotificationResult::fail('Pembayaran tanpa wali untuk diberitahu.');
+        }
+
+        $data = $this->dataFor($payment, $guardian);
+
+        return $log->channel === 'email'
+            ? $this->mail->send($log->recipient, 'payment_receipt', $data)
+            : $this->whatsapp->sendMessage($log->recipient, $this->whatsappMessage($data));
+    }
+
+    /**
      * The guardian who paid, falling back to the billed student's billing
      * contact - a staff-recorded cash payment may carry no payer at all.
      */

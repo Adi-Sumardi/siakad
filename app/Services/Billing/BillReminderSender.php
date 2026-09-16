@@ -75,14 +75,7 @@ class BillReminderSender
             return false;
         }
 
-        $data = [
-            'guardian_name' => $guardian->nama,
-            'student_name' => $bill->student->nama_panggilan ?: $bill->student->nama_lengkap,
-            'description' => $bill->description,
-            'amount' => number_format((float) $bill->remaining_amount, 0, ',', '.'),
-            'due_date' => $bill->due_date->translatedFormat('d F Y'),
-            'kind' => $kind,
-        ];
+        $data = $this->buildData($bill, $guardian, $kind);
 
         $result = $channel === 'email'
             ? $this->mail->send($to, 'bill_reminder', $data)
@@ -105,6 +98,43 @@ class BillReminderSender
     }
 
     /**
+     * The retry sweep's second chance for a reminder whose delivery failed.
+     * Amounts are re-derived fresh (a partial payment since the failure
+     * should not be nagged at the old figure), but only while the bill is
+     * still open - a reminder for a bill that has since been paid is a
+     * message about money that no longer exists.
+     *
+     * Deliberately no BillReminder row and no log() call: both were already
+     * written by the original send, and the sweep updates the same
+     * notification_logs row instead of adding one.
+     */
+    public function resend(NotificationLog $log): NotificationResult
+    {
+        $bill = $log->notifiable;
+        $kind = $log->payload['kind'] ?? null;
+
+        if (! $bill instanceof Bill || ! in_array($kind, self::KINDS, true)) {
+            return NotificationResult::fail('Tagihan atau jenis pengingat sudah tidak ada.');
+        }
+
+        if (! $bill->isOpen()) {
+            return NotificationResult::fail('Tagihan sudah tidak terbuka (lunas/dibatalkan).');
+        }
+
+        $guardian = $this->billingContactFor($bill);
+
+        if (! $guardian) {
+            return NotificationResult::fail('Tagihan tanpa kontak penagihan.');
+        }
+
+        $data = $this->buildData($bill, $guardian, $kind);
+
+        return $log->channel === 'email'
+            ? $this->mail->send($log->recipient, 'bill_reminder', $data)
+            : $this->whatsapp->sendMessage($log->recipient, $this->whatsappMessage($data));
+    }
+
+    /**
      * The guardian marked as the billing contact, falling back to the primary
      * one - a bill with no marked contact should still reach somebody.
      */
@@ -115,6 +145,19 @@ class BillReminderSender
         return $guardians->firstWhere('pivot.is_billing_contact', true)
             ?? $guardians->firstWhere('pivot.is_primary', true)
             ?? $guardians->first();
+    }
+
+    /** @return array<string, mixed> */
+    private function buildData(Bill $bill, Guardian $guardian, string $kind): array
+    {
+        return [
+            'guardian_name' => $guardian->nama,
+            'student_name' => $bill->student->nama_panggilan ?: $bill->student->nama_lengkap,
+            'description' => $bill->description,
+            'amount' => number_format((float) $bill->remaining_amount, 0, ',', '.'),
+            'due_date' => $bill->due_date->translatedFormat('d F Y'),
+            'kind' => $kind,
+        ];
     }
 
     private function whatsappMessage(array $data): string

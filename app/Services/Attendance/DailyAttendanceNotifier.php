@@ -18,9 +18,10 @@ use Illuminate\Support\Facades\Log;
  * Deduplication is the notification_logs row, not a promise that a job runs
  * once: the scheduler may fire twice, a correction may re-mark a student, and
  * neither may produce a second WhatsApp for the same record. A failed send
- * still writes its row - same policy as PointThresholdNotifier: log the
- * failure, let a human resend, never an automatic retry (open question §4
- * no. 3 in PROGRESS-MAGANG, mentor domain).
+ * still writes its row - and that row is what notifications:retry-failed
+ * reads back for a bounded second chance (3 attempts over 24 hours; was the
+ * open question §4 no. 3 in PROGRESS-MAGANG). Beyond those bounds a failure
+ * stays a human's problem.
  */
 class DailyAttendanceNotifier
 {
@@ -95,6 +96,49 @@ class DailyAttendanceNotifier
                 'notifiable_id' => $record->id,
             ]);
         }
+    }
+
+    /**
+     * The retry sweep's second chance for an attendance message whose
+     * delivery failed.
+     *
+     * Replays the exact per-guardian body stored in the row's payload - the
+     * {wali} placeholder was already substituted and nothing in it is a
+     * credential, so it is precisely the message that never arrived.
+     * Rendering fresh instead would risk telling a family their child was
+     * absent after the record was corrected to present. Only a row with no
+     * payload (defensive - none is written today) falls back to a fresh
+     * render. This sender is WhatsApp-only, so every row it writes carries
+     * channel=whatsapp; the sweep sends on the row's channel regardless.
+     * Never writes a NotificationLog row; the sweep updates the failed row
+     * in place.
+     */
+    public function resend(NotificationLog $log): NotificationResult
+    {
+        $body = $log->payload['body'] ?? null;
+
+        if (! $body) {
+            $record = $log->notifiable;
+
+            if (! $record instanceof DailyRecord) {
+                return NotificationResult::fail('Catatan presensi sudah tidak ada.');
+            }
+
+            $rendered = $log->template === 'daily_absent'
+                ? $this->absentMessage($record)
+                : $this->arrivalMessage($record);
+
+            $guardian = $record->student?->guardians
+                ->first(fn ($g) => trim((string) $g->no_hp) === $log->recipient);
+
+            if (! $guardian) {
+                return NotificationResult::fail('Nomor wali tidak ditemukan lagi.');
+            }
+
+            $body = str_replace('{wali}', (string) $guardian->nama, $rendered);
+        }
+
+        return $this->whatsapp->sendMessage($log->recipient, (string) $body);
     }
 
     private function arrivalMessage(DailyRecord $record): string

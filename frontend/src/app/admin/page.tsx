@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { NotificationFailureAlert } from "@/components/notification-failure-alert";
 import { useAuth } from "@/lib/auth/auth-context";
 import { api } from "@/lib/api";
 import { rupiah } from "@/lib/format";
@@ -284,6 +285,14 @@ export default function AdminHomePage() {
       {!isCentral && data && kpi && data.units[0] && (
         <RingkasanAkademikCard unit={data.units[0]} kpi={kpi} thresholds={data.thresholds} />
       )}
+
+      {/* =================================================================== */}
+      {/* Notifikasi gagal - alerting retry sweep, khusus admin pusat */}
+      {/* =================================================================== */}
+      {/* Strict === true (bukan default ?? true seperti isCentral di atas):
+          admin_unit tidak boleh memicu request yang pasti 403 setiap kali
+          dashboard dibuka. */}
+      {data?.scope.is_central === true && <NotificationFailureAlert />}
 
       {/* =================================================================== */}
       {/* Alert / Watchlist - Perlu Perhatian */}

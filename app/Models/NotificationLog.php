@@ -16,6 +16,7 @@ class NotificationLog extends Model
         'recipient',
         'payload',
         'status',
+        'attempts',
         'provider_message_id',
         'error',
         'sent_at',
@@ -25,6 +26,7 @@ class NotificationLog extends Model
 
     protected $casts = [
         'payload' => 'array',
+        'attempts' => 'integer',
         'sent_at' => 'datetime',
     ];
 

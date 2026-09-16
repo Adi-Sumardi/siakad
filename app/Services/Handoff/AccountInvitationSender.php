@@ -78,6 +78,48 @@ class AccountInvitationSender
             : $this->deliverWhatsApp($invitation, $data);
     }
 
+    /**
+     * The retry sweep's second chance for an invitation whose delivery failed.
+     *
+     * The stored payload deliberately carries no activation_url (see log()),
+     * and the plaintext token lives nowhere but the message that never
+     * arrived - so the only way to deliver a working link is to rotate the
+     * token on this same invitation row. Safe precisely because the row is
+     * failed: the previous link never reached anyone, and overwriting it
+     * keeps the "exactly one working link" invariant instead of widening it.
+     * expires_at is never extended. Never writes a NotificationLog row; the
+     * sweep updates the failed row in place.
+     */
+    public function resend(NotificationLog $log): NotificationResult
+    {
+        $invitation = $log->notifiable;
+
+        if (! $invitation instanceof AccountInvitation || ! $invitation->isUsable()) {
+            // Activated through another path, or past its 7-day TTL - there
+            // is no live link left to deliver.
+            return NotificationResult::fail('Undangan sudah dipakai atau kedaluwarsa.');
+        }
+
+        $plainToken = AccountInvitation::generateToken();
+
+        $invitation->forceFill([
+            'token_hash' => AccountInvitation::hashToken($plainToken),
+            'sent_count' => $invitation->sent_count + 1,
+            'last_sent_at' => now(),
+        ])->save();
+
+        $data = array_merge($log->payload ?? [], [
+            'activation_url' => rtrim((string) config('app.frontend_url'), '/').'/aktivasi?token='.$plainToken,
+            'login_identifier' => $invitation->sent_to,
+            'expires_at' => $invitation->expires_at->translatedFormat('d F Y'),
+            'guardian_name' => $invitation->user?->name ?? (string) ($log->payload['guardian_name'] ?? ''),
+        ]);
+
+        return $log->channel === 'email'
+            ? $this->mail->send($log->recipient, 'school_account_invite', $data)
+            : $this->whatsapp->sendMessage($log->recipient, $this->renderWhatsAppMessage($data));
+    }
+
     private function deliverEmail(AccountInvitation $invitation, array $data): NotificationResult
     {
         $result = $this->mail->send($invitation->sent_to, 'school_account_invite', $data);
@@ -89,16 +131,20 @@ class AccountInvitationSender
 
     private function deliverWhatsApp(AccountInvitation $invitation, array $data): NotificationResult
     {
-        $message = "Assalamu'alaikum {$data['guardian_name']},\n\n"
-            ."Uang pangkal {$data['student_name']} sudah lunas dan akun aplikasi sekolah sudah kami buatkan.\n\n"
-            ."Aktifkan akun serta tentukan kata sandi di tautan berikut:\n{$data['activation_url']}\n\n"
-            ."Tautan berlaku sampai {$data['expires_at']}.";
-
-        $result = $this->whatsapp->sendMessage($invitation->sent_to, $message);
+        $result = $this->whatsapp->sendMessage($invitation->sent_to, $this->renderWhatsAppMessage($data));
 
         $this->log($invitation, 'whatsapp', 'school_account_invite', $data, $result);
 
         return $result;
+    }
+
+    /** @param array<string, mixed> $data */
+    private function renderWhatsAppMessage(array $data): string
+    {
+        return "Assalamu'alaikum {$data['guardian_name']},\n\n"
+            ."Uang pangkal {$data['student_name']} sudah lunas dan akun aplikasi sekolah sudah kami buatkan.\n\n"
+            ."Aktifkan akun serta tentukan kata sandi di tautan berikut:\n{$data['activation_url']}\n\n"
+            ."Tautan berlaku sampai {$data['expires_at']}.";
     }
 
     /**
