@@ -16,7 +16,8 @@ use Illuminate\Support\Carbon;
  *
  * Wall-clock contract: opens_at/closes_at store Jakarta local time (the date
  * part is the Jakarta calendar date), so every comparison goes through
- * Carbon::now('Asia/Jakarta') - see the migration's docblock.
+ * Carbon::now('Asia/Jakarta') - explicit on purpose, so the contract holds
+ * whatever app.timezone's env says. See the migration's docblock.
  */
 class DailySession extends Model
 {

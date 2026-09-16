@@ -33,9 +33,10 @@ use RuntimeException;
  * H/S/I/A summaries the wali portal, the rapor PDF and the enrollment rollup
  * the watchlist reads are all computed here - from days, not lesson periods.
  *
- * All wall-clock reasoning runs on Carbon::now('Asia/Jakarta') - the daily
- * layer would otherwise roll over at 07:00 WIB while app.timezone is still
- * UTC (see the migration docblock).
+ * All wall-clock reasoning runs on Carbon::now('Asia/Jakarta') - explicit
+ * even though app.timezone now reads the env (default Jakarta), so the wall
+ * contract below holds even if that env ever flips back (see the migration
+ * docblock).
  */
 class DailyAttendanceService
 {

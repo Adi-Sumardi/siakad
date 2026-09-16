@@ -17,8 +17,9 @@ return new class extends Migration
      * All datetime columns store Jakarta WALL-CLOCK values (the date part is
      * the Jakarta calendar date), and every comparison in the service layer
      * runs against Carbon::now('Asia/Jakarta') - never a bare now(), which
-     * would report the wrong day before 07:00 WIB while app.timezone is still
-     * UTC (switching it is a mentor-domain change, see PROGRESS-MAGANG §3.1).
+     * would report the wrong day before 07:00 WIB if app.timezone were ever
+     * UTC again (app.timezone read the env for the first time on 16 Sep 2026;
+     * this contract predates that and does not depend on it).
      */
     public function up(): void
     {

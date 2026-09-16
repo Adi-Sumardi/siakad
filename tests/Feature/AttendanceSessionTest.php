@@ -758,11 +758,13 @@ class AttendanceSessionTest extends TestCase
     }
 
     /**
-     * config('app.timezone') is UTC, not the Asia/Jakarta .env sets it to
-     * (config/app.php never reads the env var) - a bare Carbon::today() dates
-     * the session to the previous calendar day for the seven hours every
-     * morning (00:00-06:59 WIB) that fall on UTC's previous day, exactly when
-     * a teacher opens roll call for an early first period.
+     * config('app.timezone') was hardcoded UTC until 16 Sep 2026 (the .env's
+     * Asia/Jakarta was never read) - a bare Carbon::today() dated the session
+     * to the previous calendar day for the seven hours every morning
+     * (00:00-06:59 WIB) that fall on UTC's previous day, exactly when a
+     * teacher opens roll call for an early first period. The controller still
+     * passes the Jakarta date explicitly, which keeps working whatever the
+     * env says.
      */
     public function test_a_session_opened_early_in_the_jakarta_morning_is_dated_to_the_jakarta_day_not_utc(): void
     {

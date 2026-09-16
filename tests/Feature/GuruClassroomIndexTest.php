@@ -17,8 +17,10 @@ use Tests\TestCase;
  * summary, which the frontend splits into "classes with lessons today" on
  * top and the full unit roster below. Two things must hold: only the
  * requesting day's periods count, and "today" is decided by the Jakarta
- * clock (config timezone is UTC, which is a day behind every morning
- * 00:00-07:00 WIB - exactly when a teacher opens this screen).
+ * clock (config timezone was hardcoded UTC until 16 Sep 2026, which is a
+ * day behind every morning 00:00-07:00 WIB - exactly when a teacher opens
+ * this screen; the controllers keep the explicit Jakarta clock so they stay
+ * correct whatever the env says).
  */
 class GuruClassroomIndexTest extends TestCase
 {
@@ -95,8 +97,9 @@ class GuruClassroomIndexTest extends TestCase
 
     public function test_today_is_decided_by_the_jakarta_clock(): void
     {
-        // 00:30 WIB Friday is still Thursday in UTC (the app's config
-        // timezone) - a bare Carbon::now() would summarize Thursday instead.
+        // 00:30 WIB Friday is still Thursday in UTC - a bare Carbon::now()
+        // under a UTC app.timezone would summarize Thursday instead. The
+        // explicit Jakarta clock in the controller answers Friday either way.
         Carbon::setTestNow(Carbon::parse('2026-09-11 00:30:00', 'Asia/Jakarta'));
 
         ClassSchedule::create(['classroom_id' => $this->kelas1a->id, 'subject_id' => $this->subject()->id, 'teacher_id' => $this->guru->id, 'day_of_week' => 5, 'start_time' => '07:00', 'end_time' => '08:00']);

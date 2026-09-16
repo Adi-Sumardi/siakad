@@ -30,8 +30,10 @@ class ClassroomController extends Controller
             ->orderBy('tingkat')->orderBy('name')
             ->get();
 
-        // Same Asia/Jakarta day-of-week reasoning as schedulesToday() below:
-        // a bare Carbon::now() reports the wrong day for 00:00-07:00 WIB.
+        // Explicit Asia/Jakarta even though app.timezone now reads the env
+        // (default Jakarta): the browser never matters here, and this stays
+        // correct if the env ever flips back to UTC. Same reasoning as
+        // schedulesToday() below.
         $today = Carbon::now('Asia/Jakarta')->dayOfWeekIso; // 1 = Senin ... 7 = Minggu
 
         // One query for every listed classroom's periods today, so the
@@ -195,11 +197,10 @@ class ClassroomController extends Controller
     {
         $classroom = Classroom::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
-        // config('app.timezone') is UTC, not the Asia/Jakarta .env sets it to
-        // (config/app.php never reads the env var) - a bare Carbon::now()
-        // reports the wrong day of week for the seven hours every morning
-        // (00:00-07:00 WIB) that fall on the previous UTC day, which is
-        // exactly when a teacher opens this screen to take attendance.
+        // Explicit Asia/Jakarta rather than relying on app.timezone (now
+        // env-read, default Jakarta): this stays correct even if the env
+        // ever flips back to UTC, which used to misdate the day of week for
+        // 00:00-07:00 WIB - exactly when a teacher opens this screen.
         $today = Carbon::now('Asia/Jakarta')->dayOfWeekIso; // 1 = Senin ... 7 = Minggu
 
         $schedules = $classroom->classSchedules()

@@ -26,12 +26,11 @@ class StoreAchievementRequest extends FormRequest
             'juara' => 'nullable|in:1,2,3,Harapan 1,Harapan 2,Harapan 3,Peserta',
             'nama_event' => 'nullable|string|max:200',
             'penyelenggara' => 'nullable|string|max:200',
-            // Laravel's bare 'today' keyword resolves against
-            // config('app.timezone'), which is UTC despite .env setting
-            // Asia/Jakarta (config/app.php never reads the env var) - an
-            // explicit Jakarta date avoids rejecting a same-day event as
-            // "in the future" during the seven hours every morning UTC's
-            // calendar date still lags Jakarta's.
+            // An explicit Jakarta date rather than Laravel's bare 'today'
+            // keyword: 'today' resolves against app.timezone (env-read since
+            // 16 Sep 2026, default Jakarta), and the explicit form stays
+            // correct even if that env ever flips back to UTC, which would
+            // reject a same-day event as "in the future" before 07:00 WIB.
             'tanggal_event' => ['nullable', 'date', 'before_or_equal:'.Carbon::today('Asia/Jakarta')->toDateString()],
             'tempat_event' => 'nullable|string|max:200',
             'sertifikat' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',

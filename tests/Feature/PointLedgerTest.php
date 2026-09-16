@@ -200,11 +200,13 @@ class PointLedgerTest extends TestCase
     }
 
     /**
-     * config('app.timezone') is UTC, not the Asia/Jakarta .env sets it to -
-     * Laravel's bare 'today' validation keyword resolves against it, so
-     * before_or_equal:today used to reject a genuinely same-day entry as "in
-     * the future" for the seven hours every morning (00:00-06:59 WIB) that
-     * still fall on UTC's previous calendar day.
+     * config('app.timezone') was hardcoded UTC until 16 Sep 2026 (the .env's
+     * Asia/Jakarta was never read) - Laravel's bare 'today' validation keyword
+     * resolves against it, so before_or_equal:today used to reject a genuinely
+     * same-day entry as "in the future" for the seven hours every morning
+     * (00:00-06:59 WIB) that still fall on UTC's previous calendar day. The
+     * request still pins the Jakarta date explicitly, which keeps working
+     * whatever the env says.
      */
     public function test_recording_a_point_for_the_jakarta_today_is_accepted_even_when_utc_still_says_yesterday(): void
     {

@@ -78,7 +78,17 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    // Asia/Jakarta per the build mandate (PROMPT-RANCANG-BANGUN.md): every
+    // scheduled hour in routes/console.php is written as WIB wall time, and
+    // the business-day boundaries (due dates, attendance windows) are
+    // Jakarta days. This was hardcoded 'UTC' from the start while the env
+    // files carried APP_TIMEZONE=Asia/Jakarta dead - flipped 16 Sep 2026,
+    // before go-live, so historical rows written as UTC wall are accepted
+    // as-is (they read 7h off from here on) rather than risking a data
+    // migration. Explicit Carbon::now('Asia/Jakarta') call sites were left
+    // standing: they are tautological now and correct again if the env
+    // ever flips back.
+    'timezone' => env('APP_TIMEZONE', 'UTC'),
 
     /*
     |--------------------------------------------------------------------------
