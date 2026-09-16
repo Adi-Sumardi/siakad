@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -26,8 +27,8 @@ type FailureSummary = {
  * Rendered only for central admins (the parent gates on scope.is_central
  * strictly true); fetch errors stay silent on purpose - a network blip on
  * the dashboard is never worth a toast, the sweep is the one that must be
- * loud. No drill-down link yet: the full monitoring page is a separate
- * roadmap item.
+ * loud. The card links to the ruang kontrol (/admin/monitoring) for the
+ * row-level list and the manual resend.
  */
 export function NotificationFailureAlert() {
   const [failures, setFailures] = useState<FailureSummary | null>(null);
@@ -88,6 +89,12 @@ export function NotificationFailureAlert() {
           </div>
         )}
         {failures.last_failed_at && <p>Kegagalan terakhir: {tanggal(failures.last_failed_at)}</p>}
+      </div>
+
+      <div className="mt-4 border-t border-border/70 pt-3">
+        <Link href="/admin/monitoring" className="text-xs font-semibold text-primary hover:underline">
+          Lihat detail &amp; kirim ulang →
+        </Link>
       </div>
     </Card>
   );

@@ -391,6 +391,17 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     // notifications:retry-failed sweep. Central-admin only for the same
     // reason as the activity log above.
     Route::get('/notification-failures', [\App\Http\Controllers\Api\Admin\NotificationFailureController::class, 'summary']);
+
+    // The ruang kontrol (/admin/monitoring, audit C7 / P4-15): the three
+    // lists a central admin watches when things quietly stop working -
+    // failed notifications (with manual resend), the integration webhook
+    // inbox (with PMB replay), and the queue's dead-letter shelf.
+    // Central-only for the same reason as the two above.
+    Route::get('/notification-logs', [\App\Http\Controllers\Api\Admin\NotificationLogController::class, 'index']);
+    Route::post('/notification-logs/{ulid}/resend', [\App\Http\Controllers\Api\Admin\NotificationLogController::class, 'resend']);
+    Route::get('/integration-events', [\App\Http\Controllers\Api\Admin\IntegrationEventController::class, 'index']);
+    Route::post('/integration-events/{ulid}/reprocess', [\App\Http\Controllers\Api\Admin\IntegrationEventController::class, 'reprocess']);
+    Route::get('/failed-jobs', [\App\Http\Controllers\Api\Admin\FailedJobController::class, 'index']);
 });
 
 // Dev-only convenience for exercising checkout end to end without a live

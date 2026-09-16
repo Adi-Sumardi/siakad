@@ -26,6 +26,12 @@ use Illuminate\Support\Facades\Log;
  * that carry credentials), sent to the recipient recorded on the failed row,
  * and updates that same row - one delivery, one row of history, however
  * many attempts it takes.
+ *
+ * retryOne()/manualRefusal() are the human lane the ruang kontrol
+ * (/admin/monitoring) uses: a manual resend bypasses the attempt cap and the
+ * 24-hour window because a person decided it should go out, but never the
+ * exclusions - there is no human decision that makes an expired OTP worth
+ * resending.
  */
 class NotificationRetryService
 {
@@ -89,14 +95,7 @@ class NotificationRetryService
                 $result = NotificationResult::fail($e->getMessage());
             }
 
-            $attempts = $log->attempts + 1;
-
-            $log->update([
-                'attempts' => $attempts,
-                'status' => $result->success ? 'sent' : 'failed',
-                'error' => $result->success ? null : $result->message,
-                'sent_at' => $result->success ? now() : $log->sent_at,
-            ]);
+            $attempts = $this->applyResult($log, $result);
 
             $stats['retried']++;
             $result->success ? $stats['sent']++ : $stats['still_failed']++;
@@ -123,6 +122,67 @@ class NotificationRetryService
         }
 
         return $stats;
+    }
+
+    /**
+     * The manual lane: one human-decided resend, cap and window be damned.
+     * The row is updated exactly like a sweep attempt, and the outcome is
+     * returned as-is - "still failing" is a valid, reportable result here,
+     * not something to hide behind an exception.
+     */
+    public function retryOne(NotificationLog $log): NotificationResult
+    {
+        $resend = $this->resendFor($log->template);
+
+        if (! $resend) {
+            return NotificationResult::fail("Template {$log->template} tidak punya pemetaan resend.");
+        }
+
+        try {
+            $result = $resend($log);
+        } catch (\Throwable $e) {
+            $result = NotificationResult::fail($e->getMessage());
+        }
+
+        $this->applyResult($log, $result);
+
+        return $result;
+    }
+
+    /**
+     * Why this row may NOT be manually resent, or null when it may. The
+     * controller turns a non-null reason into a 422, so the template map
+     * and the exclusion list live only here.
+     */
+    public function manualRefusal(NotificationLog $log): ?string
+    {
+        return match (true) {
+            $log->status === 'sent' => 'Notifikasi ini sudah terkirim — tidak perlu dikirim ulang.',
+            $log->status !== 'failed' => 'Hanya notifikasi berstatus gagal yang bisa dikirim ulang.',
+            isset(self::EXCLUDED_TEMPLATES[$log->template]) => self::EXCLUDED_TEMPLATES[$log->template],
+            ! $this->resendFor($log->template) => "Template {$log->template} tidak punya pemetaan resend.",
+            default => null,
+        };
+    }
+
+    /**
+     * One delivery, one row: applies a resend outcome to the row it retried.
+     * Returns the new attempt count (computed before the update - the model
+     * attribute changes as a side effect, so reading it back afterwards
+     * would already be the new value).
+     */
+    private function applyResult(NotificationLog $log, NotificationResult $result): int
+    {
+        $attempts = $log->attempts + 1;
+
+        $log->update([
+            'attempts' => $attempts,
+            'status' => $result->success ? 'sent' : 'failed',
+            'error' => $result->success ? null : $result->message,
+            'sent_at' => $result->success ? now() : $log->sent_at,
+        ]);
+
+        return $attempts;
     }
 
     /**
