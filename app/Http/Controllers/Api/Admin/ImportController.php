@@ -14,6 +14,7 @@ use App\Models\FeeRate;
 use App\Models\FeeType;
 use App\Models\Guardian;
 use App\Models\SchoolUnit;
+use App\Models\StaffProfile;
 use App\Models\Student;
 use App\Models\User;
 use App\Services\Notification\PhoneNumberFormatter;
@@ -664,6 +665,14 @@ class ImportController extends Controller
                     if ($role === 'orangtua') {
                         self::ensureGuardianFor($existing, $phone, $email);
                     }
+
+                    // The re-import refreshes name/unit, never the login
+                    // channel - the staff mirror follows the same line: only
+                    // make sure the record exists for a staff account that
+                    // predates the column.
+                    if (! $existing->staffProfile) {
+                        StaffProfile::mirrorUserPhone($existing);
+                    }
                     $updatedCount++;
                     continue;
                 }
@@ -683,6 +692,10 @@ class ImportController extends Controller
                 if ($role === 'orangtua') {
                     self::ensureGuardianFor($user, $phone, $email);
                 }
+
+                // Same reason as UserController::store(): the staff
+                // record's mirrored contact. No-op for parents.
+                StaffProfile::mirrorUserPhone($user);
                 $importedCount++;
             }
 

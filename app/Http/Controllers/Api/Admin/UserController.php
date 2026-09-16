@@ -8,6 +8,7 @@ use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Models\ActivityLog;
 use App\Models\Guardian;
 use App\Models\SchoolUnit;
+use App\Models\StaffProfile;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -140,6 +141,11 @@ class UserController extends Controller
             ]);
         }
 
+        // The staff record's mirrored contact (03-ERD) - the same
+        // one-field-two-homes reasoning as the guardian block above, for
+        // the staff roles. No-op for parents.
+        StaffProfile::mirrorUserPhone($user);
+
         ActivityLog::record($request->user(), 'user.created', $user, ['role' => $user->role]);
 
         return response()->json(['user' => $user->load('schoolUnit')], 201);
@@ -161,6 +167,13 @@ class UserController extends Controller
 
         $user->fill(collect($validated)->except(['school_unit_ulid'])->all());
         $user->save();
+
+        // Keep the staff record's mirrored contact in step when the shared
+        // field changes. The request is `sometimes`, so an absent key means
+        // "untouched", not "cleared".
+        if (array_key_exists('phone', $validated)) {
+            StaffProfile::mirrorUserPhone($user);
+        }
 
         ActivityLog::record($request->user(), 'user.updated', $user, $validated);
 
