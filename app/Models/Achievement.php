@@ -7,6 +7,18 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * One trophy on the cabinet: nama, kategori, tingkat, juara, evidence.
+ *
+ * Two orthogonal dimensions the audit once flagged (G.3) and the design
+ * deliberately keeps apart: `source` is PROVENANCE - pmb (imported already
+ * verified, not ours to edit, see isEditableHere()) vs sekolah (recorded
+ * here) - while `achiever_type` is WHOSE achievement it is, siswa or guru.
+ * "guru" is intentionally not a `source` value: a teacher's achievement is
+ * source=sekolah + achiever_type=guru, and folding both meanings into one
+ * column is exactly what would make them rancu. Confirmed as the final
+ * design, 16 Sep 2026.
+ */
 class Achievement extends Model
 {
     use HasUlidKey;
