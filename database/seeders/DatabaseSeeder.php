@@ -88,7 +88,6 @@ class DatabaseSeeder extends Seeder
             ['code' => 'ekskul', 'name' => 'Ekstrakurikuler', 'recurrence' => 'per_term'],
             ['code' => 'seragam', 'name' => 'Seragam & atribut', 'recurrence' => 'once', 'allow_installment' => true, 'requires_selection' => true],
             ['code' => 'buku', 'name' => 'Buku', 'recurrence' => 'per_term'],
-            ['code' => 'kegiatan', 'name' => 'Kegiatan', 'recurrence' => 'per_term'],
         ];
 
         foreach ($feeTypes as $i => $type) {
@@ -131,5 +130,6 @@ class DatabaseSeeder extends Seeder
         );
 
         $this->call(TestPaymentSeeder::class);
+        $this->call(OtherFeeBillsSeeder::class);
     }
 }

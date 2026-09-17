@@ -61,7 +61,7 @@ class BillingApiClient
      * bank - or null when e-SPP has no prefix registered for that fee type.
      *
      * Null is the honest answer: the old fallback silently reused the SPP
-     * prefix for unmapped fee types (seragam, buku, kegiatan), minting a VA
+     * prefix for unmapped fee types (seragam, buku), minting a VA
      * identical to the student's SPP VA for the same year - one payment
      * could then settle the other's bill at the bank. An explicit
      * config key (va_prefixes.{fee_code}) is the escape hatch once e-SPP

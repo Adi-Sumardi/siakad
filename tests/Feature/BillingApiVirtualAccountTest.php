@@ -949,7 +949,6 @@ class BillingApiVirtualAccountTest extends TestCase
         // the same year.
         $this->assertNull(BillingApiClient::resolvePrefix('seragam'));
         $this->assertNull(BillingApiClient::resolvePrefix('buku'));
-        $this->assertNull(BillingApiClient::resolvePrefix('kegiatan'));
     }
 
     public function test_an_explicit_config_prefix_unlocks_an_unmapped_fee_type(): void

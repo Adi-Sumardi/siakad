@@ -41,7 +41,7 @@ class TestPaymentSeeder extends Seeder
             ['starts_on' => '2026-07-01', 'ends_on' => '2026-12-31', 'is_active' => true]
         );
 
-        // 3. Ensure Fee Types (SPP, Kegiatan, etc.)
+        // 3. Ensure Fee Types (SPP etc.)
         $sppType = FeeType::firstOrCreate(
             ['code' => 'spp'],
             ['name' => 'SPP Bulanan', 'recurrence' => 'monthly', 'allow_installment' => true, 'sort_order' => 0, 'is_active' => true]
