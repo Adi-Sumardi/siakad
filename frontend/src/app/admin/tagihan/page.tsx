@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Download, Filter, RefreshCw, Search, Wallet } from "lucide-react";
+import { Download, FilePlus2, Filter, RefreshCw, Search, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,28 @@ type Paginated<T> = {
 };
 
 type Option = { ulid: string; code: string; label: string };
+
+type FeeTypeOption = {
+  ulid: string;
+  code: string;
+  name: string;
+  is_active: boolean;
+  has_va_prefix: boolean;
+};
+
+type StudentHit = { ulid: string; nama_lengkap: string; nis: string | null; unit: { label: string } | null };
+
+/** Module-scope so the component render stays pure - fresh defaults per open. */
+function emptyManualForm() {
+  return {
+    student_search: "",
+    student_ulid: "",
+    fee_type_ulid: "",
+    description: "",
+    amount: "",
+    due_date: new Date(Date.now() + 14 * 86_400_000).toISOString().split("T")[0],
+  };
+}
 
 function statusBadge(bill: Bill) {
   if (bill.status === "paid") return <Badge variant="good">Lunas</Badge>;
@@ -56,6 +78,66 @@ function AdminBillsContent() {
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("cash");
   const [reason, setReason] = useState("");
+
+  // Manual bill modal (one-off bills for unexpected cases)
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [feeTypes, setFeeTypes] = useState<FeeTypeOption[]>([]);
+  const [manual, setManual] = useState(emptyManualForm);
+  const [studentHits, setStudentHits] = useState<StudentHit[]>([]);
+  const [searchingStudents, setSearchingStudents] = useState(false);
+  const [creatingManual, setCreatingManual] = useState(false);
+
+  // Debounced student search for the manual-bill picker - same endpoint and
+  // debounce shape as the diskon page's assignment picker.
+  useEffect(() => {
+    if (!showManualModal || manual.student_search.length < 2) {
+      const clear = setTimeout(() => setStudentHits([]), 0);
+      return () => clearTimeout(clear);
+    }
+    const timer = setTimeout(async () => {
+      setSearchingStudents(true);
+      try {
+        const res = await api.get<{ students: { data: StudentHit[] } }>(
+          `/api/admin/students?search=${encodeURIComponent(manual.student_search)}&per_page=8`,
+        );
+        setStudentHits(res.students.data ?? []);
+      } catch {
+        setStudentHits([]);
+      } finally {
+        setSearchingStudents(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [showManualModal, manual.student_search]);
+
+  const selectedFeeType = feeTypes.find((t) => t.ulid === manual.fee_type_ulid) ?? null;
+
+  async function submitManualBill(e: React.FormEvent) {
+    e.preventDefault();
+    if (!manual.student_ulid) {
+      toast.error("Pilih siswa terlebih dahulu.");
+      return;
+    }
+    setCreatingManual(true);
+    try {
+      const res = await api.post<{ bill: Bill }>("/api/admin/bills/manual", {
+        student_ulid: manual.student_ulid,
+        fee_type_ulid: manual.fee_type_ulid,
+        description: manual.description,
+        amount: parseFloat(manual.amount),
+        due_date: manual.due_date,
+      });
+      toast.success(`Tagihan manual ${res.bill.bill_number} diterbitkan.`);
+      setShowManualModal(false);
+      setManual(emptyManualForm());
+      setPage(1);
+      load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal menerbitkan tagihan manual.");
+    } finally {
+      setCreatingManual(false);
+    }
+  }
 
   // .then() chains (not async/await) so setState only ever runs in an async
   // callback - the effect below calls this synchronously, and awaiting first
@@ -186,10 +268,31 @@ function AdminBillsContent() {
           </p>
         </div>
 
-        <Button variant="outline" size="sm" onClick={load} className="gap-2 self-start sm:self-auto">
-          <RefreshCw className="size-4" />
-          <span>Segarkan Data</span>
-        </Button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={async () => {
+              setShowManualModal(true);
+              if (feeTypes.length === 0) {
+                try {
+                  const d = await api.get<{ fee_types: FeeTypeOption[] }>("/api/admin/fee-types");
+                  setFeeTypes(d.fee_types.filter((t) => t.is_active));
+                } catch {
+                  toast.error("Gagal memuat daftar jenis biaya.");
+                }
+              }
+            }}
+          >
+            <FilePlus2 className="size-4" />
+            <span>Buat Tagihan Manual</span>
+          </Button>
+          <Button variant="outline" size="sm" onClick={load} className="gap-2">
+            <RefreshCw className="size-4" />
+            <span>Segarkan Data</span>
+          </Button>
+        </div>
       </div>
 
       {/* Filter Toolbar */}
@@ -367,6 +470,137 @@ function AdminBillsContent() {
       </div>
 
       {bills && bills.data.length > 0 && <Pagination meta={bills.meta} onPage={setPage} label="tagihan" />}
+
+      {/* MODAL: BUAT TAGIHAN MANUAL */}
+      {showManualModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-lg p-6 border-border shadow-2xl space-y-4 my-8">
+            <div>
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <FilePlus2 className="size-5 text-primary" />
+                <span>Buat Tagihan Manual</span>
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Untuk kasus di luar penerbitan rutin (seragam pengganti, bulan tertinggal siswa baru, denda khusus).
+                Tagihan masuk ke portal wali dan mengikuti alur bayar yang sama seperti tagihan rutin.
+              </p>
+            </div>
+
+            <form onSubmit={submitManualBill} className="space-y-3.5 text-xs">
+              <div>
+                <Label className="text-xs">Siswa</Label>
+                <Input
+                  value={manual.student_search}
+                  onChange={(e) =>
+                    setManual({ ...manual, student_search: e.target.value, student_ulid: "" })
+                  }
+                  placeholder="Ketik minimal 2 huruf nama siswa / NIS..."
+                  required
+                  className="mt-1"
+                  autoFocus
+                />
+                {searchingStudents && <p className="mt-1 text-[11px] text-muted-foreground">Mencari...</p>}
+                {studentHits.length > 0 && !manual.student_ulid && (
+                  <div className="mt-1 max-h-36 overflow-y-auto rounded-md border border-border bg-card shadow-lg divide-y divide-border">
+                    {studentHits.map((s) => (
+                      <button
+                        type="button"
+                        key={s.ulid}
+                        onClick={() => {
+                          setManual({
+                            ...manual,
+                            student_ulid: s.ulid,
+                            student_search: `${s.nama_lengkap} (${s.unit?.label ?? "-"})`,
+                          });
+                          setStudentHits([]);
+                        }}
+                        className="flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-muted/40"
+                      >
+                        <span className="font-semibold">{s.nama_lengkap}</span>
+                        <span className="text-muted-foreground">{s.unit?.label ?? "-"}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Jenis Biaya</Label>
+                  <select
+                    value={manual.fee_type_ulid}
+                    onChange={(e) => setManual({ ...manual, fee_type_ulid: e.target.value })}
+                    required
+                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                  >
+                    <option value="">Pilih jenis...</option>
+                    {feeTypes.map((t) => (
+                      <option key={t.ulid} value={t.ulid}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <Label className="text-xs">Jatuh Tempo</Label>
+                  <Input
+                    type="date"
+                    value={manual.due_date}
+                    onChange={(e) => setManual({ ...manual, due_date: e.target.value })}
+                    required
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+
+              {selectedFeeType && !selectedFeeType.has_va_prefix && (
+                <p className="rounded-lg border border-warn/30 bg-warn-soft px-3 py-2 text-[11px] font-medium text-warn">
+                  Jenis “{selectedFeeType.name}” belum punya nomor Virtual Account di bank — pembayaran diterima tunai
+                  di Tata Usaha (pakai tombol Catat Bayar).
+                </p>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Nominal (Rp)</Label>
+                  <Input
+                    type="number"
+                    min={1000}
+                    step={500}
+                    value={manual.amount}
+                    onChange={(e) => setManual({ ...manual, amount: e.target.value })}
+                    required
+                    placeholder="mis. 450000"
+                    className="mt-1 font-bold"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Deskripsi</Label>
+                  <Input
+                    value={manual.description}
+                    onChange={(e) => setManual({ ...manual, description: e.target.value })}
+                    required
+                    maxLength={200}
+                    placeholder={
+                      selectedFeeType ? `${selectedFeeType.name} - keterangan` : "mis. Seragam pengganti"
+                    }
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="ghost" onClick={() => setShowManualModal(false)} disabled={creatingManual}>
+                  Batal
+                </Button>
+                <Button type="submit" disabled={creatingManual || !manual.student_ulid} className="font-bold shadow-xs">
+                  {creatingManual ? "Menerbitkan…" : "Terbitkan Tagihan"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
 
       {/* ACTION MODAL */}
       {action && (

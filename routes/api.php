@@ -233,6 +233,10 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/students/attention', [AttentionController::class, 'index']);
     Route::get('/students/dapodik-export', [StudentController::class, 'exportDapodik']);
     Route::get('/bills', [AdminBillController::class, 'index']);
+    // One-off bills for unexpected cases - same fee catalogue, statuses and
+    // payment lanes as generated bills; VA follows the fee type's prefix
+    // (cash at the desk for types e-SPP has no prefix for).
+    Route::post('/bills/manual', [AdminBillController::class, 'storeManual']);
     Route::get('/bills/{ulid}/pdf', [AdminBillController::class, 'pdf']);
     Route::post('/bills/{ulid}/waive', [AdminBillController::class, 'waive']);
     Route::post('/bills/{ulid}/cancel', [AdminBillController::class, 'cancel']);

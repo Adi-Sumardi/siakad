@@ -5,10 +5,16 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\BillReasonRequest;
 use App\Http\Requests\Admin\RecordBillPaymentRequest;
+use App\Http\Requests\Admin\StoreManualBillRequest;
 use App\Http\Resources\BillResource;
 use App\Http\Resources\PaymentResource;
+use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Bill;
+use App\Models\BillLine;
+use App\Models\FeeType;
+use App\Models\Student;
+use App\Models\Term;
 use App\Services\Billing\BillPdfService;
 use App\Services\Billing\CheckoutService;
 use Illuminate\Http\JsonResponse;
@@ -43,6 +49,77 @@ class BillController extends Controller
         return response()->json([
             'bills' => BillResource::collection($bills)->response()->getData(true),
         ]);
+    }
+
+    /**
+     * A one-off bill for the cases the scheduled generator never knows about
+     * (replacement uniform, a mid-year entry's missed month, a fine). The
+     * money context is identical to a generated bill: same fee type
+     * catalogue, same statuses, same payment lanes - VA checkout when e-SPP
+     * has a prefix for the type (SPP, jamiyyah, ekskul, ...), cash at the
+     * desk recorded through the usual lane otherwise. A per-unit admin only
+     * reaches students inside their own unit (visibleTo, R3 - 404 not 403).
+     */
+    public function storeManual(StoreManualBillRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+
+        $student = Student::visibleTo($request->user())
+            ->where('ulid', $validated['student_ulid'])
+            ->firstOrFail();
+
+        $feeType = FeeType::where('ulid', $validated['fee_type_ulid'])
+            ->where('is_active', true)
+            ->firstOrFail();
+
+        $year = AcademicYear::where('is_active', true)->first()
+            ?? AcademicYear::latest('starts_on')->first();
+
+        if (! $year) {
+            return response()->json(['message' => 'Belum ada tahun ajaran di sistem.'], 422);
+        }
+
+        $amount = round((float) $validated['amount'], 2);
+
+        $bill = Bill::create([
+            'bill_number' => Bill::generateNumber($feeType, $year->year),
+            'student_id' => $student->id,
+            'fee_type_id' => $feeType->id,
+            'academic_year_id' => $year->id,
+            'term_id' => Term::current()?->id,
+            'dedup_key' => 'manual:'.$student->id.':'.uniqid(),
+            'description' => $validated['description'],
+            'subtotal' => $amount,
+            'discount_amount' => 0,
+            'late_fee' => 0,
+            'total_amount' => $amount,
+            'paid_amount' => 0,
+            'remaining_amount' => $amount,
+            'status' => 'unpaid',
+            'due_date' => $validated['due_date'],
+            'allow_installment' => (bool) $feeType->allow_installment,
+            'issued_at' => now(),
+            'issued_by' => $request->user()->id,
+            'notes' => 'Diterbitkan manual oleh '.$request->user()->name,
+        ]);
+
+        BillLine::create([
+            'bill_id' => $bill->id,
+            'name' => $validated['description'],
+            'qty' => 1,
+            'unit_price' => $amount,
+            'amount' => $amount,
+            'sort_order' => 0,
+        ]);
+
+        ActivityLog::record($request->user(), 'bill.manual_created', $bill, [
+            'bill_number' => $bill->bill_number,
+            'student' => $student->nama_lengkap,
+            'fee_type' => $feeType->code,
+            'amount' => $amount,
+        ]);
+
+        return response()->json(['bill' => new BillResource($bill)], 201);
     }
 
     public function pdf(Request $request, string $ulid, BillPdfService $pdf): Response

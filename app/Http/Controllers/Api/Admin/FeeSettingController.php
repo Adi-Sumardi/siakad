@@ -7,11 +7,13 @@ use App\Http\Requests\Admin\StoreFeeRateRequest;
 use App\Http\Requests\Admin\StoreFeeTypeRequest;
 use App\Http\Requests\Admin\UpdateFeeRateRequest;
 use App\Http\Requests\Admin\UpdateFeeTypeRequest;
+use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\FeeComponent;
 use App\Models\FeeRate;
 use App\Models\FeeType;
 use App\Models\SchoolUnit;
+use App\Services\Billing\BillingApiClient;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -46,6 +48,10 @@ class FeeSettingController extends Controller
                     'requires_roster_membership' => $type->requires_roster_membership,
                     'is_active' => $type->is_active,
                     'rate_count' => $type->rates()->count(),
+                    // Whether e-SPP has a VA prefix for this fee type - a
+                    // manual bill of a type without one is payable at the
+                    // front desk only, and the UI must say so up front.
+                    'has_va_prefix' => BillingApiClient::resolvePrefix($type->code) !== null,
                 ]),
         ]);
     }
@@ -136,7 +142,7 @@ class FeeSettingController extends Controller
 
         $type = FeeType::where('ulid', $validated['fee_type_ulid'])->firstOrFail();
         $unit = SchoolUnit::where('ulid', $validated['school_unit_ulid'])->firstOrFail();
-        $year = \App\Models\AcademicYear::where('ulid', $validated['academic_year_ulid'])->firstOrFail();
+        $year = AcademicYear::where('ulid', $validated['academic_year_ulid'])->firstOrFail();
 
         // The unique index would catch this anyway, but a 422 naming the clash
         // is a better answer than a 500 from a constraint violation.
