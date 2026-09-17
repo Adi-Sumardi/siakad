@@ -56,23 +56,6 @@ return [
         'base_url' => env('PMB_BASE_URL'),
     ],
 
-    // Gateway Pembayaran SendagoPay
-    'sendagopay' => [
-        'public_key' => env('SENDAGOPAY_PUBLIC_KEY'),
-        'secret_key' => env('SENDAGOPAY_SECRET_KEY'),
-        'webhook_secret' => env('SENDAGOPAY_WEBHOOK_SECRET'),
-        'base_url' => env('SENDAGOPAY_BASE_URL', 'https://api-sendagopay.adilabs.id'),
-    ],
-
-    // Payment gateway Xendit. Left unset, checkout still works end to end but produces
-    // no invoice URL - a laptop must not be able to mint payable invoices.
-    'xendit' => [
-        'secret_key' => env('XENDIT_SECRET_KEY'),
-        'webhook_token' => env('XENDIT_WEBHOOK_TOKEN'),
-        'base_url' => env('XENDIT_BASE_URL', 'https://api.xendit.co'),
-        'invoice_duration' => env('XENDIT_INVOICE_DURATION', 86400),
-    ],
-
     // Web Service Billing API e-SPP (Bank Muamalat BMI & Bank Syariah Indonesia BSI Virtual Account).
     // Endpoint paths and payload shape verified against docs/Dokumentasi_Billing_API
     // (sections 5.1-5.3) - see BillingApiClient for what that verification changed.

@@ -19,7 +19,7 @@ use RuntimeException;
  *
  * Only allocations belonging to a *completed* payment count. A checkout that is
  * still pending has reserved nothing: the parent may abandon it, and a bill
- * marked paid on the strength of an unfinished Xendit invoice is a bill nobody
+ * marked paid on the strength of an unfinished bank invoice is a bill nobody
  * chases.
  */
 class PaymentAllocator
@@ -27,6 +27,7 @@ class PaymentAllocator
     public function __construct(
         private PaymentReceiptNotifier $receipts,
     ) {}
+
     /**
      * Records what a payment is meant to settle.
      *
@@ -59,12 +60,12 @@ class PaymentAllocator
     /**
      * Marks a payment settled and updates every bill it touched.
      *
-     * Idempotent on purpose: a Xendit callback can arrive twice, and the second
+     * Idempotent on purpose: a bank callback can arrive twice, and the second
      * one must change nothing rather than double-count.
      *
      * Refuses anything not still pending/processing, not only what is already
      * completed. A payment CheckoutService superseded because a fresher
-     * checkout covered the same bill is done, even if its old Xendit invoice
+     * checkout covered the same bill is done, even if its old bank invoice
      * is technically still sitting out there and gets paid late - completing
      * it here would double-count the bill exactly the way two live invoices
      * for one bill did before checkout started superseding them.

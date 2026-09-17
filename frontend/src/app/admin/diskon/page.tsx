@@ -124,33 +124,37 @@ export default function AdminDiscountPage() {
     loadData();
   }, [loadData]);
 
-  // Student search for assignment
+  // Student search for assignment. Hits the student list endpoint (the only
+  // API that actually searches students) - this used to call /api/admin/bills
+  // with a `student` param that endpoint never read, so the dropdown stayed
+  // forever empty and assignment was silently impossible.
   useEffect(() => {
     if (assignForm.student_search.length >= 2) {
-      setSearchingStudents(true);
       const timer = setTimeout(async () => {
+        setSearchingStudents(true);
         try {
-          const res = await api.get<{ students: Array<{ ulid: string; nama_lengkap: string; nis: string | null; school_unit: { label: string } | null }> }>(
-            `/api/admin/bills?student=${encodeURIComponent(assignForm.student_search)}&limit=8`
-          );
-          // Extract unique students
-          const list = (res.students || []).map((s) => ({
+          const res = await api.get<{
+            students: {
+              data: Array<{ ulid: string; nama_lengkap: string; nis: string | null; unit: { label: string } | null }>;
+            };
+          }>(`/api/admin/students?search=${encodeURIComponent(assignForm.student_search)}&per_page=8`);
+          const list = (res.students.data || []).map((s) => ({
             ulid: s.ulid,
             nama_lengkap: s.nama_lengkap,
             nis: s.nis,
-            unit: s.school_unit?.label ?? "-",
+            unit: s.unit?.label ?? "-",
           }));
           setStudentResults(list);
         } catch {
-          // fallback
+          setStudentResults([]);
         } finally {
           setSearchingStudents(false);
         }
       }, 300);
       return () => clearTimeout(timer);
-    } else {
-      setStudentResults([]);
     }
+    const timer = setTimeout(() => setStudentResults([]), 0);
+    return () => clearTimeout(timer);
   }, [assignForm.student_search]);
 
   async function handleCreateScheme(e: React.FormEvent) {

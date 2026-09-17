@@ -98,9 +98,9 @@ class IntegrationEventMonitoringTest extends TestCase
     {
         $pmb = $this->pmbEvent();
         IntegrationEvent::create([
-            'source' => 'xendit',
-            'event_type' => 'payment.succeeded',
-            'event_id' => 'xendit:inv-1:SUCCEEDED',
+            'source' => 'billing_api',
+            'event_type' => 'payment.callback',
+            'event_id' => 'billing_api:inv-1:SETTLED',
             'payload' => ['id' => 'inv-1'],
             'status' => 'processed',
             'processed_at' => now(),
@@ -148,10 +148,10 @@ class IntegrationEventMonitoringTest extends TestCase
 
     public function test_reprocess_refuses_non_pmb_and_already_processed_events(): void
     {
-        $xendit = IntegrationEvent::create([
-            'source' => 'xendit',
-            'event_type' => 'payment.failed',
-            'event_id' => 'xendit:inv-2:FAILED',
+        $bank = IntegrationEvent::create([
+            'source' => 'billing_api',
+            'event_type' => 'payment.callback',
+            'event_id' => 'billing_api:inv-2:FAILED',
             'payload' => ['id' => 'inv-2'],
             'status' => 'failed',
             'attempts' => 1,
@@ -160,10 +160,10 @@ class IntegrationEventMonitoringTest extends TestCase
         $done = $this->pmbEvent(['status' => 'processed', 'processed_at' => now(), 'error' => null]);
         $admin = $this->staff('admin');
 
-        $this->actingAs($admin)->postJson("/api/admin/integration-events/{$xendit->ulid}/reprocess")->assertStatus(422);
+        $this->actingAs($admin)->postJson("/api/admin/integration-events/{$bank->ulid}/reprocess")->assertStatus(422);
         $this->actingAs($admin)->postJson("/api/admin/integration-events/{$done->ulid}/reprocess")->assertStatus(422);
 
-        $this->assertDatabaseHas('integration_events', ['ulid' => $xendit->ulid, 'status' => 'failed']);
+        $this->assertDatabaseHas('integration_events', ['ulid' => $bank->ulid, 'status' => 'failed']);
     }
 
     public function test_reprocess_also_picks_up_a_stuck_received_event(): void

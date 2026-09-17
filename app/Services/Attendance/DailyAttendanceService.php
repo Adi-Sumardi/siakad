@@ -5,10 +5,11 @@ namespace App\Services\Attendance;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\Classroom;
-use App\Models\DailyRecord;
-use App\Models\Enrollment;
-use App\Models\DailySession;
 use App\Models\DailyAttendanceSetting;
+use App\Models\DailyRecord;
+use App\Models\DailySession;
+use App\Models\Enrollment;
+use App\Models\Holiday;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\Term;
@@ -84,7 +85,7 @@ class DailyAttendanceService
     {
         $date ??= Carbon::now('Asia/Jakarta');
 
-        if (! $setting->enabled || ! $setting->runsOn($date->dayOfWeekIso) || ! Term::current()) {
+        if (! $setting->enabled || ! $setting->runsOn($date->dayOfWeekIso) || ! Term::current() || $this->isHoliday($date)) {
             return collect();
         }
 
@@ -93,9 +94,27 @@ class DailyAttendanceService
         return collect($types)->map(fn (string $type) => $this->firstOrCreateSession($setting, $date, $type));
     }
 
+    /**
+     * Whether the school-wide holiday calendar closes this date. Checked by
+     * both session creation and the sweep: a holiday marked after a session
+     * had already opened must close it quietly, not auto-alpa the school.
+     */
+    private function isHoliday(Carbon $date): bool
+    {
+        return Holiday::query()->whereDate('date', $date->toDateString())->exists();
+    }
+
     private function firstOrCreateSession(DailyAttendanceSetting $setting, Carbon $date, string $type): DailySession
     {
         [$opens, $closes, $lateAfter] = $this->windowTimes($setting, $type);
+        $now = Carbon::now('Asia/Jakarta');
+
+        // A session born after its own close time must never be created
+        // "open": the next sweep would auto-alpa an entire unit that was only
+        // just enabled (or added today to its days) mid-day. It still gets a
+        // row - the honest history that no window ever opened - but closed
+        // from birth, which the sweep leaves alone.
+        $windowAlreadyPast = $date->copy()->setTimeFromTimeString($closes)->lte($now);
 
         try {
             return DailySession::firstOrCreate(
@@ -104,7 +123,8 @@ class DailyAttendanceService
                     'opens_at' => $date->copy()->setTimeFromTimeString($opens),
                     'closes_at' => $date->copy()->setTimeFromTimeString($closes),
                     'late_after' => $lateAfter,
-                    'status' => 'open',
+                    'status' => $windowAlreadyPast ? 'closed' : 'open',
+                    'closed_at' => $windowAlreadyPast ? $now : null,
                 ],
             );
         } catch (QueryException) {
@@ -679,7 +699,9 @@ class DailyAttendanceService
                 'closed_at' => now(),
             ])->save();
 
-            if ($session->type !== 'masuk' || ! $term) {
+            if ($session->type !== 'masuk' || ! $term || $this->isHoliday($session->date)) {
+                // No auto-alpa on a holiday: the school was shut, nobody
+                // "missed" anything.
                 return [collect(), collect()];
             }
 

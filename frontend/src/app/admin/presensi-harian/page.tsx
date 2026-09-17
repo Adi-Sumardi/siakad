@@ -556,7 +556,125 @@ export default function AdminDailyAttendancePage() {
           </Card>
         </>
       )}
+
+      {isCentral && <HolidayCalendarCard />}
     </div>
+  );
+}
+
+/**
+ * The school-wide holiday calendar (central admin only). On a listed date no
+ * unit's attendance sessions open, so a national holiday falling on a school
+ * day can never sweep everyone into alpa at 08:00.
+ */
+function HolidayCalendarCard() {
+  const [holidays, setHolidays] = useState<Array<{ ulid: string; date: string; label: string }> | null>(null);
+  const [date, setDate] = useState("");
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api
+      .get<{ holidays: Array<{ ulid: string; date: string; label: string }> }>("/api/admin/holidays")
+      .then((d) => setHolidays(d.holidays))
+      .catch(() => setHolidays([]));
+  }, []);
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const res = await api.post<{ holiday: { ulid: string; date: string; label: string } }>("/api/admin/holidays", {
+        date,
+        label,
+      });
+      toast.success(`Hari libur ${res.holiday.date} terdaftar.`);
+      setHolidays((prev) => [...(prev ?? []), res.holiday].sort((a, b) => a.date.localeCompare(b.date)));
+      setDate("");
+      setLabel("");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal menambah hari libur.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(ulid: string, labelDate: string) {
+    if (!confirm(`Hapus hari libur ${labelDate}?`)) return;
+    try {
+      await api.delete(`/api/admin/holidays/${ulid}`);
+      setHolidays((prev) => (prev ?? []).filter((h) => h.ulid !== ulid));
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal menghapus hari libur.");
+    }
+  }
+
+  return (
+    <Card className="p-5 border-border/80 shadow-xs">
+      <div className="flex items-center gap-2">
+        <CalendarCheck2 className="size-4 text-primary" />
+        <h2 className="text-sm font-bold">Kalender Hari Libur</h2>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Pada tanggal yang terdaftar, tidak ada sesi presensi harian di semua unit — hari libur nasional tidak akan
+        menyapu seluruh siswa menjadi alpa.
+      </p>
+
+      <form onSubmit={add} className="mt-3 flex flex-wrap items-end gap-2">
+        <div>
+          <Label className="text-xs">Tanggal</Label>
+          <Input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            required
+            className="mt-1 h-9 w-40 text-xs"
+          />
+        </div>
+        <div className="min-w-[180px] flex-1">
+          <Label className="text-xs">Nama Libur</Label>
+          <Input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="mis. Idul Fitri 1448H"
+            required
+            maxLength={100}
+            className="mt-1 h-9 text-xs"
+          />
+        </div>
+        <Button type="submit" size="sm" disabled={busy || !date || !label} className="text-xs font-bold">
+          Tambah
+        </Button>
+      </form>
+
+      {holidays === null ? (
+        <Skeleton className="mt-3 h-16 w-full rounded-lg" />
+      ) : holidays.length === 0 ? (
+        <p className="mt-3 rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
+          Belum ada hari libur terdaftar. Tambahkan libur nasional agar presensi tidak berjalan pada tanggal tersebut.
+        </p>
+      ) : (
+        <ul className="mt-3 max-h-48 divide-y divide-border/60 overflow-y-auto rounded-lg border border-border">
+          {holidays.map((h) => (
+            <li key={h.ulid} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs font-semibold">{h.date}</span>
+                <span className="truncate text-xs text-muted-foreground">{h.label}</span>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => remove(h.ulid, h.date)}
+                className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10"
+              >
+                Hapus
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 

@@ -6,15 +6,16 @@ use App\Models\AcademicYear;
 use App\Models\Bill;
 use App\Models\FeeType;
 use App\Models\Guardian;
+use App\Models\IntegrationEvent;
 use App\Models\Payment;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\User;
 use App\Services\Billing\BillingApiClient;
+use App\Services\Billing\BillingApiException;
 use App\Services\Billing\PaymentAllocator;
-use App\Services\Payment\BillingApiGateway;
-use App\Services\Payment\PaymentGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Testing\TestResponse;
 use Mockery;
 use Tests\TestCase;
 
@@ -23,9 +24,13 @@ class BillingApiVirtualAccountTest extends TestCase
     use RefreshDatabase;
 
     private SchoolUnit $tkUnit;
+
     private SchoolUnit $sdUnit;
+
     private SchoolUnit $smp12Unit;
+
     private SchoolUnit $smp55Unit;
+
     private AcademicYear $year;
 
     protected function setUp(): void
@@ -116,22 +121,22 @@ class BillingApiVirtualAccountTest extends TestCase
 
         // SPP Muamalat: 802001 + 2627 + student id
         $sppVa = BillingApiClient::generateVaNumber($student, $sppBill, 'muamalat');
-        $this->assertEquals('802001' . '2627' . $studentCode, $sppVa);
+        $this->assertEquals('802001'.'2627'.$studentCode, $sppVa);
         $this->assertEquals(16, strlen($sppVa));
 
         // Jamiyyah Muamalat: 802003 + 2627 + student id
         $jamiyyahVa = BillingApiClient::generateVaNumber($student, $jamiyyahBill, 'muamalat');
-        $this->assertEquals('802003' . '2627' . $studentCode, $jamiyyahVa);
+        $this->assertEquals('802003'.'2627'.$studentCode, $jamiyyahVa);
         $this->assertEquals(16, strlen($jamiyyahVa));
 
         // SPP BSI: 365601 + 2627 + student id
         $sppVaBsi = BillingApiClient::generateVaNumber($student, $sppBill, 'bsi');
-        $this->assertEquals('365601' . '2627' . $studentCode, $sppVaBsi);
+        $this->assertEquals('365601'.'2627'.$studentCode, $sppVaBsi);
         $this->assertEquals(16, strlen($sppVaBsi));
 
         // Jamiyyah BSI: 365603 + 2627 + student id
         $jamiyyahVaBsi = BillingApiClient::generateVaNumber($student, $jamiyyahBill, 'bsi');
-        $this->assertEquals('365603' . '2627' . $studentCode, $jamiyyahVaBsi);
+        $this->assertEquals('365603'.'2627'.$studentCode, $jamiyyahVaBsi);
         $this->assertEquals(16, strlen($jamiyyahVaBsi));
     }
 
@@ -148,9 +153,9 @@ class BillingApiVirtualAccountTest extends TestCase
             'nis' => '100',
         ]);
         $vaTk = BillingApiClient::generateVaNumber($studentTk, $ekskulType, 'muamalat');
-        $this->assertEquals('802005' . '2627' . str_pad((string) $studentTk->id, 6, '0', STR_PAD_LEFT), $vaTk);
+        $this->assertEquals('802005'.'2627'.str_pad((string) $studentTk->id, 6, '0', STR_PAD_LEFT), $vaTk);
         $vaTkBsi = BillingApiClient::generateVaNumber($studentTk, $ekskulType, 'bsi');
-        $this->assertEquals('365605' . '2627' . str_pad((string) $studentTk->id, 6, '0', STR_PAD_LEFT), $vaTkBsi);
+        $this->assertEquals('365605'.'2627'.str_pad((string) $studentTk->id, 6, '0', STR_PAD_LEFT), $vaTkBsi);
 
         // 2. SD Unit -> 802006 (Muamalat) & 365606 (BSI)
         $studentSd = Student::create([
@@ -161,9 +166,9 @@ class BillingApiVirtualAccountTest extends TestCase
             'nis' => '200',
         ]);
         $vaSd = BillingApiClient::generateVaNumber($studentSd, $ekskulType, 'muamalat');
-        $this->assertEquals('802006' . '2627' . str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSd);
+        $this->assertEquals('802006'.'2627'.str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSd);
         $vaSdBsi = BillingApiClient::generateVaNumber($studentSd, $ekskulType, 'bsi');
-        $this->assertEquals('365606' . '2627' . str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSdBsi);
+        $this->assertEquals('365606'.'2627'.str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSdBsi);
 
         // 3. SMP-12 Unit -> 802007 (Muamalat) & 365607 (BSI)
         $studentSmp12 = Student::create([
@@ -174,9 +179,9 @@ class BillingApiVirtualAccountTest extends TestCase
             'nis' => '300',
         ]);
         $vaSmp12 = BillingApiClient::generateVaNumber($studentSmp12, $ekskulType, 'muamalat');
-        $this->assertEquals('802007' . '2627' . str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12);
+        $this->assertEquals('802007'.'2627'.str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12);
         $vaSmp12Bsi = BillingApiClient::generateVaNumber($studentSmp12, $ekskulType, 'bsi');
-        $this->assertEquals('365607' . '2627' . str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12Bsi);
+        $this->assertEquals('365607'.'2627'.str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12Bsi);
 
         // 4. SMP-55 Unit -> 802008 (Muamalat) & 365608 (BSI)
         $studentSmp55 = Student::create([
@@ -187,9 +192,9 @@ class BillingApiVirtualAccountTest extends TestCase
             'nis' => '400',
         ]);
         $vaSmp55 = BillingApiClient::generateVaNumber($studentSmp55, $ekskulType, 'muamalat');
-        $this->assertEquals('802008' . '2627' . str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55);
+        $this->assertEquals('802008'.'2627'.str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55);
         $vaSmp55Bsi = BillingApiClient::generateVaNumber($studentSmp55, $ekskulType, 'bsi');
-        $this->assertEquals('365608' . '2627' . str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55Bsi);
+        $this->assertEquals('365608'.'2627'.str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55Bsi);
     }
 
     public function test_it_formats_student_code_from_the_students_own_id_not_nis(): void
@@ -277,7 +282,7 @@ class BillingApiVirtualAccountTest extends TestCase
         $paymentData = $response->json('payment');
 
         $expectedStudentCode = str_pad((string) $student->id, 6, '0', STR_PAD_LEFT);
-        $this->assertEquals('8020012627' . $expectedStudentCode, $paymentData['virtual_account']['va_number']);
+        $this->assertEquals('8020012627'.$expectedStudentCode, $paymentData['virtual_account']['va_number']);
         $this->assertEquals('Bank Muamalat', $paymentData['virtual_account']['bank_name']);
         $this->assertEquals('147', $paymentData['virtual_account']['bank_code']);
         $this->assertEquals(650000, $paymentData['amount']);
@@ -346,7 +351,7 @@ class BillingApiVirtualAccountTest extends TestCase
         $paymentData = $response->json('payment');
 
         $expectedStudentCode = str_pad((string) $student->id, 6, '0', STR_PAD_LEFT);
-        $this->assertEquals('3656012627' . $expectedStudentCode, $paymentData['virtual_account']['va_number']);
+        $this->assertEquals('3656012627'.$expectedStudentCode, $paymentData['virtual_account']['va_number']);
         $this->assertEquals('Bank Syariah Indonesia (BSI)', $paymentData['virtual_account']['bank_name']);
         $this->assertEquals('451', $paymentData['virtual_account']['bank_code']);
         $this->assertEquals(650000, $paymentData['amount']);
@@ -420,6 +425,11 @@ class BillingApiVirtualAccountTest extends TestCase
         $mockClient->shouldReceive('createBilling')
             ->twice()
             ->andReturn(['uuid' => 'bill-uuid-1'], ['uuid' => 'bill-uuid-2']);
+        // The supersede guard asks the bank about the older VA before closing
+        // it - still outstanding here, so superseding is safe.
+        $mockClient->shouldReceive('getByVaNumber')
+            ->once()
+            ->andReturn(['sisa' => 650000]);
         $this->app->instance(BillingApiClient::class, $mockClient);
 
         $this->actingAs($user);
@@ -439,6 +449,55 @@ class BillingApiVirtualAccountTest extends TestCase
         $this->assertEquals('failed', Payment::where('ulid', $first['ulid'])->value('status'));
         $this->assertEquals('processing', Payment::where('ulid', $second['ulid'])->value('status'));
         $this->assertSame('unpaid', $julyBill->fresh()->status);
+    }
+
+    public function test_a_superseded_va_the_bank_says_was_paid_gets_settled_not_buried(): void
+    {
+        $user = User::create(['name' => 'Wali Telat Bayar', 'role' => 'orangtua', 'phone' => '081292702079', 'is_active' => true]);
+        $guardian = Guardian::create(['user_id' => $user->id, 'nama' => 'Wali Telat Bayar', 'hubungan' => 'ayah']);
+        $student = Student::create(['nama_lengkap' => 'Anak Telat Bayar', 'jenis_kelamin' => 'L', 'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'nis' => '703']);
+        $student->guardians()->attach($guardian->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+        $sppType = FeeType::create(['code' => 'spp', 'name' => 'SPP', 'recurrence' => 'monthly']);
+        $julyBill = Bill::create([
+            'bill_number' => 'SPP/2026/07/00030', 'dedup_key' => 'spp:2026:07:'.$student->id,
+            'description' => 'SPP Juli 2026', 'student_id' => $student->id,
+            'academic_year_id' => $this->year->id, 'fee_type_id' => $sppType->id,
+            'subtotal' => 650000, 'total_amount' => 650000, 'remaining_amount' => 650000,
+            'status' => 'unpaid', 'due_date' => now()->addDays(7)->toDateString(), 'issued_at' => now(),
+        ]);
+        $augustBill = Bill::create([
+            'bill_number' => 'SPP/2026/08/00031', 'dedup_key' => 'spp:2026:08:'.$student->id,
+            'description' => 'SPP Agustus 2026', 'student_id' => $student->id,
+            'academic_year_id' => $this->year->id, 'fee_type_id' => $sppType->id,
+            'subtotal' => 650000, 'total_amount' => 650000, 'remaining_amount' => 650000,
+            'status' => 'unpaid', 'due_date' => now()->addDays(7)->toDateString(), 'issued_at' => now(),
+        ]);
+
+        $mockClient = Mockery::mock(BillingApiClient::class);
+        $mockClient->shouldReceive('createBilling')->once()->andReturn(['uuid' => 'bill-uuid-early']);
+        // The bank's word on the older VA: fully paid. The money exists - it
+        // must be booked under the payment that earned it, and the new
+        // checkout must stop rather than strand it.
+        $mockClient->shouldReceive('getByVaNumber')->once()->andReturn(['sisa' => 0]);
+        $this->app->instance(BillingApiClient::class, $mockClient);
+
+        $this->actingAs($user);
+
+        $first = $this->postJson('/api/wali/checkout', [
+            'bill_ulids' => [$julyBill->ulid],
+            'method' => 'virtual_account',
+        ])->json('payment');
+
+        $second = $this->postJson('/api/wali/checkout', [
+            'bill_ulids' => [$augustBill->ulid],
+            'method' => 'virtual_account',
+        ]);
+
+        $second->assertStatus(422);
+        $this->assertEquals('completed', Payment::where('ulid', $first['ulid'])->value('status'));
+        $this->assertSame('paid', $julyBill->fresh()->status);
+        $this->assertSame('unpaid', $augustBill->fresh()->status);
     }
 
     public function test_paying_several_months_of_spp_at_once_uses_one_consistent_va(): void
@@ -670,7 +729,7 @@ class BillingApiVirtualAccountTest extends TestCase
         $mockClient = Mockery::mock(BillingApiClient::class);
         $mockClient->shouldReceive('getByVaNumber')
             ->with('8020012627000601')
-            ->andThrow(new \App\Services\Billing\BillingApiException('e-SPP unreachable', 500));
+            ->andThrow(new BillingApiException('e-SPP unreachable', 500));
         $this->app->instance(BillingApiClient::class, $mockClient);
 
         $response = $this->postJson('/api/payment-webhook/trans-uuid-601', [
@@ -768,5 +827,148 @@ class BillingApiVirtualAccountTest extends TestCase
         ]);
 
         $response->assertStatus(201);
+    }
+
+    /** A payment sitting at "processing" with one open bill, ready for webhook tests. */
+    private function processingVaPayment(string $nis, array $esppStatus): array
+    {
+        $user = User::create(['name' => 'Wali Hook '.$nis, 'role' => 'orangtua', 'phone' => '0812927'.$nis, 'is_active' => true]);
+        $guardian = Guardian::create(['user_id' => $user->id, 'nama' => 'Wali Hook', 'hubungan' => 'ayah']);
+        $student = Student::create(['nama_lengkap' => 'Anak Hook '.$nis, 'jenis_kelamin' => 'L', 'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'nis' => $nis]);
+        $student->guardians()->attach($guardian->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+        $sppType = FeeType::firstOrCreate(['code' => 'spp'], ['name' => 'SPP', 'recurrence' => 'monthly']);
+        $bill = Bill::create([
+            'bill_number' => 'SPP/2026/08/H'.$nis,
+            'dedup_key' => 'spp:2026:08:h'.$nis.$student->id,
+            'description' => 'SPP Bulan Agustus 2026', 'student_id' => $student->id,
+            'academic_year_id' => $this->year->id, 'fee_type_id' => $sppType->id,
+            'subtotal' => 700000, 'total_amount' => 700000, 'remaining_amount' => 700000,
+            'status' => 'unpaid', 'due_date' => now()->addDays(7)->toDateString(), 'issued_at' => now(),
+        ]);
+
+        $studentCode = str_pad((string) $student->id, 6, '0', STR_PAD_LEFT);
+        $va = '8020012627'.$studentCode;
+
+        $payment = Payment::create([
+            'payment_number' => 'YAPI-SPP-2026-H'.$nis,
+            'payer_guardian_id' => $guardian->id,
+            'amount' => 700000,
+            'method' => 'virtual_account',
+            'status' => 'processing',
+            'external_transaction_id' => 'hook-'.$nis,
+            'invoice_id' => 'hook-'.$nis,
+            'gateway_response' => ['provider' => 'bank_muamalat', 'va_number' => $va, 'billing_uuid' => 'hook-'.$nis],
+        ]);
+        app(PaymentAllocator::class)->allocate($payment, [$bill->id => 700000]);
+
+        $mockClient = Mockery::mock(BillingApiClient::class);
+        $mockClient->shouldReceive('getByVaNumber')->with($va)->andReturn($esppStatus);
+        $this->app->instance(BillingApiClient::class, $mockClient);
+
+        return [$payment, $bill];
+    }
+
+    private function postWebhook(string $id): TestResponse
+    {
+        $nis = substr($id, 6); // "event-903" -> "903"
+
+        return $this->postJson("/api/payment-webhook/{$id}", [
+            'uuid' => $id,
+            'billing_uuid' => 'hook-'.$nis,
+            'reference_no' => null,
+            'jumlah_pembayaran' => 700000,
+            'payment_type' => 'PAYMENT',
+        ]);
+    }
+
+    public function test_a_webhook_whose_espp_response_has_no_sisa_field_never_settles(): void
+    {
+        [$payment, $bill] = $this->processingVaPayment('900', ['status' => 'ok']); // no sisa key
+
+        $this->postWebhook('event-900')->assertOk();
+
+        $this->assertEquals('processing', $payment->fresh()->status);
+        $this->assertSame('unpaid', $bill->fresh()->status);
+        // Visible on the monitoring screen, not just in laravel.log.
+        $this->assertDatabaseHas('integration_events', [
+            'source' => 'billing_api',
+            'status' => 'failed',
+        ]);
+    }
+
+    public function test_a_webhook_whose_espp_amount_disagrees_with_the_payment_never_settles(): void
+    {
+        [$payment, $bill] = $this->processingVaPayment('901', ['sisa' => 0, 'jumlah_tagihan' => 999000]);
+
+        $this->postWebhook('event-901')->assertOk();
+
+        $this->assertEquals('processing', $payment->fresh()->status);
+        $this->assertSame('unpaid', $bill->fresh()->status);
+        $this->assertDatabaseHas('integration_events', ['source' => 'billing_api', 'status' => 'failed']);
+    }
+
+    public function test_money_arriving_for_a_superseded_payment_is_flagged_not_buried(): void
+    {
+        [$payment, $bill] = $this->processingVaPayment('902', ['sisa' => 0]);
+        // The parent was slow, someone re-checked out, this payment lost.
+        $payment->forceFill(['status' => 'failed', 'rejection_reason' => 'Digantikan checkout baru'])->save();
+
+        $this->postWebhook('event-902')->assertOk();
+
+        $this->assertEquals('failed', $payment->fresh()->status);
+        $this->assertSame('unpaid', $bill->fresh()->status);
+        $this->assertDatabaseHas('integration_events', [
+            'source' => 'billing_api',
+            'status' => 'failed',
+            'error' => "VA untuk pembayaran {$payment->payment_number} (status: failed) terbayar di e-SPP - uang masuk untuk pembayaran yang sudah ditutup, perlu rekonsiliasi manual.",
+        ]);
+    }
+
+    public function test_a_redelivered_webhook_settles_exactly_once(): void
+    {
+        [$payment, $bill] = $this->processingVaPayment('903', ['sisa' => 0]);
+
+        $this->postWebhook('event-903')->assertOk();
+        $this->postWebhook('event-903')->assertOk();
+
+        $this->assertEquals('completed', $payment->fresh()->status);
+        $this->assertEquals(700000, (float) $bill->fresh()->paid_amount);
+        $this->assertSame(1, IntegrationEvent::where('event_id', 'billing_api:event-903')->count());
+    }
+
+    public function test_va_prefix_resolution_is_explicit_not_a_fallback_to_spp(): void
+    {
+        $this->assertSame('802001', BillingApiClient::resolvePrefix('spp'));
+        $this->assertSame('802002', BillingApiClient::resolvePrefix('uang_pangkal'));
+        $this->assertSame('802003', BillingApiClient::resolvePrefix('jamiyyah'));
+        $this->assertSame('802005', BillingApiClient::resolvePrefix('ekskul', $this->tkUnit));
+
+        // Fee types e-SPP has no prefix for get NULL, never the SPP prefix -
+        // the old fallback minted a VA identical to the student's SPP VA for
+        // the same year.
+        $this->assertNull(BillingApiClient::resolvePrefix('seragam'));
+        $this->assertNull(BillingApiClient::resolvePrefix('buku'));
+        $this->assertNull(BillingApiClient::resolvePrefix('kegiatan'));
+    }
+
+    public function test_an_explicit_config_prefix_unlocks_an_unmapped_fee_type(): void
+    {
+        config()->set('services.billing_api.banks.muamalat.va_prefixes.seragam', '802009');
+
+        $this->assertSame('802009', BillingApiClient::resolvePrefix('seragam'));
+    }
+
+    public function test_generate_va_number_refuses_an_unmapped_fee_type(): void
+    {
+        $user = User::create(['name' => 'Wali Seragam', 'role' => 'orangtua', 'phone' => '081292702080', 'is_active' => true]);
+        $guardian = Guardian::create(['user_id' => $user->id, 'nama' => 'Wali Seragam', 'hubungan' => 'ayah']);
+        $student = Student::create(['nama_lengkap' => 'Anak Seragam', 'jenis_kelamin' => 'P', 'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'nis' => '801']);
+        $student->guardians()->attach($guardian->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+        $seragam = FeeType::create(['code' => 'seragam', 'name' => 'Seragam & atribut', 'recurrence' => 'once']);
+
+        $this->expectException(BillingApiException::class);
+        BillingApiClient::generateVaNumber($student, $seragam);
     }
 }

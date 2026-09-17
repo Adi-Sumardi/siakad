@@ -9,9 +9,6 @@ use App\Models\PaymentAllocation;
 use App\Models\User;
 use App\Services\Payment\BillingApiGateway;
 use App\Services\Payment\PaymentGateway;
-use App\Services\Payment\SendagoPayGateway;
-use App\Services\Payment\XenditGateway;
-use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -24,11 +21,12 @@ class CheckoutService
     public function __construct(
         private PaymentGateway $gateway,
         private PaymentAllocator $allocator,
+        private BillingApiClient $client,
     ) {}
 
     /**
      * Creates a pending Payment row and its bill allocations, then hands off
-     * to the active payment gateway (e-SPP Virtual Account, SendagoPay, or Xendit).
+     * to the payment gateway (e-SPP Virtual Account).
      *
      * @param  array<int, string>  $billUlids
      * @param  array<string, float|int|numeric-string>  $customAmounts  Bill ULID => custom partial amount
@@ -59,6 +57,11 @@ class CheckoutService
 
         $selectedBank = in_array(strtolower($bank), ['muamalat', 'bsi'], true) ? strtolower($bank) : 'muamalat';
 
+        // Refuse before any payment row exists - a fee type e-SPP has no VA
+        // prefix for cannot be paid by VA at all, and the old behavior (reusing
+        // the SPP prefix) silently collided with the student's SPP VA.
+        $this->assertVaPrefixAvailable($bills, $selectedBank);
+
         // Compute per-bill charge amount (either custom amount or remaining balance)
         $allocations = [];
         $amount = 0.0;
@@ -74,7 +77,7 @@ class CheckoutService
                 }
                 if ($custom > $remaining) {
                     throw new RuntimeException(
-                        "Nominal kustom untuk tagihan '{$bill->description}' (Rp ".number_format($custom, 0, ',', '.').") melebihi sisa tagihan (Rp ".number_format($remaining, 0, ',', '.').').'
+                        "Nominal kustom untuk tagihan '{$bill->description}' (Rp ".number_format($custom, 0, ',', '.').') melebihi sisa tagihan (Rp '.number_format($remaining, 0, ',', '.').').'
                     );
                 }
                 $charge = $custom;
@@ -86,10 +89,14 @@ class CheckoutService
 
         $amount = round($amount, 2);
 
-        $payment = DB::transaction(function () use ($guardian, $bills, $amount, $method, $allocations, $selectedBank) {
-            $this->supersedePendingPaymentsFor($bills);
-            $this->supersedeOtherVaPaymentsForSameGroup($bills);
+        // Outside the transaction on purpose: supersedeOtherVaPaymentsForSameGroup()
+        // may call the bank, and one of its outcomes settles money (which opens
+        // its own transaction and notifies the family) - neither belongs inside
+        // the checkout's lock window.
+        $this->supersedePendingPaymentsFor($bills);
+        $this->supersedeOtherVaPaymentsForSameGroup($bills);
 
+        $payment = DB::transaction(function () use ($guardian, $bills, $amount, $method, $allocations, $selectedBank) {
             $payment = Payment::create([
                 'payment_number' => Payment::generateNumber(),
                 'payer_guardian_id' => $guardian->id,
@@ -161,7 +168,38 @@ class CheckoutService
     }
 
     /**
-     * Supersedes older pending VA payments for the same student & fee type group.
+     * A fee type with no registered VA prefix must not reach the gateway.
+     *
+     * @param  Collection<int, Bill>  $bills
+     */
+    private function assertVaPrefixAvailable(Collection $bills, string $bank): void
+    {
+        if (! $this->gateway instanceof BillingApiGateway) {
+            return;
+        }
+
+        $primary = $bills->first();
+
+        if (! $primary) {
+            return;
+        }
+
+        $feeTypeCode = $primary->feeType?->code ?? 'spp';
+
+        if (BillingApiClient::resolvePrefix($feeTypeCode, $primary->student->schoolUnit, $bank) === null) {
+            $name = $primary->feeType?->name ?? $feeTypeCode;
+
+            throw new RuntimeException(
+                "Jenis biaya '{$name}' belum punya nomor Virtual Account di bank. Silakan bayar tunai di Tata Usaha sementara."
+            );
+        }
+    }
+
+    /**
+     * Supersedes older pending VA payments for the same student & fee type
+     * group - but only after asking the bank about each one. A VA the parent
+     * already paid must be SETTLED (the money exists), never silently failed;
+     * the old behavior buried it and the money vanished from the system.
      *
      * @param  Collection<int, Bill>  $bills
      */
@@ -193,11 +231,51 @@ class CheckoutService
                     ->orWhereNotNull('gateway_response->va_number');
             })
             ->get()
-            ->each(fn (Payment $stale) => $this->allocator->fail(
-                $stale,
-                'failed',
-                'Digantikan oleh checkout baru untuk anak dan jenis biaya yang sama.',
-            ));
+            ->each(function (Payment $stale) {
+                $this->settleStaleIfAlreadyPaid($stale);
+
+                $this->allocator->fail(
+                    $stale,
+                    'failed',
+                    'Digantikan oleh checkout baru untuk anak dan jenis biaya yang sama.',
+                );
+            });
+    }
+
+    /**
+     * Asks e-SPP whether this pending VA has in fact been paid. Fail-closed
+     * on the response, same as the webhook: a missing "sisa" is "cannot
+     * tell" (and then superseding proceeds only when the bank is reachable -
+     * an unreachable bank aborts the whole checkout rather than risking it).
+     */
+    private function settleStaleIfAlreadyPaid(Payment $stale): void
+    {
+        $vaNumber = $stale->gateway_response['va_number'] ?? null;
+
+        if (! $vaNumber) {
+            return;
+        }
+
+        try {
+            $statusRes = $this->client->getByVaNumber($vaNumber);
+        } catch (\Throwable $e) {
+            throw new RuntimeException(
+                'Tidak bisa menghubungi bank untuk memeriksa pembayaran Virtual Account sebelumnya ('.$e->getMessage().'). Mohon coba beberapa saat lagi.'
+            );
+        }
+
+        $rawRemaining = $statusRes['sisa'] ?? $statusRes['data']['sisa'] ?? null;
+
+        if ($rawRemaining !== null && is_numeric($rawRemaining) && (float) $rawRemaining <= 0) {
+            // The money exists - book it under the payment that earned it.
+            // settle() keeps the payment's own external id and gateway
+            // response when handed empties.
+            $this->allocator->settle($stale);
+
+            throw new RuntimeException(
+                'Pembayaran Virtual Account sebelumnya terdeteksi sudah dibayar dan baru saja dibukukan. Silakan muat ulang halaman tagihan.'
+            );
+        }
     }
 
     /**

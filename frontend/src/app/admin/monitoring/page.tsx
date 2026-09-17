@@ -411,7 +411,7 @@ function EventPanel() {
     <>
       <PanelHeader
         title="Webhook & Integrasi"
-        description="Kotak masuk event dari sistem luar (PMB, Xendit, SendagoPay). Event PMB yang gagal bisa diproses ulang."
+        description="Kotak masuk event dari sistem luar (PMB, e-SPP). Event PMB yang gagal bisa diproses ulang."
         onReload={load}
       />
 

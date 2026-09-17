@@ -190,6 +190,13 @@ class PromotionTest extends TestCase
         $this->assertSame('graduated', Enrollment::where('student_id', $graduate->id)->first()->status);
         $this->assertSame('left', Enrollment::where('student_id', $leaver->id)->first()->status);
         $this->assertSame(0, Enrollment::where('academic_year_id', $this->nextYear->id)->count());
+
+        // The student rows must say so too - otherwise every "active students"
+        // count, the unplaced alert, and the point-threshold sweep keep
+        // treating alumni as current students.
+        $this->assertSame('graduated', $graduate->fresh()->status);
+        $this->assertSame('transferred', $leaver->fresh()->status);
+        $this->assertSame(0, Student::whereIn('id', [$graduate->id, $leaver->id])->active()->count());
     }
 
     public function test_it_rejects_a_target_classroom_at_the_wrong_tingkat(): void

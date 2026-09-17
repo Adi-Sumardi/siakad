@@ -41,7 +41,9 @@ class BillPdfService
             // unverified bank accounts this used to print (never confirmed
             // as YAPI's real accounts, and stale since the gateway moved to
             // Bank Muamalat VA). Pure local formatting, no gateway call.
-            'vaNumber' => $bill->status === 'paid' ? null : BillingApiClient::generateVaNumber($bill->student, $bill),
+            // Fee types without a registered VA prefix get no VA block at
+            // all (null) rather than a number borrowed from another fee type.
+            'vaNumber' => $this->vaNumberFor($bill),
             'money' => fn (float $amount) => 'Rp '.number_format($amount, 0, ',', '.'),
         ])->setPaper('a4');
     }
@@ -51,6 +53,24 @@ class BillPdfService
         $prefix = $bill->status === 'paid' ? 'Kuitansi' : 'Tagihan';
 
         return $prefix.'-'.str_replace('/', '-', $bill->bill_number).'.pdf';
+    }
+
+    /**
+     * The VA to print on an unpaid bill, or null when there is none to print
+     * (paid bills, and fee types the bank has no VA prefix for - the blade
+     * skips the whole VA block for null either way).
+     */
+    private function vaNumberFor(Bill $bill): ?string
+    {
+        if ($bill->status === 'paid') {
+            return null;
+        }
+
+        try {
+            return BillingApiClient::generateVaNumber($bill->student, $bill);
+        } catch (BillingApiException) {
+            return null;
+        }
     }
 
     /**

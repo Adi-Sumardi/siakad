@@ -8,8 +8,6 @@ use App\Services\Notification\SendagoWhatsAppGateway;
 use App\Services\Notification\WhatsAppGateway;
 use App\Services\Payment\BillingApiGateway;
 use App\Services\Payment\PaymentGateway;
-use App\Services\Payment\SendagoPayGateway;
-use App\Services\Payment\XenditGateway;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\ServiceProvider;
@@ -22,15 +20,10 @@ class AppServiceProvider extends ServiceProvider
         // handoff code knowing which provider is behind it.
         $this->app->bind(MailGateway::class, SendagoMailGateway::class);
         $this->app->bind(WhatsAppGateway::class, SendagoWhatsAppGateway::class);
-        $this->app->bind(PaymentGateway::class, function () {
-            $driver = env('PAYMENT_GATEWAY', 'billing_api');
-
-            return match ($driver) {
-                'sendagopay' => app(SendagoPayGateway::class),
-                'xendit' => app(XenditGateway::class),
-                default => app(BillingApiGateway::class),
-            };
-        });
+        // e-SPP Virtual Account is the one and only payment gateway in
+        // production; the old Xendit/SendagoPay alternates were never used
+        // for real bills and are removed.
+        $this->app->bind(PaymentGateway::class, BillingApiGateway::class);
     }
 
     public function boot(): void

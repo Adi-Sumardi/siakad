@@ -104,7 +104,12 @@ class PromotionService
                 if (! in_array($outcome, ['promoted', 'repeated'], true)) {
                     // graduated / left: the student's journey through this
                     // app's academic records ends here, on purpose - no new
-                    // row.
+                    // row. The student row itself must say so too - otherwise
+                    // every "active students" count, the unplaced-classroom
+                    // alert, and the point-threshold sweep keep treating
+                    // alumni as current students.
+                    $student->forceFill(['status' => $outcome === 'graduated' ? 'graduated' : 'transferred'])->save();
+
                     return $current;
                 }
 

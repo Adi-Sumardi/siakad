@@ -11,6 +11,7 @@ use App\Models\Term;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
 use App\Services\Notification\WhatsAppGateway;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -72,28 +73,41 @@ class PointThresholdNotifier
             'balance' => (string) $balance,
             'label' => $threshold->label,
             'action' => (string) $threshold->action,
+            // Bookkeeping keys for the dedup write after a successful retry -
+            // the templates never read them.
+            'term_id' => $term->id,
+            'threshold_id' => $threshold->id,
         ];
 
         $result = $channel === 'email'
             ? $this->mail->send($to, 'point_threshold', $data)
             : $this->whatsapp->sendMessage($to, $this->whatsappMessage($data));
 
-        // Recorded before checking $result->success: a failed send that gets
-        // retried tomorrow by the same daily job would otherwise need its own
-        // separate retry bookkeeping. The failure row itself is what the
-        // notifications:retry-failed sweep picks up; the unique row here is
-        // what keeps that sweep from double-notifying.
-        PointThresholdNotification::create([
-            'student_id' => $student->id,
-            'term_id' => $term->id,
-            'point_threshold_id' => $threshold->id,
-            'balance_at_notification' => $balance,
-            'notified_at' => now(),
-        ]);
-
         $this->log($student, $channel, $to, $data, $result);
 
-        return $result->success;
+        if (! $result->success) {
+            // Deliberately NO dedup row on failure. The failed NotificationLog
+            // row is what the retry sweep picks up; if that exhausts too,
+            // tomorrow's evaluate() gets a fresh attempt. Writing the unique
+            // row before knowing the outcome (the old behavior) silenced a
+            // family forever whenever a gateway outage outlasted the retries.
+            return false;
+        }
+
+        try {
+            PointThresholdNotification::create([
+                'student_id' => $student->id,
+                'term_id' => $term->id,
+                'point_threshold_id' => $threshold->id,
+                'balance_at_notification' => $balance,
+                'notified_at' => now(),
+            ]);
+        } catch (QueryException) {
+            // Lost a race with a concurrent send - the unique row exists,
+            // which is exactly the state this write was for.
+        }
+
+        return true;
     }
 
     /**
@@ -148,9 +162,32 @@ class PointThresholdNotifier
             ];
         }
 
-        return $log->channel === 'email'
+        $result = $log->channel === 'email'
             ? $this->mail->send($log->recipient, 'point_threshold', $data)
             : $this->whatsapp->sendMessage($log->recipient, $this->whatsappMessage($data));
+
+        // A retry that finally succeeded is the one real delivery - write the
+        // dedup row now (evaluate() skipped its own write when the first
+        // attempt failed) so tomorrow's daily job does not send it again.
+        if ($result->success
+            && ($student = $log->notifiable) instanceof Student
+            && ! empty($data['term_id']) && ! empty($data['threshold_id'])
+        ) {
+            try {
+                PointThresholdNotification::firstOrCreate([
+                    'student_id' => $student->id,
+                    'term_id' => (int) $data['term_id'],
+                    'point_threshold_id' => (int) $data['threshold_id'],
+                ], [
+                    'balance_at_notification' => (int) $data['balance'],
+                    'notified_at' => now(),
+                ]);
+            } catch (QueryException) {
+                // Same race as evaluate() - the row existing is the goal.
+            }
+        }
+
+        return $result;
     }
 
     private function primaryGuardianFor(Student $student): ?Guardian

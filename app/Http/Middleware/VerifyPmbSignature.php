@@ -11,7 +11,7 @@ use Symfony\Component\HttpFoundation\Response;
  * Verifies that a handoff really came from PMB.
  *
  * HMAC-SHA256 over the raw body with a shared secret - the same shape as the
- * Xendit callback checks PMB already runs, so there is no second mechanism for
+ * callback-token checks PMB already runs, so there is no second mechanism for
  * anyone to learn.
  */
 class VerifyPmbSignature

@@ -188,4 +188,45 @@ class PointThresholdNotifierTest extends TestCase
         $this->assertEmpty($this->sentMail);
         $this->assertDatabaseCount('point_threshold_notifications', 0);
     }
+
+    public function test_a_failed_send_writes_no_dedup_row_so_tomorrow_tries_again(): void
+    {
+        $student = $this->studentWithGuardian(-30);
+
+        // The gateway fails the first send and recovers afterwards.
+        $failFirst = true;
+        $this->app->forgetInstance(MailGateway::class);
+        $this->app->bind(MailGateway::class, function () use (&$failFirst) {
+            return new class($failFirst) implements MailGateway
+            {
+                public function __construct(private bool &$failFirst) {}
+
+                public function send(string $to, string $template, array $data, array $attachments = []): NotificationResult
+                {
+                    if ($this->failFirst) {
+                        $this->failFirst = false;
+
+                        return NotificationResult::fail('SMTP down');
+                    }
+
+                    return NotificationResult::ok();
+                }
+            };
+        });
+
+        $notifier = app(PointThresholdNotifier::class);
+
+        // Day 1: the send fails - and must leave NO dedup row behind. The old
+        // behavior wrote it before knowing the outcome, silencing the family
+        // forever once the outage outlasted the retry sweep.
+        $this->assertFalse($notifier->evaluate($student, $this->term));
+        $this->assertDatabaseCount('point_threshold_notifications', 0);
+
+        // Day 2: the gateway recovered - the family still gets told.
+        $this->assertTrue($notifier->evaluate($student, $this->term));
+        $this->assertDatabaseCount('point_threshold_notifications', 1);
+
+        // And once delivered, still exactly once per band per term.
+        $this->assertFalse($notifier->evaluate($student, $this->term));
+    }
 }

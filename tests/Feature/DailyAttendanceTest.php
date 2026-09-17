@@ -9,17 +9,18 @@ use App\Models\DailyRecord;
 use App\Models\DailySession;
 use App\Models\Enrollment;
 use App\Models\Guardian;
+use App\Models\Holiday;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\Term;
 use App\Models\User;
 use App\Services\Attendance\DailyAttendanceService;
-use RuntimeException;
 use App\Services\Attendance\RotatingQrService;
 use App\Services\Notification\NotificationResult;
 use App\Services\Notification\WhatsAppGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -945,5 +946,60 @@ class DailyAttendanceTest extends TestCase
         // No auto-alpa was invented for a window the unit itself withdrew -
         // the sweep is what writes those, and it only runs for enabled units.
         $this->assertDatabaseMissing('daily_records', ['student_id' => $student->id]);
+    }
+
+    public function test_a_holiday_opens_no_sessions_and_never_sweeps_alpa(): void
+    {
+        $setting = $this->enabledSetting($this->sd);
+        $classroom = $this->classroomIn($this->sd);
+        $student = $this->studentIn($classroom, '9010');
+        $this->guardianOf($student);
+
+        Holiday::create(['date' => $this->monday->toDateString(), 'label' => 'Hari Libur Nasional']);
+
+        $sessions = app(DailyAttendanceService::class)->ensureSessionsForDate($setting, $this->monday);
+        $this->assertCount(0, $sessions);
+        $this->assertDatabaseCount('daily_sessions', 0);
+
+        // Marked the holiday only after a session had already opened? Closing
+        // it must stay quiet - a school that was shut never mass-alpas.
+        $session = DailySession::create([
+            'school_unit_id' => $this->sd->id,
+            'date' => $this->monday->toDateString(),
+            'type' => 'masuk',
+            'opens_at' => $this->monday->copy()->setTime(6, 30),
+            'closes_at' => $this->monday->copy()->setTime(8, 0),
+            'status' => 'open',
+        ]);
+
+        $swept = app(DailyAttendanceService::class)->closeAndSweep($session);
+
+        $this->assertSame(0, $swept);
+        $this->assertSame('closed', $session->fresh()->status);
+        $this->assertDatabaseCount('daily_records', 0);
+        $this->assertEmpty($this->sentWa);
+    }
+
+    public function test_enabling_a_unit_midday_after_its_close_time_creates_no_open_session(): void
+    {
+        $setting = $this->enabledSetting($this->sd, ['masuk_closes_at' => '08:00:00']);
+        $classroom = $this->classroomIn($this->sd);
+        $student = $this->studentIn($classroom, '9011');
+        $this->guardianOf($student);
+
+        // 10:00 Monday - the admin flips the unit on two hours after masuk
+        // closed. The session must be born closed, or the next sweep would
+        // alpa the entire unit and blast every family.
+        Carbon::setTestNow(Carbon::create(2026, 9, 14, 10, 0, 0, 'Asia/Jakarta')->utc());
+
+        $sessions = app(DailyAttendanceService::class)->ensureSessionsForDate($setting);
+
+        $this->assertCount(1, $sessions);
+        $this->assertSame('closed', $sessions[0]->fresh()->status);
+
+        $this->artisan('attendance:daily-sweep')->assertSuccessful();
+
+        $this->assertDatabaseCount('daily_records', 0);
+        $this->assertEmpty($this->sentWa);
     }
 }

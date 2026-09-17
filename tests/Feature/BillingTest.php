@@ -461,7 +461,7 @@ class BillingTest extends TestCase
         $allocator->settle($payment);
         $allocator->settle($payment->fresh());
 
-        // Xendit retries; the balance must not move on the second delivery.
+        // The gateway retries; the balance must not move on the second delivery.
         $this->assertEquals(650000.0, (float) $bill->fresh()->paid_amount);
         $this->assertDatabaseCount('payment_allocations', 1);
     }
@@ -558,7 +558,7 @@ class BillingTest extends TestCase
         $this->assertSame('processing', $second->fresh()->status);
 
         // If the family (or a late gateway callback) somehow settles both -
-        // two Xendit invoices, two transfers - the bill must not end up
+        // two bank invoices, two transfers - the bill must not end up
         // marked paid for more than it was ever owed.
         $allocator->settle($first->fresh());
         $allocator->settle($second->fresh());

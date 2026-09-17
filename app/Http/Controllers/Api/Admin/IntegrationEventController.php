@@ -26,7 +26,7 @@ class IntegrationEventController extends Controller
         $status = $request->string('status')->value();
 
         $events = IntegrationEvent::query()
-            ->when(in_array($source, ['pmb', 'xendit', 'sendagopay', 'billing_api'], true), fn ($q) => $q->where('source', $source))
+            ->when(in_array($source, ['pmb', 'billing_api'], true), fn ($q) => $q->where('source', $source))
             ->when(in_array($status, ['received', 'processed', 'failed'], true), fn ($q) => $q->where('status', $status))
             ->orderByDesc('created_at')
             ->orderByDesc('id')
@@ -52,7 +52,7 @@ class IntegrationEventController extends Controller
      * cannot duplicate a student. The classic flow is "unknown unit" - the
      * admin adds the unit, presses this, and the handoff completes.
      *
-     * PMB only: the xendit/sendagopay handlers run inline in their
+     * PMB only: the billing_api webhook runs inline in its
      * controllers and have no replayable service to dispatch.
      */
     public function reprocess(Request $request, string $ulid): JsonResponse
