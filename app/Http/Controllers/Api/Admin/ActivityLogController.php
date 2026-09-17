@@ -36,7 +36,7 @@ class ActivityLogController extends Controller
                 ->where('created_at', '<=', $to.' 23:59:59'))
             ->orderByDesc('created_at')
             ->orderByDesc('id')
-            ->paginate(50);
+            ->paginate($request->integer('per_page', 20));
 
         $rows = $logs->getCollection()->load('user:id,ulid,name,role');
         $subjectUlids = $this->subjectUlids($rows);
@@ -57,6 +57,7 @@ class ActivityLogController extends Controller
                 'current_page' => $logs->currentPage(),
                 'last_page' => $logs->lastPage(),
                 'total' => $logs->total(),
+                'per_page' => $logs->perPage(),
             ],
         ]]);
     }

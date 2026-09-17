@@ -32,6 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError, API_BASE } from "@/lib/api";
 import { useAuth } from "@/lib/auth/auth-context";
 import { tanggalWaktu } from "@/lib/format";
+import { Pagination, type PageMeta } from "@/components/ui/pagination";
 
 type UserItem = {
   ulid: string;
@@ -56,8 +57,10 @@ export default function UserManagementPage() {
   const isUnitAdmin = user?.role === "admin_unit";
 
   const [users, setUsers] = useState<UserItem[] | null>(null);
+  const [meta, setMeta] = useState<PageMeta | null>(null);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
 
   // Guru CSV import
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -85,17 +88,22 @@ export default function UserManagementPage() {
   const [formIsActive, setFormIsActive] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  function loadUsers() {
+  function loadUsers(targetPage: number = page) {
     setLoading(true);
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (roleFilter) params.set("role", roleFilter);
     if (unitFilter) params.set("unit", unitFilter);
     if (statusFilter !== "") params.set("is_active", statusFilter);
+    params.set("page", String(targetPage));
+    params.set("per_page", "20");
 
     api
-      .get<{ users: { data: UserItem[] } }>(`/api/admin/users?${params.toString()}`)
-      .then((d) => setUsers(d.users.data))
+      .get<{ users: { data: UserItem[]; meta: PageMeta } }>(`/api/admin/users?${params.toString()}`)
+      .then((d) => {
+        setUsers(d.users.data);
+        setMeta(d.users.meta);
+      })
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat pengguna."))
       .finally(() => setLoading(false));
   }
@@ -106,11 +114,17 @@ export default function UserManagementPage() {
       .get<{ school_units: SchoolUnit[] }>("/api/admin/school-units")
       .then((d) => setUnits(d.school_units))
       .catch(() => {});
-  }, [roleFilter, unitFilter, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [roleFilter, unitFilter, statusFilter, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
-    loadUsers();
+    // A new search can shrink the result set - always land on page 1. When
+    // we're already there the effect above won't re-fire, so fetch by hand.
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      loadUsers(1);
+    }
   }
 
   function openCreate() {
@@ -242,7 +256,13 @@ export default function UserManagementPage() {
       await api.delete(`/api/admin/users/${deletingUser.ulid}`);
       toast.success("Pengguna berhasil dihapus.");
       setDeletingUser(null);
-      loadUsers();
+      // Deleting the last row of a page would strand the user on an empty
+      // page - step back instead of refetching the now-empty one.
+      if (users && users.length === 1 && page > 1) {
+        setPage(page - 1);
+      } else {
+        loadUsers();
+      }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menghapus pengguna.");
     } finally {
@@ -378,7 +398,10 @@ export default function UserManagementPage() {
             <Label className="text-xs">Role / Peran</Label>
             <select
               value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
+              onChange={(e) => {
+                setRoleFilter(e.target.value);
+                setPage(1);
+              }}
               className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
             >
               <option value="">Semua Role</option>
@@ -403,7 +426,10 @@ export default function UserManagementPage() {
               <Label className="text-xs">Unit Sekolah</Label>
               <select
                 value={unitFilter}
-                onChange={(e) => setUnitFilter(e.target.value)}
+                onChange={(e) => {
+                  setUnitFilter(e.target.value);
+                  setPage(1);
+                }}
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
               >
                 <option value="">Semua Unit</option>
@@ -421,7 +447,10 @@ export default function UserManagementPage() {
               <Label className="text-xs">Status Akun</Label>
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setPage(1);
+                }}
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
               >
                 <option value="">Semua Status</option>
@@ -544,6 +573,15 @@ export default function UserManagementPage() {
             </tbody>
           </table>
         </div>
+
+        {meta && (
+          <Pagination
+            meta={meta}
+            onPage={setPage}
+            label="pengguna"
+            className="border-t border-border/60 px-5 py-3.5"
+          />
+        )}
       </Card>
 
       {/* Modal Tambah User */}

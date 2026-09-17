@@ -13,8 +13,9 @@ import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth/auth-context";
 import { tanggalWaktu } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { Pagination, type PageMeta } from "@/components/ui/pagination";
 
-type Paginated<T> = { data: T[]; meta: { current_page: number; last_page: number; total: number } };
+type Paginated<T> = { data: T[]; meta: PageMeta };
 
 type NotificationRow = {
   ulid: string;
@@ -62,8 +63,6 @@ const TEMPLATE_LABEL: Record<string, string> = {
 
 const SOURCE_LABEL: Record<string, string> = {
   pmb: "PMB",
-  xendit: "Xendit",
-  sendagopay: "SendagoPay",
   billing_api: "e-SPP",
 };
 
@@ -188,22 +187,8 @@ function PanelHeader({ title, description, onReload }: { title: string; descript
   );
 }
 
-function Pager({ meta, onPage }: { meta: Paginated<unknown>["meta"]; onPage: (next: number) => void }) {
-  return (
-    <div className="flex items-center justify-between">
-      <p className="text-sm text-muted-foreground">
-        Halaman {meta.current_page} dari {meta.last_page} · {meta.total} baris
-      </p>
-      <div className="flex gap-2">
-        <Button size="sm" variant="outline" disabled={meta.current_page <= 1} onClick={() => onPage(meta.current_page - 1)}>
-          Sebelumnya
-        </Button>
-        <Button size="sm" variant="outline" disabled={meta.current_page >= meta.last_page} onClick={() => onPage(meta.current_page + 1)}>
-          Berikutnya
-        </Button>
-      </div>
-    </div>
-  );
+function Pager({ meta, onPage }: { meta: PageMeta; onPage: (next: number) => void }) {
+  return <Pagination meta={meta} onPage={onPage} label="baris" />;
 }
 
 function NotificationPanel() {

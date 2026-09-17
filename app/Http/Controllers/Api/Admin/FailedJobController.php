@@ -26,7 +26,7 @@ class FailedJobController extends Controller
         $jobs = DB::table('failed_jobs')
             ->orderByDesc('failed_at')
             ->orderByDesc('id')
-            ->paginate(50);
+            ->paginate($request->integer('per_page', 20));
 
         return response()->json(['jobs' => [
             'data' => collect($jobs->items())->map(fn ($job) => [
@@ -42,6 +42,7 @@ class FailedJobController extends Controller
                 'current_page' => $jobs->currentPage(),
                 'last_page' => $jobs->lastPage(),
                 'total' => $jobs->total(),
+                'per_page' => $jobs->perPage(),
             ],
         ]]);
     }

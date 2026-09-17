@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth/auth-context";
 import { tanggalWaktu } from "@/lib/format";
+import { Pagination } from "@/components/ui/pagination";
 
 type LogRow = {
   ulid: string;
@@ -194,21 +195,7 @@ export default function ActivityLogPage() {
         })}
       </div>
 
-      {logs && logs.data.length > 0 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Halaman {logs.meta.current_page} dari {logs.meta.last_page} · {logs.meta.total} aktivitas
-          </p>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" disabled={logs.meta.current_page <= 1} onClick={() => setPage((p) => p - 1)}>
-              Sebelumnya
-            </Button>
-            <Button size="sm" variant="outline" disabled={logs.meta.current_page >= logs.meta.last_page} onClick={() => setPage((p) => p + 1)}>
-              Berikutnya
-            </Button>
-          </div>
-        </div>
-      )}
+      {logs && logs.data.length > 0 && <Pagination meta={logs.meta} onPage={setPage} label="aktivitas" />}
     </div>
   );
 }

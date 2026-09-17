@@ -38,7 +38,7 @@ class BillController extends Controller
             ->when($request->string('year')->value(), fn ($q, $year) => $q->whereHas('academicYear',
                 fn ($ay) => $ay->where('year', $year)->orWhere('ulid', $year)))
             ->orderBy('due_date')
-            ->paginate(50);
+            ->paginate($request->integer('per_page', 20));
 
         return response()->json([
             'bills' => BillResource::collection($bills)->response()->getData(true),

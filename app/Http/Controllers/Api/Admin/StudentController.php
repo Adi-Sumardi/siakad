@@ -38,16 +38,11 @@ class StudentController extends Controller
 
         $sppType = FeeType::where('code', 'spp')->first();
 
-        $studentsQuery = Student::query()
+        // One filter set feeds both the paginated rows and the KPI totals -
+        // the summary cards describe the whole filtered cohort, not just the
+        // 20 rows on the current page.
+        $filteredQuery = fn () => Student::query()
             ->visibleTo($request->user())
-            ->with([
-                'schoolUnit',
-                'entryYear',
-                'guardians',
-                'enrollments' => fn ($q) => $q->where('status', 'active')
-                    ->when($selectedYear, fn ($eq) => $eq->where('academic_year_id', $selectedYear->id))
-                    ->with('classroom.homeroomTeacher'),
-            ])
             ->when($request->string('search')->value(), function ($q, $search) {
                 $q->where(function ($sq) use ($search) {
                     $sq->where('nama_lengkap', 'like', "%{$search}%")
@@ -69,7 +64,26 @@ class StudentController extends Controller
                     ->when($selectedYear, fn ($ey) => $ey->where('academic_year_id', $selectedYear->id))))
             ->orderBy('nama_lengkap');
 
-        $students = $studentsQuery->paginate($request->integer('per_page', 25));
+        $students = $filteredQuery()
+            ->with([
+                'schoolUnit',
+                'entryYear',
+                'guardians',
+                'enrollments' => fn ($q) => $q->where('status', 'active')
+                    ->when($selectedYear, fn ($eq) => $eq->where('academic_year_id', $selectedYear->id))
+                    ->with('classroom.homeroomTeacher'),
+            ])
+            ->paginate($request->integer('per_page', 20));
+
+        // Totals pass over the whole filtered set, but with only the columns
+        // pricing reads (school_unit_id + the enrollment's tingkat) - no
+        // guardians or unit labels to hydrate.
+        $totalsStudents = $filteredQuery()
+            ->with(['enrollments' => fn ($q) => $q->select('id', 'student_id', 'classroom_id', 'status', 'academic_year_id')
+                ->where('status', 'active')
+                ->when($selectedYear, fn ($eq) => $eq->where('academic_year_id', $selectedYear->id))
+                ->with('classroom:id,tingkat')])
+            ->get(['id', 'school_unit_id']);
 
         // Preload all SPP rates for selected academic year
         $feeRates = $sppType && $selectedYear
@@ -79,15 +93,19 @@ class StudentController extends Controller
                 ->get()
             : collect();
 
-        // Preload active student discounts
-        $studentIds = $students->pluck('id')->all();
+        // Preload active student discounts (rows + totals in one query)
         $studentDiscounts = StudentDiscount::with('scheme.feeType')
-            ->whereIn('student_id', $studentIds)
+            ->whereIn('student_id', $students->pluck('id')
+                ->merge($totalsStudents->pluck('id'))
+                ->unique()
+                ->all())
             ->effectiveOn(now())
             ->get()
             ->groupBy('student_id');
 
-        $data = $students->map(function (Student $student) use ($feeRates, $studentDiscounts, $sppType) {
+        // Shared by the row mapper and the totals loop so both always agree
+        // on what a student's SPP pricing is.
+        $pricingFor = function (Student $student) use ($feeRates, $studentDiscounts, $sppType): array {
             $activeEnrollment = $student->enrollments->first();
             $classroom = $activeEnrollment?->classroom;
             $tingkat = $classroom?->tingkat;
@@ -117,7 +135,26 @@ class StudentController extends Controller
                 }
             }
 
-            $netSpp = max(0.0, round($baseSpp - $discountTotal, 2));
+            return [
+                'has_rate' => $matchedRate !== null,
+                'base_spp' => $baseSpp,
+                'discount_amount' => $discountTotal,
+                'net_spp' => max(0.0, round($baseSpp - $discountTotal, 2)),
+                'discounts' => $discountDetails,
+            ];
+        };
+
+        $totals = ['base_spp' => 0.0, 'discount' => 0.0, 'net_spp' => 0.0];
+        foreach ($totalsStudents as $student) {
+            $pricing = $pricingFor($student);
+            $totals['base_spp'] += $pricing['base_spp'];
+            $totals['discount'] += $pricing['discount_amount'];
+            $totals['net_spp'] += $pricing['net_spp'];
+        }
+
+        $data = $students->map(function (Student $student) use ($pricingFor) {
+            $activeEnrollment = $student->enrollments->first();
+            $classroom = $activeEnrollment?->classroom;
 
             $primaryGuardian = $student->guardians->first(fn ($g) => $g->pivot->is_primary)
                 ?? $student->guardians->first();
@@ -147,13 +184,7 @@ class StudentController extends Controller
                     'relationship' => $primaryGuardian->pivot->relationship,
                     'phone' => $primaryGuardian->no_hp,
                 ] : null,
-                'pricing' => [
-                    'has_rate' => $matchedRate !== null,
-                    'base_spp' => $baseSpp,
-                    'discount_amount' => $discountTotal,
-                    'net_spp' => $netSpp,
-                    'discounts' => $discountDetails,
-                ],
+                'pricing' => $pricingFor($student),
             ];
         });
 
@@ -165,6 +196,14 @@ class StudentController extends Controller
                     'last_page' => $students->lastPage(),
                     'total' => $students->total(),
                     'per_page' => $students->perPage(),
+                    // The KPI cards aggregate the whole filtered cohort, so
+                    // they keep their meaning now that rows arrive 20 at a
+                    // time instead of tracking whichever page is on screen.
+                    'totals' => [
+                        'base_spp' => round($totals['base_spp'], 2),
+                        'discount' => round($totals['discount'], 2),
+                        'net_spp' => round($totals['net_spp'], 2),
+                    ],
                     'selected_academic_year' => $selectedYear?->year,
                     'selected_academic_year_ulid' => $selectedYear?->ulid,
                 ],

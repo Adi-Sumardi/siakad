@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth/auth-context";
 import { api, ApiError, API_BASE } from "@/lib/api";
 import { rupiah } from "@/lib/format";
+import { Pagination, type PageMeta } from "@/components/ui/pagination";
 
 type StudentItem = {
   ulid: string;
@@ -73,15 +74,24 @@ type StudentItem = {
 type SchoolUnit = { ulid: string; code: string; label: string; jenjang_group: string };
 type AcademicYear = { ulid: string; year: string; is_active: boolean };
 
+// The KPI aggregates come from the backend (whole filtered cohort) instead of
+// the 20 rows on screen, so they keep their meaning across pages.
+type StudentListMeta = PageMeta & {
+  totals: { base_spp: number; discount: number; net_spp: number };
+  selected_academic_year: string;
+};
+
 function AdminStudentsContent() {
   const { user } = useAuth();
   const isAdministrator = user?.role === "admin";
   const searchParams = useSearchParams();
 
   const [students, setStudents] = useState<StudentItem[] | null>(null);
+  const [meta, setMeta] = useState<StudentListMeta | null>(null);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [selectedYear, setSelectedYear] = useState<string>("");
+  const [page, setPage] = useState(1);
 
   // Filters
   const [search, setSearch] = useState("");
@@ -116,7 +126,7 @@ function AdminStudentsContent() {
   // refetch (filter/search change) keeps the previous rows on screen instead of
   // flashing a skeleton - and nothing ever calls setState synchronously in the
   // effect below.
-  function loadStudents() {
+  function loadStudents(targetPage: number = page) {
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (unitFilter) params.set("unit", unitFilter);
@@ -124,13 +134,16 @@ function AdminStudentsContent() {
     if (statusFilter) params.set("status", statusFilter);
     if (placementNone) params.set("placement", "none");
     if (selectedYear) params.set("academic_year", selectedYear);
+    params.set("page", String(targetPage));
+    params.set("per_page", "20");
 
     api
-      .get<{ students: { data: StudentItem[]; meta: { selected_academic_year: string } } }>(
+      .get<{ students: { data: StudentItem[]; meta: StudentListMeta } }>(
         `/api/admin/students?${params.toString()}`,
       )
       .then((d) => {
         setStudents(d.students.data);
+        setMeta(d.students.meta);
       })
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data siswa."));
   }
@@ -158,11 +171,17 @@ function AdminStudentsContent() {
     if (selectedYear) {
       loadStudents();
     }
-  }, [selectedYear, unitFilter, jenjangFilter, statusFilter, placementNone]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedYear, unitFilter, jenjangFilter, statusFilter, placementNone, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
-    loadStudents();
+    // A new search can shrink the result set - always land on page 1. When
+    // we're already there the effect above won't re-fire, so fetch by hand.
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      loadStudents(1);
+    }
   }
 
   // Download endpoints live on the API origin, so a plain <a href="/api/...">
@@ -270,7 +289,13 @@ function AdminStudentsContent() {
       await api.delete(`/api/admin/students/${deletingStudent.ulid}`);
       toast.success("Data siswa berhasil dihapus.");
       setDeletingStudent(null);
-      loadStudents();
+      // Deleting the last row of a page would strand the user on an empty
+      // page - step back instead of refetching the now-empty one.
+      if (students && students.length === 1 && page > 1) {
+        setPage(page - 1);
+      } else {
+        loadStudents();
+      }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menghapus data siswa.");
     } finally {
@@ -278,11 +303,12 @@ function AdminStudentsContent() {
     }
   }
 
-  // Summary Metrics
-  const totalStudents = students?.length ?? 0;
-  const totalBaseSPP = students?.reduce((acc, s) => acc + (s.pricing?.base_spp ?? 0), 0) ?? 0;
-  const totalDiscount = students?.reduce((acc, s) => acc + (s.pricing?.discount_amount ?? 0), 0) ?? 0;
-  const totalNetSPP = students?.reduce((acc, s) => acc + (s.pricing?.net_spp ?? 0), 0) ?? 0;
+  // Summary Metrics - aggregated by the backend over the whole filtered set
+  // (meta.totals), not the 20 rows on screen.
+  const totalStudents = meta?.total ?? 0;
+  const totalBaseSPP = meta?.totals.base_spp ?? 0;
+  const totalDiscount = meta?.totals.discount ?? 0;
+  const totalNetSPP = meta?.totals.net_spp ?? 0;
 
   return (
     <div className="space-y-6">
@@ -302,7 +328,10 @@ function AdminStudentsContent() {
             <span className="text-xs font-semibold text-muted-foreground">Tahun:</span>
             <select
               value={selectedYear}
-              onChange={(e) => setSelectedYear(e.target.value)}
+              onChange={(e) => {
+                setSelectedYear(e.target.value);
+                setPage(1);
+              }}
               className="bg-transparent text-xs font-bold text-foreground focus:outline-hidden"
             >
               {years.map((y) => (
@@ -421,7 +450,10 @@ function AdminStudentsContent() {
               <Label className="text-xs">Jenjang Sekolah</Label>
               <select
                 value={jenjangFilter}
-                onChange={(e) => setJenjangFilter(e.target.value)}
+                onChange={(e) => {
+                  setJenjangFilter(e.target.value);
+                  setPage(1);
+                }}
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
               >
                 <option value="">Semua Jenjang</option>
@@ -438,7 +470,10 @@ function AdminStudentsContent() {
               <Label className="text-xs">Unit Sekolah</Label>
               <select
                 value={unitFilter}
-                onChange={(e) => setUnitFilter(e.target.value)}
+                onChange={(e) => {
+                  setUnitFilter(e.target.value);
+                  setPage(1);
+                }}
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
               >
                 <option value="">Semua Unit</option>
@@ -456,7 +491,10 @@ function AdminStudentsContent() {
               <Label className="text-xs">Status Siswa</Label>
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setPage(1);
+                }}
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
               >
                 <option value="">Semua Status</option>
@@ -476,7 +514,10 @@ function AdminStudentsContent() {
           <div className="sm:col-span-2 lg:col-span-5">
             <button
               type="button"
-              onClick={() => setPlacementNone(!placementNone)}
+              onClick={() => {
+                setPlacementNone(!placementNone);
+                setPage(1);
+              }}
               aria-pressed={placementNone}
               className={`h-9 w-full sm:w-auto rounded-md border px-3.5 text-xs font-bold shadow-2xs transition-colors ${
                 placementNone
@@ -504,7 +545,7 @@ function AdminStudentsContent() {
                 <th className="px-5 py-3.5 text-right">Tarif Pokok</th>
                 <th className="px-5 py-3.5">Diskon / Beasiswa</th>
                 <th className="px-5 py-3.5 text-right">SPP Net / Bulan</th>
-                {isAdministrator && <th className="px-5 py-3.5 text-right">Aksi</th>}
+                {isAdministrator && <th className="px-5 py-3.5 text-center">Aksi</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
@@ -525,7 +566,7 @@ function AdminStudentsContent() {
               )}
 
               {students?.map((s) => {
-                  const hasDiscounts = (s.pricing?.discounts?.length ?? 0) > 0;
+                const hasDiscounts = (s.pricing?.discounts?.length ?? 0) > 0;
 
                   return (
                     <tr key={s.ulid} className="hover:bg-accent/30 transition-colors">
@@ -627,7 +668,7 @@ function AdminStudentsContent() {
                               className="h-8 px-2.5 text-xs font-semibold gap-1"
                             >
                               <Edit2 className="size-3.5" />
-                              <span>Edit</span>
+                              
                             </Button>
                             <Button
                               size="sm"
@@ -646,6 +687,15 @@ function AdminStudentsContent() {
             </tbody>
           </table>
         </div>
+
+        {meta && (
+          <Pagination
+            meta={meta}
+            onPage={setPage}
+            label="siswa"
+            className="border-t border-border/60 px-5 py-3.5"
+          />
+        )}
       </Card>
 
       {/* MODAL: IMPORT SISWA */}

@@ -13,11 +13,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError, API_BASE } from "@/lib/api";
 import { useAuth } from "@/lib/auth/auth-context";
 import { dueLabel, rupiah, tanggal } from "@/lib/format";
-import { isOpen, type Bill } from "@/lib/types/billing";
+import { isOpen, OPEN_STATUSES, type Bill } from "@/lib/types/billing";
+import { Pagination } from "@/components/ui/pagination";
 
 type Paginated<T> = {
   data: T[];
-  meta: { current_page: number; last_page: number; total: number };
+  meta: { current_page: number; last_page: number; total: number; per_page?: number };
 };
 
 type Option = { ulid: string; code: string; label: string };
@@ -42,6 +43,7 @@ function AdminBillsContent() {
   const [status, setStatus] = useState("open");
   const [q, setQ] = useState("");
   const [unitCode, setUnitCode] = useState("");
+  const [page, setPage] = useState(1);
   // The dashboard's money alerts land here with ?year= of the period their
   // count came from (T23) - the dropdown starts from it so numbers line up.
   const [academicYear, setAcademicYear] = useState(searchParams.get("year") ?? "");
@@ -64,12 +66,14 @@ function AdminBillsContent() {
     if (q) params.set("q", q);
     if (unitCode) params.set("unit", unitCode);
     if (academicYear) params.set("year", academicYear);
+    params.set("page", String(page));
+    params.set("per_page", "20");
 
     api
       .get<{ bills: Paginated<Bill> }>(`/api/admin/bills?${params}`)
       .then((d) => setBills(d.bills))
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan."));
-  }, [status, q, unitCode, academicYear]);
+  }, [status, q, unitCode, academicYear, page]);
 
   useEffect(() => {
     load();
@@ -147,7 +151,21 @@ function AdminBillsContent() {
       }
 
       setAction(null);
-      load();
+      // A settled bill leaves any view that excludes its next status (full
+      // payment leaves "Belum Lunas", a partial one leaves "Menunggak", ...).
+      // If it was the last row of a page, step back instead of refetching a
+      // now-empty page; rows that stay in view plain reload.
+      const nextStatus =
+        action.kind !== "bayar"
+          ? action.kind === "bebaskan" ? "waived" : "cancelled"
+          : parseFloat(payAmount) + 1e-9 >= action.bill.remaining_amount ? "paid" : "partial";
+      const staysInView =
+        status === "" || status === nextStatus || (status === "open" && OPEN_STATUSES.includes(nextStatus));
+      if (bills && bills.data.length === 1 && page > 1 && !staysInView) {
+        setPage(page - 1);
+      } else {
+        load();
+      }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal memproses aksi.");
     } finally {
@@ -180,7 +198,10 @@ function AdminBillsContent() {
           <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPage(1);
+            }}
             placeholder="Cari nama siswa atau no tagihan…"
             className="pl-9 bg-card text-xs shadow-2xs"
           />
@@ -194,7 +215,10 @@ function AdminBillsContent() {
 
           <select
             value={academicYear}
-            onChange={(e) => setAcademicYear(e.target.value)}
+            onChange={(e) => {
+              setAcademicYear(e.target.value);
+              setPage(1);
+            }}
             className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
           >
             <option value="">Semua Tahun Ajaran</option>
@@ -211,7 +235,10 @@ function AdminBillsContent() {
           {isCentral && (
             <select
               value={unitCode}
-              onChange={(e) => setUnitCode(e.target.value)}
+              onChange={(e) => {
+                setUnitCode(e.target.value);
+                setPage(1);
+              }}
               className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
             >
               <option value="">Semua Unit Sekolah</option>
@@ -223,7 +250,10 @@ function AdminBillsContent() {
 
           <select
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setPage(1);
+            }}
             className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
           >
             <option value="open">Belum Lunas</option>
@@ -335,6 +365,8 @@ function AdminBillsContent() {
           </Card>
         )}
       </div>
+
+      {bills && bills.data.length > 0 && <Pagination meta={bills.meta} onPage={setPage} label="tagihan" />}
 
       {/* ACTION MODAL */}
       {action && (

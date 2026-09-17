@@ -30,7 +30,7 @@ class IntegrationEventController extends Controller
             ->when(in_array($status, ['received', 'processed', 'failed'], true), fn ($q) => $q->where('status', $status))
             ->orderByDesc('created_at')
             ->orderByDesc('id')
-            ->paginate(50);
+            ->paginate($request->integer('per_page', 20));
 
         $rows = $events->getCollection()->load('student:id,ulid');
 
@@ -40,6 +40,7 @@ class IntegrationEventController extends Controller
                 'current_page' => $events->currentPage(),
                 'last_page' => $events->lastPage(),
                 'total' => $events->total(),
+                'per_page' => $events->perPage(),
             ],
         ]]);
     }
