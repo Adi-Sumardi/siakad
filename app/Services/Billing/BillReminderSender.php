@@ -9,6 +9,7 @@ use App\Models\NotificationLog;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
 use App\Services\Notification\WhatsAppGateway;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -18,8 +19,14 @@ use Illuminate\Support\Facades\Log;
  * Reminder fatigue is the failure mode here: a family that gets four messages
  * about one SPP stops reading any of them, and then misses the one that
  * mattered. So the beats are few and deliberate - a week out to plan, the day
- * before to act, once after to notice - and each is recorded under a unique
- * index so a job that runs twice cannot send twice.
+ * before to act, once after to notice - and each beat is recorded per channel
+ * under a unique index so a job that runs twice cannot send twice.
+ *
+ * Channels are independent: email and WhatsApp each get the same data
+ * snapshot and each own their own sent-row, log row, and failure - one being
+ * down never silences the other. The in-app half of the story is the wali
+ * navbar's bill bell, which derives from the live bills API rather than from
+ * anything stored here, so it can never advertise a bill that has been paid.
  */
 class BillReminderSender
 {
@@ -48,12 +55,26 @@ class BillReminderSender
     }
 
     /**
-     * Sends one reminder, or returns false if it was already sent or there is
-     * nobody to send it to.
+     * Sends one reminder beat through every channel the billing contact
+     * actually has (email and WhatsApp are independent - one failing or
+     * already-sent never blocks the other), or returns false when nothing
+     * could be sent at all.
      */
     public function send(Bill $bill, string $kind): bool
     {
-        if (BillReminder::where('bill_id', $bill->id)->where('kind', $kind)->exists()) {
+        // The freshest word on whether this bill still needs nagging. The
+        // caller picked the bill from an open-bills query, but a payment can
+        // land in the seconds between that SELECT and this dispatch - the
+        // database decides, never the in-memory snapshot.
+        $bill->refresh();
+
+        if (! $bill->isOpen()) {
+            Log::info('[Reminder] Bill dilewati - sudah lunas/ditutup', [
+                'bill' => $bill->bill_number,
+                'status' => $bill->status,
+                'kind' => $kind,
+            ]);
+
             return false;
         }
 
@@ -68,33 +89,66 @@ class BillReminderSender
             return false;
         }
 
-        $channel = $guardian->email ? 'email' : 'whatsapp';
-        $to = $guardian->email ?: (string) $guardian->no_hp;
+        $data = $this->buildData($bill, $guardian, $kind);
+        $anySent = false;
 
-        if (! $to) {
-            return false;
+        foreach ($this->channelsFor($guardian) as $channel => $to) {
+            if (BillReminder::where('bill_id', $bill->id)->where('kind', $kind)->where('channel', $channel)->exists()) {
+                Log::info('[Reminder] Dilewati - beat ini sudah pernah dikirim di channel ini', [
+                    'bill' => $bill->bill_number,
+                    'kind' => $kind,
+                    'channel' => $channel,
+                ]);
+
+                continue;
+            }
+
+            // A gateway crash or a lost race on the unique index is one
+            // channel's problem - the other channel still goes out.
+            try {
+                $result = $channel === 'email'
+                    ? $this->mail->send($to, 'bill_reminder', $data)
+                    : $this->whatsapp->sendMessage($to, $this->whatsappMessage($data));
+
+                BillReminder::create([
+                    'bill_id' => $bill->id,
+                    'kind' => $kind,
+                    'channel' => $channel,
+                    'sent_to' => $to,
+                    'sent_at' => now(),
+                ]);
+            } catch (UniqueConstraintViolationException $e) {
+                Log::info('[Reminder] Dilewati - channel ini sudah tercatat terkirim (race)', [
+                    'bill' => $bill->bill_number,
+                    'kind' => $kind,
+                    'channel' => $channel,
+                ]);
+
+                continue;
+            } catch (\Throwable $e) {
+                Log::warning('[Reminder] Gagal menyiapkan pengiriman', [
+                    'bill' => $bill->bill_number,
+                    'kind' => $kind,
+                    'channel' => $channel,
+                    'error' => $e->getMessage(),
+                ]);
+
+                continue;
+            }
+
+            // Recorded whether or not the gateway accepted it. A failed send
+            // that the retry sweep picks up is better than a family messaged
+            // twice because the first attempt was not written down.
+            $this->log($bill, $channel, $to, $data, $result);
+
+            $result->success
+                ? Log::info('[Reminder] Terkirim', ['bill' => $bill->bill_number, 'kind' => $kind, 'channel' => $channel, 'to' => $to])
+                : Log::warning('[Reminder] Gagal terkirim', ['bill' => $bill->bill_number, 'kind' => $kind, 'channel' => $channel, 'error' => $result->message]);
+
+            $anySent = $anySent || $result->success;
         }
 
-        $data = $this->buildData($bill, $guardian, $kind);
-
-        $result = $channel === 'email'
-            ? $this->mail->send($to, 'bill_reminder', $data)
-            : $this->whatsapp->sendMessage($to, $this->whatsappMessage($data));
-
-        // Recorded whether or not the gateway accepted it. A failed send that is
-        // retried tomorrow is better than a family messaged twice because the
-        // first attempt was not written down.
-        BillReminder::create([
-            'bill_id' => $bill->id,
-            'kind' => $kind,
-            'channel' => $channel,
-            'sent_to' => $to,
-            'sent_at' => now(),
-        ]);
-
-        $this->log($bill, $channel, $to, $data, $result);
-
-        return $result->success;
+        return $anySent;
     }
 
     /**
@@ -116,6 +170,10 @@ class BillReminderSender
         if (! $bill instanceof Bill || ! in_array($kind, self::KINDS, true)) {
             return NotificationResult::fail('Tagihan atau jenis pengingat sudah tidak ada.');
         }
+
+        // Same rule as send(): the retry may run hours after the failure, so
+        // the status is re-read from the database, not trusted from the row.
+        $bill->refresh();
 
         if (! $bill->isOpen()) {
             return NotificationResult::fail('Tagihan sudah tidak terbuka (lunas/dibatalkan).');
@@ -145,6 +203,28 @@ class BillReminderSender
         return $guardians->firstWhere('pivot.is_billing_contact', true)
             ?? $guardians->firstWhere('pivot.is_primary', true)
             ?? $guardians->first();
+    }
+
+    /**
+     * Every channel the contact can actually be reached on: email when an
+     * address exists, WhatsApp when a phone number does. A contact with both
+     * gets both; one with neither yields nothing and the bill is skipped.
+     *
+     * @return array<string, string>
+     */
+    private function channelsFor(Guardian $guardian): array
+    {
+        $channels = [];
+
+        if (filled($guardian->email)) {
+            $channels['email'] = $guardian->email;
+        }
+
+        if (filled($guardian->no_hp)) {
+            $channels['whatsapp'] = $guardian->no_hp;
+        }
+
+        return $channels;
     }
 
     /** @return array<string, mixed> */
