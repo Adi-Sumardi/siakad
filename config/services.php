@@ -77,6 +77,13 @@ return [
         // and VA prefixes live together here so generateVaNumber() and
         // createInvoice() resolve everything about "which bank" from one key.
         'banks' => [
+            // VA prefixes below were CONFIRMED correct by the school on
+            // 2026-09-17 (Muamalat 8020.01-.08, BSI 3656.01-.08 - same layout,
+            // different institution head). Fee types WITHOUT a prefix here
+            // (seragam, buku, kegiatan) get NO VA at all: BillingApiClient
+            // refuses rather than borrowing another fee type's prefix, so
+            // those stay cash-at-the-desk until e-SPP registers one - add it
+            // as an explicit 'va_prefixes.{fee_code}' key when they do.
             'muamalat' => [
                 // Unconfirmed with e-SPP as of 2026-09 - defaults to '1', the
                 // original single-bank value, which is likely Muamalat's real
