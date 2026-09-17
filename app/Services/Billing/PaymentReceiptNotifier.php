@@ -16,10 +16,15 @@ use Illuminate\Support\Facades\Log;
  * Fired from PaymentAllocator::settle(), the one choke point every settle
  * path funnels through - the e-SPP webhook, the poller, the dev simulate
  * button, a staff cash record - so however a payment completed, the receipt
- * is the same message from the same code. Idempotent on NotificationLog:
- * the webhook can arrive twice and settle() can run again, the family still
- * hears it exactly once (same discipline BillReminderSender keeps so a job
- * that runs twice cannot message twice).
+ * is the same message from the same code. Idempotent on NotificationLog,
+ * per channel: the webhook can arrive twice and settle() can run again, and
+ * email and WhatsApp each still hear it exactly once (same discipline
+ * BillReminderSender keeps so a job that runs twice cannot message twice).
+ *
+ * Channels are independent - one failing or crashing never blocks the other.
+ * The in-app half is the wali navbar bell's "Pembayaran diterima" section,
+ * which reads the live payments feed rather than anything stored here, so a
+ * settled payment shows up there within a refresh cycle.
  */
 class PaymentReceiptNotifier
 {
@@ -30,14 +35,6 @@ class PaymentReceiptNotifier
 
     public function notify(Payment $payment): void
     {
-        if (NotificationLog::query()
-            ->where('template', 'payment_receipt')
-            ->where('notifiable_type', Payment::class)
-            ->where('notifiable_id', $payment->id)
-            ->exists()) {
-            return;
-        }
-
         $guardian = $payment->payer ?? $this->billingContactFor($payment);
 
         if (! $guardian) {
@@ -51,33 +48,81 @@ class PaymentReceiptNotifier
             return;
         }
 
-        $channel = $guardian->email ? 'email' : 'whatsapp';
-        $to = $guardian->email ?: (string) $guardian->no_hp;
-
-        if (! $to) {
-            return;
-        }
-
         $data = $this->dataFor($payment, $guardian);
 
-        $result = $channel === 'email'
-            ? $this->mail->send($to, 'payment_receipt', $data)
-            : $this->whatsapp->sendMessage($to, $this->whatsappMessage($data));
+        foreach ($this->channelsFor($guardian) as $channel => $to) {
+            if (NotificationLog::query()
+                ->where('template', 'payment_receipt')
+                ->where('channel', $channel)
+                ->where('notifiable_type', Payment::class)
+                ->where('notifiable_id', $payment->id)
+                ->exists()) {
+                continue;
+            }
 
-        // Recorded whether or not the gateway accepted it, for the same
-        // reason as the reminders: a send nobody wrote down gets retried as
-        // a duplicate.
-        NotificationLog::create([
-            'channel' => $channel,
-            'template' => 'payment_receipt',
-            'recipient' => $to,
-            'payload' => $data,
-            'status' => $result->success ? 'sent' : 'failed',
-            'error' => $result->message,
-            'sent_at' => $result->success ? now() : null,
-            'notifiable_type' => Payment::class,
-            'notifiable_id' => $payment->id,
-        ]);
+            // One channel's crash is that channel's problem alone.
+            try {
+                $result = $channel === 'email'
+                    ? $this->mail->send($to, 'payment_receipt', $data)
+                    : $this->whatsapp->sendMessage($to, $this->whatsappMessage($data));
+            } catch (\Throwable $e) {
+                Log::warning('[PaymentReceipt] Gagal menyiapkan pengiriman', [
+                    'payment' => $payment->payment_number,
+                    'channel' => $channel,
+                    'error' => $e->getMessage(),
+                ]);
+
+                continue;
+            }
+
+            // Recorded whether or not the gateway accepted it, for the same
+            // reason as the reminders: a send nobody wrote down gets retried as
+            // a duplicate.
+            NotificationLog::create([
+                'channel' => $channel,
+                'template' => 'payment_receipt',
+                'recipient' => $to,
+                'payload' => $data,
+                'status' => $result->success ? 'sent' : 'failed',
+                'error' => $result->message,
+                'sent_at' => $result->success ? now() : null,
+                'notifiable_type' => Payment::class,
+                'notifiable_id' => $payment->id,
+            ]);
+
+            $result->success
+                ? Log::info('[PaymentReceipt] Terkirim', [
+                    'payment' => $payment->payment_number,
+                    'channel' => $channel,
+                    'to' => $to,
+                ])
+                : Log::warning('[PaymentReceipt] Gagal terkirim', [
+                    'payment' => $payment->payment_number,
+                    'channel' => $channel,
+                    'error' => $result->message,
+                ]);
+        }
+    }
+
+    /**
+     * Every channel the contact can actually be reached on - a contact with
+     * both an email address and a phone number gets the receipt on both.
+     *
+     * @return array<string, string>
+     */
+    private function channelsFor(Guardian $guardian): array
+    {
+        $channels = [];
+
+        if (filled($guardian->email)) {
+            $channels['email'] = $guardian->email;
+        }
+
+        if (filled($guardian->no_hp)) {
+            $channels['whatsapp'] = $guardian->no_hp;
+        }
+
+        return $channels;
     }
 
     /**
