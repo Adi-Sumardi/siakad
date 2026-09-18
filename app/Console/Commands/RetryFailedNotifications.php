@@ -7,8 +7,8 @@ use Illuminate\Console\Command;
 
 /**
  * The failed-notification sweep (audit C2 / P2-4). Bounded: three attempts
- * total per delivery, a 24-hour lookback - an attendance notice from two
- * days ago is noise, not a retry - and half-hour beats from the schedule.
+ * total per delivery, a 24-hour lookback - a bill reminder from two days
+ * ago is noise, not a retry - and half-hour beats from the schedule.
  *
  * login_otp never appears here: a code that expires in minutes is worthless
  * on a retry, and `otp:issue` is the documented manual recovery when both

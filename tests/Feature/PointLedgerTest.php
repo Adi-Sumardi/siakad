@@ -276,7 +276,7 @@ class PointLedgerTest extends TestCase
 
         \App\Models\PointThreshold::create([
             'school_unit_id' => null, 'min_points' => -999, 'max_points' => -1,
-            'label' => 'Peringatan 1', 'notify_guardian' => true,
+            'label' => 'Peringatan 1',
         ]);
 
         $this->ledger()->record($student, $this->term, $this->rule(['points' => 10]), $guru, now(), 'X');

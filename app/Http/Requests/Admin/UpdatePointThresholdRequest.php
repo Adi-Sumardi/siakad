@@ -19,7 +19,6 @@ class UpdatePointThresholdRequest extends FormRequest
             'label' => 'sometimes|string|max:80',
             'action' => 'nullable|string|max:500',
             'color' => 'nullable|string|max:20',
-            'notify_guardian' => 'boolean',
         ];
     }
 }

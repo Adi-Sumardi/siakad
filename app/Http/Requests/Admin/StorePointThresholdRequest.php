@@ -24,7 +24,6 @@ class StorePointThresholdRequest extends FormRequest
             'label' => 'required|string|max:80',
             'action' => 'nullable|string|max:500',
             'color' => 'nullable|string|max:20',
-            'notify_guardian' => 'boolean',
         ];
     }
 }

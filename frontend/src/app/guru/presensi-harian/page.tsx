@@ -245,8 +245,8 @@ export default function GuruDailyAttendancePage() {
             </div>
 
             <p className="mt-3 text-xs text-muted-foreground">
-              Menandai ulang siswa otomatis mengoreksi catatan sebelumnya — wali
-              murid tetap menerima WhatsApp untuk status terbaru.
+              Menandai ulang siswa otomatis mengoreksi catatan sebelumnya — rekap
+              kehadiran hari itu ikut diperbarui.
             </p>
           </Card>
         );

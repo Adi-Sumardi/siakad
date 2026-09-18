@@ -11,13 +11,12 @@ class PointThreshold extends Model
     use HasUlidKey;
 
     protected $fillable = [
-        'school_unit_id', 'min_points', 'max_points', 'label', 'action', 'color', 'notify_guardian',
+        'school_unit_id', 'min_points', 'max_points', 'label', 'action', 'color',
     ];
 
     protected $casts = [
         'min_points' => 'integer',
         'max_points' => 'integer',
-        'notify_guardian' => 'boolean',
     ];
 
     public function schoolUnit(): BelongsTo
@@ -28,7 +27,7 @@ class PointThreshold extends Model
     /**
      * The band a balance falls into, for the given unit - that unit's own
      * bands first, falling back to the school-wide ones so a unit that never
-     * set its own still gets badges and notifications.
+     * set its own still gets badges.
      */
     public static function forBalance(int $balance, ?int $schoolUnitId): ?self
     {

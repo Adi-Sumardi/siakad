@@ -25,8 +25,8 @@ use RuntimeException;
  * lifecycle (DESAIN-PRESENSI-HARIAN.md). Sessions open themselves from the
  * unit's settings - no human "opens" anything in the normal day - and the
  * morning window closes itself by sweeping every still-unmarked student into
- * an 'alpa' row, so a forgotten homeroom marking leaves a hole in the WA
- * notification, not in the data. Corrections supersede: re-marking a student
+ * an 'alpa' row, so a forgotten homeroom marking surfaces as an alpa to
+ * correct, never a hole in the data. Corrections supersede: re-marking a student
  * revokes the old row and writes a fresh one, exactly the shape
  * AttendanceLedger::recordBulk established for per-lesson attendance.
  *
@@ -44,10 +44,7 @@ class DailyAttendanceService
     /** The description closeAndSweep stamps on its auto-alpa rows - resyncTodayWindows() finds them back by it. */
     public const AUTO_SWEEP_DESCRIPTION = 'Tidak tercatat hingga sesi ditutup otomatis.';
 
-    public function __construct(
-        private DailyAttendanceNotifier $notifier,
-        private RotatingQrService $qr,
-    ) {}
+    public function __construct(private RotatingQrService $qr) {}
 
     /** First-or-create the unit's settings row, pre-filled with the jenjang's default mode and sane bells. */
     public function ensureSettings(SchoolUnit $unit): DailyAttendanceSetting
@@ -350,10 +347,6 @@ class DailyAttendanceService
             ]);
         });
 
-        // Outside the transaction on purpose: a WhatsApp send is a network
-        // call, and holding row locks for its timeout would serialize every
-        // concurrent mark behind one flaky gateway.
-        $this->notifier->recorded($record);
         $this->syncEnrollmentRollup($student);
 
         return $record;
@@ -480,7 +473,6 @@ class DailyAttendanceService
             throw new RuntimeException('Perangkat ini sudah dipakai absen siswa lain hari ini.');
         }
 
-        $this->notifier->recorded($record);
         $this->syncEnrollmentRollup($student);
 
         return $record;
@@ -731,14 +723,9 @@ class DailyAttendanceService
             return [$missed, $records];
         });
 
-        // Same post-commit rule as mark(): the gateway call never runs inside
-        // the transaction that wrote the rows it reports on. The rollup rides
-        // along for the same reason - a swept alpa changes the watchlist's
-        // numbers, so it must land even if the WA send is what fails loudly.
-        $records->each(function (DailyRecord $record) {
-            $this->notifier->absent($record);
-            $this->syncEnrollmentRollup($record->student);
-        });
+        // A swept alpa changes the watchlist's numbers, so the rollup must
+        // land for every record the window just closed out.
+        $records->each(fn (DailyRecord $record) => $this->syncEnrollmentRollup($record->student));
 
         return $missed->count();
     }

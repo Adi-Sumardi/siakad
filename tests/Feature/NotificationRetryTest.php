@@ -274,7 +274,7 @@ class NotificationRetryTest extends TestCase
 
         $this->failedRow(); // failed, within the 24h window
 
-        $threeDays = $this->failedRow(['template' => 'point_threshold']);
+        $threeDays = $this->failedRow(['template' => 'payment_receipt']);
         $threeDays->forceFill(['created_at' => now()->subDays(3)])->saveQuietly();
 
         // Older than the 7-day aggregate and a healthy row: counted nowhere.

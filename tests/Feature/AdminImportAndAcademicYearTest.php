@@ -164,7 +164,7 @@ class AdminImportAndAcademicYearTest extends TestCase
     public function test_reimporting_a_student_with_a_different_guardian_does_not_leave_two_primaries(): void
     {
         // Elsewhere (PmbHandoffProcessor, BillReminderSender,
-        // PointThresholdNotifier) the app assumes exactly one primary/billing
+        // PaymentReceiptNotifier) the app assumes exactly one primary/billing
         // guardian per student and just picks firstWhere('pivot.is_primary').
         // A CSV only has one wali column, so this only shows up across two
         // imports of the same student naming a different wali - correcting a

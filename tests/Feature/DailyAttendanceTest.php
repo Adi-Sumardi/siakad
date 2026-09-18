@@ -26,15 +26,20 @@ use Tests\TestCase;
 /**
  * The daily attendance layer (T14, DESAIN-PRESENSI-HARIAN.md): sessions that
  * open themselves from per-unit settings, the homeroom-teacher marking board
- * for mode wali_kelas, the close-time alpa sweep that guarantees no data
- * holes, and the WhatsApp leg with its per-record dedup. Scope follows the
- * house rule throughout: another unit's session is a 404, never a 403.
+ * for mode wali_kelas, and the close-time alpa sweep that guarantees no data
+ * holes. Scope follows the house rule throughout: another unit's session is
+ * a 404, never a 403.
  */
 class DailyAttendanceTest extends TestCase
 {
     use RefreshDatabase;
 
-    /** @var list<array{to: string, message: string}> */
+    /**
+     * @var list<array{to: string, message: string}>
+     *
+     * WhatsApp is no longer a channel for daily attendance - the fake stays
+     * bound precisely so any accidental rewiring fails these tests loudly.
+     */
     private array $sentWa = [];
 
     private SchoolUnit $sd;
@@ -161,7 +166,7 @@ class DailyAttendanceTest extends TestCase
         $this->assertSame('wali_kelas', $service->ensureSettings($this->sd)->intake_mode);
         $this->assertSame('gerbang', $service->ensureSettings($this->smp)->intake_mode);
         // A disabled setting is the shipping default - no unit is surprised
-        // by auto-alpa WhatsApps before it has configured itself.
+        // by auto-alpa sweeps before it has configured itself.
         $this->assertFalse($service->ensureSettings($this->sd)->enabled);
     }
 
@@ -265,7 +270,7 @@ class DailyAttendanceTest extends TestCase
         $this->assertSame('20001', $masuk['roster'][0]['nis']);
     }
 
-    public function test_wali_kelas_marks_arrival_and_the_guardian_gets_whatsapp(): void
+    public function test_wali_kelas_marks_arrival(): void
     {
         $this->enabledSetting($this->sd);
         $guru = $this->staff('guru', $this->sd);
@@ -292,9 +297,7 @@ class DailyAttendanceTest extends TestCase
             'attendance_status' => 'hadir', 'is_late' => true, 'source' => 'wali_kelas',
         ]);
 
-        $this->assertCount(1, $this->sentWa);
-        $this->assertStringContainsString('MASUK', $this->sentWa[0]['message']);
-        $this->assertStringContainsString('terlambat', $this->sentWa[0]['message']);
+        $this->assertEmpty($this->sentWa);
     }
 
     public function test_remarking_supersedes_instead_of_duplicating(): void
@@ -355,7 +358,7 @@ class DailyAttendanceTest extends TestCase
 
     // --- Close & sweep -----------------------------------------------------
 
-    public function test_closing_a_morning_window_sweeps_the_unmarked_into_alpa_with_whatsapp(): void
+    public function test_closing_a_morning_window_sweeps_the_unmarked_into_alpa(): void
     {
         $this->enabledSetting($this->sd, ['pulang_enabled' => true]);
         /** @var DailyAttendanceService $service */
@@ -373,8 +376,7 @@ class DailyAttendanceTest extends TestCase
         $masuk = $sessions->firstWhere('type', 'masuk');
         $pulang = $sessions->firstWhere('type', 'pulang');
 
-        $service->mark($masuk, $hadir, 'hadir', $guru, 'wali_kelas'); // 1 WA (masuk)
-        $this->assertCount(1, $this->sentWa);
+        $service->mark($masuk, $hadir, 'hadir', $guru, 'wali_kelas');
 
         $swept = $service->closeAndSweep($masuk);
 
@@ -382,39 +384,14 @@ class DailyAttendanceTest extends TestCase
         $this->assertSame('alpa', $masuk->dailyRecords()->active()->where('student_id', $bolos->id)->first()->attendance_status);
         $this->assertSame('hadir', $masuk->dailyRecords()->active()->where('student_id', $hadir->id)->first()->attendance_status);
 
-        // Second WA is the absent alert for the swept student; the marked one
-        // got exactly one arrival message and no scare.
-        $this->assertCount(2, $this->sentWa);
-        $this->assertStringContainsString('tidak tercatat hadir', $this->sentWa[1]['message']);
+        $this->assertEmpty($this->sentWa);
 
         // Closing twice sweeps nothing twice.
         $this->assertSame(0, $service->closeAndSweep($masuk));
-        $this->assertCount(2, $this->sentWa);
 
         // A pulang window closes without inventing absences.
         $this->assertSame(0, $service->closeAndSweep($pulang));
         $this->assertDatabaseMissing('daily_records', ['daily_session_id' => $pulang->id]);
-    }
-
-    public function test_notification_valves_silence_what_the_unit_turned_off(): void
-    {
-        $this->enabledSetting($this->sd, ['notify_masuk' => false, 'notify_absent' => false]);
-        /** @var DailyAttendanceService $service */
-        $service = app(DailyAttendanceService::class);
-
-        $guru = $this->staff('guru', $this->sd);
-        $classroom = $this->classroomIn($this->sd, $guru);
-        $student = $this->studentIn($classroom, '20010');
-        $this->guardianOf($student);
-
-        $masuk = $service->ensureSessionsForDate($this->sd->fresh()->dailyAttendanceSetting, $this->monday)
-            ->firstWhere('type', 'masuk');
-
-        $service->mark($masuk, $student, 'hadir', $guru, 'wali_kelas');
-        $service->closeAndSweep($masuk);
-
-        $this->assertSame([], $this->sentWa);
-        $this->assertDatabaseHas('daily_records', ['student_id' => $student->id, 'attendance_status' => 'hadir']);
     }
 
     // --- Admin board -------------------------------------------------------
@@ -489,7 +466,7 @@ class DailyAttendanceTest extends TestCase
         $this->getJson('/api/absen/tidak-ada')->assertStatus(404);
     }
 
-    public function test_a_gate_check_in_passes_every_layer_and_notifies_the_guardian(): void
+    public function test_a_gate_check_in_passes_every_layer(): void
     {
         $this->gateSetting();
         $classroom = $this->classroomIn($this->smp);
@@ -515,8 +492,7 @@ class DailyAttendanceTest extends TestCase
             'device_hash' => hash('sha256', 'device-A'),
         ]);
 
-        $this->assertCount(1, $this->sentWa);
-        $this->assertStringContainsString('MASUK', $this->sentWa[0]['message']);
+        $this->assertEmpty($this->sentWa);
     }
 
     public function test_a_gate_check_in_after_the_late_threshold_is_flagged(): void
@@ -539,8 +515,7 @@ class DailyAttendanceTest extends TestCase
             ->assertJsonPath('is_late', true);
 
         $this->assertDatabaseHas('daily_records', ['student_id' => $student->id, 'is_late' => true]);
-        $this->assertCount(1, $this->sentWa);
-        $this->assertStringContainsString('terlambat', $this->sentWa[0]['message']);
+        $this->assertEmpty($this->sentWa);
     }
 
     public function test_stale_qr_codes_and_far_away_positions_are_rejected(): void
@@ -989,7 +964,7 @@ class DailyAttendanceTest extends TestCase
 
         // 10:00 Monday - the admin flips the unit on two hours after masuk
         // closed. The session must be born closed, or the next sweep would
-        // alpa the entire unit and blast every family.
+        // alpa the entire unit.
         Carbon::setTestNow(Carbon::create(2026, 9, 14, 10, 0, 0, 'Asia/Jakarta')->utc());
 
         $sessions = app(DailyAttendanceService::class)->ensureSessionsForDate($setting);

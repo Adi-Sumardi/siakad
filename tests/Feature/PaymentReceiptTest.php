@@ -22,11 +22,13 @@ use Tests\TestCase;
 
 /**
  * The payment receipt is the family's "uang saya sampai" moment, and it must
- * reach them on every channel they have the moment the money settles - not
- * one channel chosen for them, and not only after a retry. settle() is the
- * single choke point that fires it (webhook, poller, cash desk, simulate
- * button), and the wali bell's "Pembayaran diterima" section reads the live
- * payments feed, which is the in-app third channel.
+ * reach them the moment the money settles - not only after a retry. settle()
+ * is the single choke point that fires it (webhook, poller, cash desk,
+ * simulate button). Email is the only outbound channel now - the WhatsApp
+ * leg was dropped on the school's decision - and the wali bell's
+ * "Pembayaran diterima" section reads the live payments feed, which is the
+ * in-app half. The WhatsApp fake stays bound precisely so these tests fail
+ * if anyone wires that channel back in by accident.
  */
 class PaymentReceiptTest extends TestCase
 {
@@ -140,18 +142,17 @@ class PaymentReceiptTest extends TestCase
         return $payment->fresh();
     }
 
-    public function test_a_settled_payment_receipts_the_family_on_email_and_whatsapp_at_once(): void
+    public function test_a_settled_payment_receipts_the_family_on_email(): void
     {
         $payment = $this->settledPaymentBy();
 
-        // "Sekali bayar, tiga kabar": email and WhatsApp fire inside settle()
-        // itself, and the in-app feed (asserted below) reads the payment row
-        // that settle() just completed.
+        // "Sekali bayar, dua kabar": the email fires inside settle() itself,
+        // and the in-app feed (asserted below) reads the payment row that
+        // settle() just completed. Nothing may go out on WhatsApp anymore.
         $this->assertCount(1, $this->sentMail);
-        $this->assertCount(1, $this->sentWhatsApp);
         $this->assertSame('payment_receipt', $this->sentMail[0]['template']);
         $this->assertSame('budi@example.com', $this->sentMail[0]['to']);
-        $this->assertStringContainsString('650.000', $this->sentWhatsApp[0]['message']);
+        $this->assertEmpty($this->sentWhatsApp);
 
         $this->assertDatabaseHas('notification_logs', [
             'template' => 'payment_receipt',
@@ -159,28 +160,23 @@ class PaymentReceiptTest extends TestCase
             'status' => 'sent',
             'notifiable_id' => $payment->id,
         ]);
-        $this->assertDatabaseHas('notification_logs', [
-            'template' => 'payment_receipt',
-            'channel' => 'whatsapp',
-            'status' => 'sent',
-            'notifiable_id' => $payment->id,
-        ]);
+        $this->assertSame(1, NotificationLog::where('template', 'payment_receipt')->count());
     }
 
-    public function test_a_redelivered_webhook_still_receipts_each_channel_exactly_once(): void
+    public function test_a_redelivered_webhook_still_receipts_exactly_once(): void
     {
         $payment = $this->settledPaymentBy();
 
         // The gateway retries the callback: settle() runs again, and its own
-        // status guard plus the per-channel log row keep both channels silent.
+        // status guard plus the log row keep the family from hearing twice.
         app(PaymentAllocator::class)->settle($payment->fresh(), 'tx_duplicate');
 
         $this->assertCount(1, $this->sentMail);
-        $this->assertCount(1, $this->sentWhatsApp);
-        $this->assertSame(2, NotificationLog::where('template', 'payment_receipt')->count());
+        $this->assertEmpty($this->sentWhatsApp);
+        $this->assertSame(1, NotificationLog::where('template', 'payment_receipt')->count());
     }
 
-    public function test_an_email_failure_does_not_stop_the_whatsapp_receipt(): void
+    public function test_an_email_failure_does_not_stop_the_settle(): void
     {
         $this->app->forgetInstance(MailGateway::class);
         $this->app->bind(MailGateway::class, fn () => new class implements MailGateway
@@ -194,39 +190,16 @@ class PaymentReceiptTest extends TestCase
         $payment = $this->settledPaymentBy();
 
         $this->assertEmpty($this->sentMail);
-        $this->assertCount(1, $this->sentWhatsApp);
+        $this->assertEmpty($this->sentWhatsApp);
         $this->assertDatabaseHas('notification_logs', [
             'channel' => 'email',
             'status' => 'failed',
             'error' => 'SMTP sedang down',
         ]);
-        $this->assertDatabaseHas('notification_logs', ['channel' => 'whatsapp', 'status' => 'sent']);
         // The failed email stays with the retry sweep, and the settle itself
         // never rolled back - the money is in regardless.
         $this->assertSame('completed', $payment->status);
         $this->assertSame(1, app(NotificationRetryService::class)->due()->count());
-    }
-
-    public function test_a_whatsapp_failure_does_not_stop_the_email_receipt(): void
-    {
-        $this->app->forgetInstance(WhatsAppGateway::class);
-        $this->app->bind(WhatsAppGateway::class, fn () => new class implements WhatsAppGateway
-        {
-            public function sendMessage(string $phone, string $message): NotificationResult
-            {
-                return NotificationResult::fail('gateway WhatsApp menolak');
-            }
-        });
-
-        $payment = $this->settledPaymentBy();
-
-        $this->assertCount(1, $this->sentMail);
-        $this->assertDatabaseHas('notification_logs', ['channel' => 'email', 'status' => 'sent']);
-        $this->assertDatabaseHas('notification_logs', [
-            'channel' => 'whatsapp',
-            'status' => 'failed',
-            'error' => 'gateway WhatsApp menolak',
-        ]);
     }
 
     public function test_the_in_app_feed_lists_the_settled_payment_immediately(): void
@@ -253,12 +226,16 @@ class PaymentReceiptTest extends TestCase
             ->assertJsonPath('payments.0.status', 'completed');
     }
 
-    public function test_a_contact_reachable_on_only_one_channel_gets_it_on_that_one(): void
+    public function test_a_phone_only_contact_gets_no_receipt_email_but_the_bell_still_shows_it(): void
     {
-        $this->settledPaymentBy(email: null, phone: '081234567890');
+        $payment = $this->settledPaymentBy(email: null, phone: '081234567890');
 
+        // No email address means no outbound receipt at all - WhatsApp is not
+        // a channel anymore - so the in-app feed is the only place this
+        // family's "uang saya sampai" moment lives.
         $this->assertEmpty($this->sentMail);
-        $this->assertCount(1, $this->sentWhatsApp);
-        $this->assertSame(1, NotificationLog::where('template', 'payment_receipt')->count());
+        $this->assertEmpty($this->sentWhatsApp);
+        $this->assertSame(0, NotificationLog::where('template', 'payment_receipt')->count());
+        $this->assertSame('completed', $payment->status);
     }
 }

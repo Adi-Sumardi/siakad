@@ -54,10 +54,6 @@ const TEMPLATE_LABEL: Record<string, string> = {
   school_account_invite: "Undangan akun",
   bill_reminder: "Pengingat tagihan",
   payment_receipt: "Kuitansi pembayaran",
-  daily_masuk: "Presensi masuk",
-  daily_pulang: "Presensi pulang",
-  daily_absent: "Presensi alpa",
-  point_threshold: "Ambang poin",
   login_otp: "OTP login",
 };
 

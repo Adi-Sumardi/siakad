@@ -3,11 +3,9 @@
 namespace App\Services\Notification;
 
 use App\Models\NotificationLog;
-use App\Services\Attendance\DailyAttendanceNotifier;
 use App\Services\Billing\BillReminderSender;
 use App\Services\Billing\PaymentReceiptNotifier;
 use App\Services\Handoff\AccountInvitationSender;
-use App\Services\Points\PointThresholdNotifier;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
@@ -48,8 +46,6 @@ class NotificationRetryService
         private AccountInvitationSender $invitations,
         private BillReminderSender $billReminders,
         private PaymentReceiptNotifier $paymentReceipts,
-        private DailyAttendanceNotifier $attendance,
-        private PointThresholdNotifier $pointThresholds,
     ) {}
 
     /** @return Collection<int, NotificationLog> */
@@ -197,8 +193,6 @@ class NotificationRetryService
             'school_account_invite' => fn (NotificationLog $log) => $this->invitations->resend($log),
             'bill_reminder' => fn (NotificationLog $log) => $this->billReminders->resend($log),
             'payment_receipt' => fn (NotificationLog $log) => $this->paymentReceipts->resend($log),
-            'daily_masuk', 'daily_pulang', 'daily_absent' => fn (NotificationLog $log) => $this->attendance->resend($log),
-            'point_threshold' => fn (NotificationLog $log) => $this->pointThresholds->resend($log),
             default => null,
         };
     }

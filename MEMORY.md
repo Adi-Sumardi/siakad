@@ -24,7 +24,7 @@
   - Setiap checkout membuat billing ke e-SPP dengan mendaftarkan 2 channel sekaligus: `bmi_billing` (Muamalat) & `bsm_billing` (BSI).
   - Pilihan bank yang dipilih orang tua (`bank=muamalat` atau `bank=bsi`) disimpan di metadata dan dijadikan nomor VA utama di UI invoice dan instruksi pembayaran.
   - Callback webhook e-SPP (`/api/payment-webhook/{uuid}`) dan cron poller (`payments:poll-billing-va`) memverifikasi status pelunasan multi-bank melalui `all_va`.
-  - **Notifikasi Pembayaran Berhasil**: `PaymentReceiptNotifier` (dipanggil dari `PaymentAllocator::settle()`) mengirim struk pembayaran ke wali via email/WhatsApp (gateway Sendago, mode log-only bila kredensial kosong). Idempotent lewat `notification_logs` (template `payment_receipt`) — callback ganda tetap 1 struk. Berlaku untuk semua jalur pelunasan: webhook, poller, simulasi dev, dan tunai TU.
+  - **Notifikasi Pembayaran Berhasil**: `PaymentReceiptNotifier` (dipanggil dari `PaymentAllocator::settle()`) mengirim struk pembayaran ke wali via **email saja** (gateway Sendago, mode log-only bila kredensial kosong; jalur WhatsApp dihapus 18-09-2026 — bel in-app wali tetap baca feed payments). Idempotent lewat `notification_logs` (template `payment_receipt`) — callback ganda tetap 1 struk. Berlaku untuk semua jalur pelunasan: webhook, poller, simulasi dev, dan tunai TU.
 - **UI Wali Murid**:
   - Pemilihan channel Bank Muamalat (147) vs BSI (451) di floating basket bar dan modal custom payment.
   - Tampilan rincian invoice & instruksi pembayaran lengkap untuk BSI Mobile (Institusi / Akademik 3656 & VA), ATM BSI, Muamalat DIN, ATM Muamalat, serta Transfer Antar Bank.

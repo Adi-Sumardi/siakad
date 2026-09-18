@@ -16,7 +16,7 @@ Sistem SIAKAD hari ini hanya punya absensi **per mata pelajaran** (guru mapel
 membuka sesi tiap jam pelajaran — hanya relevan untuk SMP/SMA). Yang belum ada:
 
 1. **Absensi "masuk sekolah"** — apakah anak datang ke sekolah hari ini? → *belum ada sama sekali*
-2. **Info ke wali murid lewat WhatsApp** — anak sudah sampai sekolah & sudah pulang → *belum ada*
+2. ~~**Info ke wali murid lewat WhatsApp** — anak sudah sampai sekolah & sudah pulang~~ → *dihapus 18-09-2026 atas keputusan sekolah (log keputusan §10); rekap tetap terlihat wali di aplikasi*
 3. **Kenyataan lapangan SD/TK**: guru hanya wali kelas, tidak ada guru mapel per jam → absensi cukup **sekali sehari**
 4. **Anti-kecurangan** — absen lewat HP bisa dicurangi (QR difoto, scan dari rumah, satu HP absenin banyak teman)
 
@@ -58,7 +58,7 @@ dan lebih benar secara cara rapor menghitung.
 | **Wali kelas** (PG/RA/TK/SD) | Menandai roster kelasnya: pagi (hadir/terlambat/sakit/izin/alpa) & sore (pulang) |
 | **Siswa** (SMP/SMA) | Buka link absen dari deskripsi grup WA kelas → scan QR gerbang → ketik NIS |
 | **TU di gerbang** (SMP/SMA) | Buka "mode layar QR" di HP/laptop sendiri (tidak perlu TV), pantau sesi, input manual untuk yang gagal, koreksi |
-| **Wali murid** | Terima notifikasi WA — tidak melakukan apa pun |
+| **Wali murid** | Melihat rekap kehadiran harian anak di aplikasi — tidak melakukan apa pun |
 | **Guru wali kelas** (semua jenjang) | Lihat rekap absen harian kelasnya (baca saja) |
 | **Admin pusat** | Lihat semua unit |
 
@@ -92,7 +92,7 @@ Halaman `/admin/presensi-harian/pengaturan`:
   - titik gerbang di peta + radius (default 100 m)
   - QR wajib atau tidak (default: wajib)
   - **Link Absen Publik**: tombol salin link + QR-nya (untuk ditempel ke grup WA); tombol reset link bila bocor
-- **Notifikasi WA**: toggle per jenis (masuk / pulang / alpa)
+- **Notifikasi WA**: toggle per jenis (masuk / pulang / alpa) — *kini dorman: pengiriman WA dihapus 18-09-2026, toggle dibiarkan di schema/UI*
 
 ### B. Setiap hari — otomatis
 
@@ -108,12 +108,10 @@ PAGI (~07:00)
   Wali kelas → halaman kelasnya → panel "Presensi Harian"
   Tandai per anak: Hadir | Terlambat | Sakit | Izin | Alpa
   (pola cepat: "tandai semua hadir" → ubah 2–3 anak yang sakit/izin)
-  → tiap penandaan mengirim WA ke wali murid anak tsb
 
 SORE (~15:00)
   Panel yang sama, mode pulang:
   Pulang | Dijemput | Pulang Cepat (+catatan)
-  → WA "Ananda telah pulang" ke wali murid
 ```
 
 Tidak ada QR, tidak ada HP siswa. Wali kelas lupa mengisi? → §5E menutup celahnya.
@@ -151,7 +149,6 @@ SISWA TIBA:
          (NIS yang sama = pemilik HP — bebas absen ulang: masuk, pulang, tiap mapel)
        ✓ NIS ini belum absen hari ini?
   6. LOLOS → HADIR pukul 07:02 (+ "terlambat 17 menit" bila lewat batas)
-           → WA langsung ke wali murid
            (pesan gagal apa pun ditampilkan di layar aktif, tidak pernah
             memantul senyap ke layar lain)
 ```
@@ -173,7 +170,6 @@ Yang paling penting: **data tidak boleh bolong karena manusia lupa.**
 ```
 Pukul 08:00 (absen masuk tutup):
   Siswa yang sampai saat itu belum tercatat → OTOMATIS ditandai ALPA
-  → WA ke wali murid: "Ananda tidak tercatat hadir hingga pukul 08:00…"
 
   Ternyata salah (orang tua telepon: anak sakit)?
   → wali kelas / TU ubah ALPA → SAKIT
@@ -184,7 +180,16 @@ Pukul 08:00 (absen masuk tutup):
 Prinsip: **coret ber-alasan, jangan hapus** (sama seperti buku kas / poin —
 aturan R2/D6). Sejarah koreksi selalu bisa diaudit.
 
-### F. Notifikasi WhatsApp (3 jenis)
+### F. Notifikasi WhatsApp (3 jenis) — DIHAPUS
+
+> **Dihapus 18-09-2026 atas keputusan sekolah.** `DailyAttendanceNotifier`
+> dan seluruh pemanggilnya dihapus; sweep penutupan jendela tetap menandai
+> alpa (itu data presensi, bukan notifikasi). Toggle per jenis di
+> pengaturan unit sengaja dibiarkan dorman di schema/UI. WhatsApp tetap
+> dipakai sistem untuk OTP login, undangan aktivasi akun, dan pengingat
+> tagihan.
+
+Riwayat desain sebelum penghapusan:
 
 | Pemicu | Pesan ke wali murid |
 |---|---|
@@ -272,9 +277,9 @@ Data lama tidak diubah/hilang — hanya ada dua "satuan" dalam sejarah.
 
 ## 9. Yang masih terbuka (tidak memblokir pembangunan)
 
-1. **Kebijakan WA gagal kirim** — saat ini gagal = catat log saja, tanpa retry (pertanyaan lama §4 no. 3 PROGRESS-MAGANG, domain mentor).
+1. ~~**Kebijakan WA gagal kirim**~~ — *moot setelah penghapusan WA 18-09-2026; retry notifikasi kini hanya untuk template yang tersisa (undangan, pengingat, kuitansi, OTP dikecualikan)*.
 2. **Libur nasional di luar pola mingguan** — v1: tidak ada sesi / matikan manual hari itu; tabel pengecualian tanggal menyusul bila perlu.
-3. **Volume & biaya WA** — ribuan pesan/hari; toggle per jenis notifikasi sudah disiapkan sebagai katup.
+3. ~~**Volume & biaya WA**~~ — *moot setelah penghapusan WA 18-09-2026*.
 4. **Timezone aplikasi** masih UTC (pindah ke Asia/Jakarta = domain mentor §3.1) — scheduler bergantung ini.
 5. **Opsi 2 (harian = sumber resmi)** menyentuh makna data historis SMP/SMA — idealnya dikonfirmasi sekilas ke mentor.
 
@@ -315,8 +320,9 @@ Data lama tidak diubah/hilang — hanya ada dua "satuan" dalam sejarah.
 ## 11. Urutan pengerjaan yang disarankan
 
 1. ✅ **Fondasi** — 3 tabel + setting unit + scheduler buka/tutup otomatis
-2. ✅ **Mode Wali Kelas** dulu (SD/TK — paling sederhana, tanpa QR): panel guru + WA + auto-alpa. Langsung terpakai 4 dari 7 unit dengan risiko terkecil
+2. ✅ **Mode Wali Kelas** dulu (SD/TK — paling sederhana, tanpa QR): panel guru + auto-alpa. Langsung terpakai 4 dari 7 unit dengan risiko terkecil
 3. ✅ **Mode Gerbang** (SMP/SMA): link publik + layar QR di HP TU + scanner + radius + perangkat-sekali + halaman sesi TU
 4. ✅ **Integrasi laporan** — rapor, watchlist, rekap kelas beralih ke sumber harian
 5. ✅ **Polesan** — alarm pola perangkat+IP (bendera di papan TU), toggle notifikasi; pengecualian tanggal libur menyusul bila perlu (§9 no. 2)
 | 2026-09-15 | **Aturan perangkat dirapatkan: "satu HP = satu NIS per hari"** (laporan user "absen satu device sekali itu rancu"). Dua temuan: (a) kata "per hari" di docs/pesan error menyesatkan pembaca jadi takut alur sah terblokir — padahal implementasi lama per-SESI sehingga (b) celahnya justru terbuka: HP bisa absen NIS A di satu sesi lalu NIS B di sesi lain (pulang/mapel berikutnya). Semantik final: perangkat terikat ke satu NIS sepanjang hari per lapis (gerbang & mapel masing-masing); NIS pemilik bebas absen ulang kapan pun; besok HP bebas lagi. Pesan error diganti jujur ("…sudah dipakai presensi/absen siswa lain hari ini"); 3 test baru (rotasi antar-mapel ditolak + pemilik bebas; batas hari di gerbang; pesan baru), 388/388 lulus | Iwan |
+| 2026-09-18 | **Notifikasi WhatsApp presensi harian dihapus menyeluruh** (masuk/pulang/alpa) atas keputusan sekolah — alasan volume & biaya; sweep alpa tetap jalan karena itu data; toggle per unit dibiarkan dorman; guru/tes diberi fake WA agar penulisan ulang jalur ini gagal keras. WhatsApp sistem kini hanya: OTP login, undangan aktivasi, pengingat tagihan | Iwan |

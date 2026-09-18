@@ -161,6 +161,5 @@ memproses — redelivery dari provider tidak pernah dobel-proses.
 |---|---|---|
 | Tanggal 1, 00:30 | `bills:generate --type=spp` | terbitkan SPP bulan berjalan untuk siswa `active` |
 | Harian 01:00 | `bills:mark-overdue` | tandai lewat jatuh tempo |
-| Harian 06:30 | `points:evaluate-thresholds` | notifikasi wali saat saldo poin melewati ambang — sekali per ambang per semester |
 | Harian 07:00 | `bills:send-reminders` | pengingat H-7, H-1, H+3 |
 | Harian 03:00 | `units:sync` | tarik ulang master unit dari PMB |

@@ -16,9 +16,9 @@ use Illuminate\Support\Carbon;
  *           the (unit, date, type) unique makes this idempotent (R5): a
  *           twice-fired schedule creates nothing the second time.
  *   close - every session whose window has ended gets closed, and a masuk
- *           window sweeps its still-unmarked students into 'alpa' with the
- *           WhatsApp alert - the guarantee that a forgotten marking leaves a
- *           notification, not a data hole.
+ *           window sweeps its still-unmarked students into 'alpa' - the
+ *           guarantee that a forgotten marking surfaces as an alpa to
+ *           correct, never a data hole.
  *
  * Runs every few minutes rather than at fixed hours so a settings edit made
  * mid-morning is picked up the same day without anyone restarting anything.

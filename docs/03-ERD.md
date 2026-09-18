@@ -221,25 +221,13 @@ Tidak ada kolom saldo di mana pun.
 
 ### `point_thresholds`
 `id, ulid, school_unit_id FK nullable, min_points, max_points, label, action, color,
-notify_guardian boolean, timestamps`.
+timestamps`.
 
 Contoh baris: `−25..−49 → "Peringatan 1" → surat pemberitahuan wali`;
-`−75..−999 → "Pemanggilan orang tua"`. Dipakai untuk mewarnai badge di UI dan
-memicu notifikasi otomatis saat saldo melewati ambang.
-
-### `point_threshold_notifications`
-
-Ditambah saat implementasi — pola idempotensi yang sama dengan `bill_reminders`
-di modul keuangan, belum tersketsa saat dokumen ini pertama ditulis.
-
-`id, ulid, student_id FK cascade, term_id FK cascade, point_threshold_id FK
-cascade, balance_at_notification integer, notified_at, timestamps`.
-
-**Unique `(student_id, term_id, point_threshold_id)`** — inilah yang membuat
-evaluator harian tidak mengirim ulang notifikasi tiap hari selama saldo diam
-di satu ambang. Turun ke ambang yang lebih buruk memicu notifikasi baru
-(baris `point_threshold_id` berbeda); membaik lalu jatuh lagi ke ambang yang
-sama tidak — sudah pernah diberi tahu, tidak perlu diulang.
+`−75..−999 → "Pemanggilan orang tua"`. Dipakai untuk mewarnai badge di UI.
+Notifikasi otomatis ke wali saat saldo melewati ambang pernah ada
+(`notify_guardian` + tabel `point_threshold_notifications`), lalu dihapus
+18-09-2026 atas keputusan sekolah.
 
 ---
 

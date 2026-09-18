@@ -31,7 +31,6 @@ class PointThresholdController extends Controller
                 'label' => $t->label,
                 'action' => $t->action,
                 'color' => $t->color,
-                'notify_guardian' => $t->notify_guardian,
             ]),
         ]);
     }
@@ -53,7 +52,6 @@ class PointThresholdController extends Controller
             'label' => $validated['label'],
             'action' => $validated['action'] ?? null,
             'color' => $validated['color'] ?? null,
-            'notify_guardian' => $validated['notify_guardian'] ?? true,
         ]);
 
         ActivityLog::record($request->user(), 'point_threshold.created', $threshold, ['label' => $threshold->label]);

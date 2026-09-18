@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 
 type Threshold = {
   ulid: string; school_unit: string | null; min_points: number; max_points: number;
-  label: string; action: string | null; color: string | null; notify_guardian: boolean;
+  label: string; action: string | null; color: string | null;
 };
 type Unit = { ulid: string; code: string; label: string };
 
@@ -25,7 +25,6 @@ function NewThresholdForm({ units, isCentral, onCreated }: { units: Unit[]; isCe
   const [label, setLabel] = useState("");
   const [action, setAction] = useState("");
   const [color, setColor] = useState<"warn" | "bad" | "good">("warn");
-  const [notifyGuardian, setNotifyGuardian] = useState(true);
   const [unitCode, setUnitCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +37,7 @@ function NewThresholdForm({ units, isCentral, onCreated }: { units: Unit[]; isCe
     try {
       await api.post("/api/admin/point-thresholds", {
         min_points: Number(minPoints), max_points: Number(maxPoints), label,
-        action: action || undefined, color, notify_guardian: notifyGuardian,
+        action: action || undefined, color,
         school_unit_code: isCentral && unitCode ? unitCode : undefined,
       });
       toast.success("Ambang ditambahkan.");
@@ -86,10 +85,6 @@ function NewThresholdForm({ units, isCentral, onCreated }: { units: Unit[]; isCe
           </select>
         </div>
       )}
-      <label className="flex items-center gap-2 pb-2.5 text-sm">
-        <input type="checkbox" checked={notifyGuardian} onChange={(e) => setNotifyGuardian(e.target.checked)} />
-        Beri tahu wali murid
-      </label>
       <Button type="submit" disabled={submitting}>{submitting ? "Menyimpan…" : "Tambah"}</Button>
       {error && <p className="w-full rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">{error}</p>}
     </form>
@@ -102,7 +97,6 @@ function EditThresholdForm({ threshold, onSaved, onCancel }: { threshold: Thresh
   const [label, setLabel] = useState(threshold.label);
   const [action, setAction] = useState(threshold.action ?? "");
   const [color, setColor] = useState<"warn" | "bad" | "good">((threshold.color as "warn" | "bad" | "good") ?? "warn");
-  const [notifyGuardian, setNotifyGuardian] = useState(threshold.notify_guardian);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -114,7 +108,7 @@ function EditThresholdForm({ threshold, onSaved, onCancel }: { threshold: Thresh
     try {
       await api.patch(`/api/admin/point-thresholds/${threshold.ulid}`, {
         min_points: Number(minPoints), max_points: Number(maxPoints), label,
-        action: action || null, color, notify_guardian: notifyGuardian,
+        action: action || null, color,
       });
       toast.success("Ambang diperbarui.");
       onSaved();
@@ -151,10 +145,6 @@ function EditThresholdForm({ threshold, onSaved, onCancel }: { threshold: Thresh
           <option value="bad">Merah</option>
         </select>
       </div>
-      <label className="flex items-center gap-2 pb-2.5 text-sm">
-        <input type="checkbox" checked={notifyGuardian} onChange={(e) => setNotifyGuardian(e.target.checked)} />
-        Beri tahu wali murid
-      </label>
       <Button type="submit" disabled={submitting}>{submitting ? "Menyimpan…" : "Simpan"}</Button>
       <Button type="button" variant="ghost" onClick={onCancel}>Batal</Button>
       {error && <p className="w-full rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">{error}</p>}
@@ -197,7 +187,7 @@ export default function PointThresholdsPage() {
       <div>
         <h1 className="text-xl font-bold tracking-tight">Ambang poin</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Rentang saldo dan artinya — dipakai untuk badge dan notifikasi otomatis ke wali murid.
+          Rentang saldo dan artinya — dipakai untuk badge poin siswa di aplikasi.
         </p>
       </div>
 
@@ -230,7 +220,6 @@ export default function PointThresholdsPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {t.notify_guardian && <Badge variant="primary">Notifikasi wali</Badge>}
                     <Badge variant={(t.color as "good" | "warn" | "bad") ?? "default"}>{t.color ?? "default"}</Badge>
                     {isCentral || t.school_unit !== null ? (
                       <Button size="sm" variant="ghost" onClick={() => setEditingUlid(t.ulid)}>

@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\DB;
  *
  * Central admin only for now, for the same reason as ActivityLogController:
  * notification_logs has no school_unit_id, and scoping its morph to
- * Bill/Payment/DailyRecord/Student per unit is easy to get subtly wrong.
+ * Bill/Payment/Student per unit is easy to get subtly wrong.
  */
 class NotificationFailureController extends Controller
 {
