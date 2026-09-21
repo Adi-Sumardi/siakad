@@ -168,6 +168,12 @@ class UserController extends Controller
         $user->fill(collect($validated)->except(['school_unit_ulid'])->all());
         $user->save();
 
+        // Note: deactivation needs no token revocation here - this app has no
+        // personal access tokens (auth is Sanctum SPA cookie sessions; User
+        // has no HasApiTokens). Enforcement is the `active` middleware on
+        // /auth/me + /files/*, which refuses the existing session on its next
+        // request, and OTP login already refuses deactivated accounts.
+
         // Keep the staff record's mirrored contact in step when the shared
         // field changes. The request is `sometimes`, so an absent key means
         // "untouched", not "cleared".

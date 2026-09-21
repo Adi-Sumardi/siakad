@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Download, FilePlus2, Filter, RefreshCw, Search, Wallet } from "lucide-react";
+import { Download, FilePlus2, Filter, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,7 +54,7 @@ function statusBadge(bill: Bill) {
   return <Badge>{dueLabel(bill.days_to_due)}</Badge>;
 }
 
-type Action = { bill: Bill; kind: "bayar" | "bebaskan" | "batalkan" };
+type Action = { bill: Bill; kind: "bebaskan" | "batalkan" };
 
 function AdminBillsContent() {
   const { user } = useAuth();
@@ -75,8 +75,6 @@ function AdminBillsContent() {
 
   // Form states
   const [submitting, setSubmitting] = useState(false);
-  const [payAmount, setPayAmount] = useState("");
-  const [payMethod, setPayMethod] = useState("cash");
   const [reason, setReason] = useState("");
 
   // Manual bill modal (one-off bills for unexpected cases)
@@ -201,8 +199,6 @@ function AdminBillsContent() {
 
   function openAction(bill: Bill, kind: Action["kind"]) {
     setAction({ bill, kind });
-    setPayAmount(String(bill.remaining_amount));
-    setPayMethod("cash");
     setReason("");
   }
 
@@ -210,21 +206,14 @@ function AdminBillsContent() {
     e.preventDefault();
     if (!action) return;
 
-    if (action.kind !== "bayar" && !reason.trim()) {
+    if (!reason.trim()) {
       toast.error("Alasan wajib diisi.");
       return;
     }
 
     setSubmitting(true);
     try {
-      if (action.kind === "bayar") {
-        await api.post(`/api/admin/bills/${action.bill.ulid}/payments`, {
-          amount: parseFloat(payAmount),
-          method: payMethod,
-          notes: reason || undefined,
-        });
-        toast.success("Pembayaran berhasil dicatat.");
-      } else if (action.kind === "bebaskan") {
+      if (action.kind === "bebaskan") {
         await api.post(`/api/admin/bills/${action.bill.ulid}/waive`, { reason });
         toast.success("Tagihan berhasil dibebaskan.");
       } else {
@@ -233,14 +222,10 @@ function AdminBillsContent() {
       }
 
       setAction(null);
-      // A settled bill leaves any view that excludes its next status (full
-      // payment leaves "Belum Lunas", a partial one leaves "Menunggak", ...).
-      // If it was the last row of a page, step back instead of refetching a
+      // A closed bill leaves any view that excludes its next status. If it
+      // was the last row of a page, step back instead of refetching a
       // now-empty page; rows that stay in view plain reload.
-      const nextStatus =
-        action.kind !== "bayar"
-          ? action.kind === "bebaskan" ? "waived" : "cancelled"
-          : parseFloat(payAmount) + 1e-9 >= action.bill.remaining_amount ? "paid" : "partial";
+      const nextStatus = action.kind === "bebaskan" ? "waived" : "cancelled";
       const staysInView =
         status === "" || status === nextStatus || (status === "open" && OPEN_STATUSES.includes(nextStatus));
       if (bills && bills.data.length === 1 && page > 1 && !staysInView) {
@@ -417,15 +402,6 @@ function AdminBillsContent() {
                 <div className="flex items-center gap-2">
                   <Button
                     size="sm"
-                    variant="outline"
-                    onClick={() => openAction(bill, "bayar")}
-                    className="gap-1.5 text-xs font-semibold"
-                  >
-                    <Wallet className="size-3.5" />
-                    <span>Catat Bayar</span>
-                  </Button>
-                  <Button
-                    size="sm"
                     variant="ghost"
                     onClick={() => openAction(bill, "bebaskan")}
                     className="text-xs text-muted-foreground hover:text-foreground"
@@ -555,8 +531,9 @@ function AdminBillsContent() {
 
               {selectedFeeType && !selectedFeeType.has_va_prefix && (
                 <p className="rounded-lg border border-warn/30 bg-warn-soft px-3 py-2 text-[11px] font-medium text-warn">
-                  Jenis “{selectedFeeType.name}” belum punya nomor Virtual Account di bank — pembayaran diterima tunai
-                  di Tata Usaha (pakai tombol Catat Bayar).
+                  Jenis “{selectedFeeType.name}” belum punya nomor Virtual Account di bank — pembayaran hanya lewat
+                  Virtual Account, jadi tagihan jenis ini belum bisa dibayar lewat sistem sampai prefix VA-nya
+                  terdaftar di e-SPP.
                 </p>
               )}
 
@@ -607,7 +584,6 @@ function AdminBillsContent() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
           <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-2xl border border-border">
             <h2 className="text-lg font-bold text-foreground">
-              {action.kind === "bayar" && "Catat Pembayaran Tagihan"}
               {action.kind === "bebaskan" && "Bebaskan Tagihan (Waiver)"}
               {action.kind === "batalkan" && "Batalkan Tagihan"}
             </h2>
@@ -619,50 +595,6 @@ function AdminBillsContent() {
             </div>
 
             <form onSubmit={handleActionSubmit} className="mt-4 space-y-4">
-              {action.kind === "bayar" && (
-                <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <Label htmlFor="pay_amount" className="text-xs">Jumlah Dibayar (Rp)</Label>
-                      <Input
-                        id="pay_amount"
-                        type="number"
-                        min="1"
-                        max={action.bill.remaining_amount}
-                        value={payAmount}
-                        onChange={(e) => setPayAmount(e.target.value)}
-                        required
-                        className="mt-1 font-bold"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="pay_method" className="text-xs">Metode Pembayaran</Label>
-                      <select
-                        id="pay_method"
-                        value={payMethod}
-                        onChange={(e) => setPayMethod(e.target.value)}
-                        className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
-                      >
-                        <option value="cash">Tunai (Front Desk)</option>
-                        <option value="bank_transfer">Transfer Bank</option>
-                        <option value="other">Lainnya</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="pay_notes" className="text-xs">Catatan (Opsional)</Label>
-                    <Input
-                      id="pay_notes"
-                      placeholder="Nomor struk, nama penyetor, dll"
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      className="mt-1"
-                    />
-                  </div>
-                </>
-              )}
-
               {(action.kind === "bebaskan" || action.kind === "batalkan") && (
                 <div>
                   <Label htmlFor="reason" className="text-xs">Alasan (Wajib diisi)</Label>

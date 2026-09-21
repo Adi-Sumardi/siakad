@@ -255,7 +255,7 @@ class BillGenerator
             'discount' => $discount,
             'total' => round($subtotal - $discount, 2),
             'dedup' => $dedup,
-            'due' => $this->dueDateFor($rate, $month, $dueDate),
+            'due' => $this->dueDateFor($rate, $month, $dueDate, $year),
         ];
     }
 
@@ -444,16 +444,24 @@ class BillGenerator
         return round(min($cut, $subtotal), 2);
     }
 
-    private function dueDateFor(FeeRate $rate, ?int $month, ?Carbon $override): Carbon
+    private function dueDateFor(FeeRate $rate, ?int $month, ?Carbon $override, AcademicYear $year): Carbon
     {
         if ($override) {
             return $override->copy();
         }
 
         if ($month && $rate->due_day) {
-            $year = (int) now()->year;
+            // The month belongs to the school year, not the wall calendar:
+            // pre-generating January for TA 2026/2027 must land in 2027 (the
+            // second half of the year), never in "this" calendar year - which
+            // is eleven months in the past and made the bill instantly
+            // overdue the moment it was born. Falls back to the year string's
+            // first half ("2026/2027" -> 2026) when starts_on is missing.
+            $startYear = (int) ($year->starts_on?->year ?? substr((string) $year->year, 0, 4));
+            $startMonth = (int) ($year->starts_on?->month ?? 7);
+            $calendarYear = $month >= $startMonth ? $startYear : $startYear + 1;
 
-            return Carbon::create($year, $month, min($rate->due_day, 28));
+            return Carbon::create($calendarYear, $month, min($rate->due_day, 28));
         }
 
         return now()->addDays(14);

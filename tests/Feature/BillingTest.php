@@ -430,16 +430,26 @@ class BillingTest extends TestCase
     public function test_a_part_payment_leaves_the_bill_partial(): void
     {
         $this->rate();
-        $this->student();
+        $student = $this->student();
+        $user = $this->guardianFor($student);
         $this->generator()->run($this->spp, $this->year, $this->unit, 8);
 
         $bill = Bill::first();
-        $admin = User::create([
-            'name' => 'Admin', 'email' => 'a@yapinet.id',
-            'role' => 'admin', 'is_active' => true, 'activated_at' => now(),
-        ]);
 
-        app(CheckoutService::class)->recordManual($bill, 200000, 'cash', $admin);
+        // Same pin as AdminBillingTest: the subject is the part payment's
+        // arithmetic, so the bill stays inside its due window no matter when
+        // the suite runs - a past-due partly-paid bill is 'overdue' now.
+        $bill->forceFill(['due_date' => now()->addDays(7)->startOfDay()])->save();
+
+        // Payment is VA-only now, so a part payment is a custom-amount VA
+        // checkout the bank then reports settled.
+        $payment = app(CheckoutService::class)->start(
+            $user,
+            [$bill->ulid],
+            'virtual_account',
+            [$bill->ulid => 200000],
+        );
+        app(PaymentAllocator::class)->settle($payment);
 
         $bill->refresh();
         $this->assertSame('partial', $bill->status);

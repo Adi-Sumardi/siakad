@@ -301,39 +301,36 @@ class CheckoutService
     }
 
     /**
-     * A payment recorded by staff: cash at the front desk, or a verified transfer.
+     * Fails every still-pending online payment that touches this bill - the
+     * shared guard for every lane that takes a bill out of the payable world
+     * by other means (today: waived and cancelled; payment itself is VA-only
+     * per the school's 2026-09-21 decision, so the VA IS the lane that must
+     * never outlive the decision). A lingering bank invoice that completes
+     * AFTER one of those decisions is a payment the system no longer has a
+     * place for (double charge / money against a closed bill).
+     *
+     * VA payments are asked about at the bank first (settleStaleIfAlreadyPaid):
+     * one that turns out to have been paid is settled - the money exists and
+     * must be booked - and the RuntimeException it then throws aborts the
+     * caller, because the bill is no longer in the state the caller assumed.
+     * An unreachable bank also aborts (fail-closed): voiding an invoice the
+     * bank may already have collected is how money disappears.
      */
-    public function recordManual(
-        Bill $bill,
-        float $amount,
-        string $method,
-        User $actor,
-        ?Guardian $payer = null,
-        ?string $notes = null,
-    ): Payment {
-        if (! $bill->isOpen()) {
-            throw new RuntimeException('Tagihan ini sudah lunas atau ditutup.');
-        }
+    public function voidPendingPaymentsFor(Bill $bill, string $reason): void
+    {
+        $paymentIds = PaymentAllocation::where('bill_id', $bill->id)
+            ->pluck('payment_id')
+            ->unique();
 
-        if ($amount <= 0 || $amount > (float) $bill->remaining_amount) {
-            throw new RuntimeException('Jumlah pembayaran melebihi sisa tagihan.');
-        }
+        Payment::whereIn('id', $paymentIds)
+            ->whereIn('status', ['pending', 'processing'])
+            ->get()
+            ->each(function (Payment $pending) use ($reason) {
+                if ($this->gateway instanceof BillingApiGateway) {
+                    $this->settleStaleIfAlreadyPaid($pending);
+                }
 
-        $payment = Payment::create([
-            'payment_number' => Payment::generateNumber(),
-            'payer_guardian_id' => $payer?->id,
-            'amount' => round($amount, 2),
-            'method' => $method,
-            'status' => 'pending',
-            'recorded_by' => $actor->id,
-            'verified_by' => $actor->id,
-            'verified_at' => now(),
-            'verification_notes' => $notes,
-        ]);
-
-        $this->allocator->allocate($payment, [$bill->id => round($amount, 2)]);
-        $this->allocator->settle($payment);
-
-        return $payment->fresh();
+                $this->allocator->fail($pending, 'failed', $reason);
+            });
     }
 }

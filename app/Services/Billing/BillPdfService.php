@@ -67,10 +67,29 @@ class BillPdfService
         }
 
         try {
-            return BillingApiClient::generateVaNumber($bill->student, $bill);
+            return BillingApiClient::generateVaNumber($bill->student, $bill, $this->bankChannelFor($bill));
         } catch (BillingApiException) {
             return null;
         }
+    }
+
+    /**
+     * Which bank's VA this bill's paper should show: the channel the family
+     * picked at their latest checkout (payment metadata bank_channel), so a
+     * parent who chose BSI is not sent to a Muamalat counter with a
+     * Muamalat-only printout. Defaults to Muamalat only when no checkout ever
+     * recorded a choice. Callers must have loaded $bill->allocations.payment.
+     */
+    public function bankChannelFor(Bill $bill): string
+    {
+        $bank = $bill->allocations
+            ->pluck('payment')
+            ->filter(fn ($p) => $p && in_array($p->status, ['pending', 'processing', 'completed'], true))
+            ->sortByDesc('id')
+            ->map(fn ($p) => $p->metadata['bank_channel'] ?? null)
+            ->first(fn ($b) => $b !== null);
+
+        return in_array($bank, ['muamalat', 'bsi'], true) ? $bank : 'muamalat';
     }
 
     /**

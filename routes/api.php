@@ -81,7 +81,10 @@ Route::prefix('auth')->group(function () {
     Route::post('/otp/request', [OtpController::class, 'request'])->middleware('throttle:10,1');
     Route::post('/otp/verify', [OtpController::class, 'verify'])->middleware('throttle:20,1');
 
-    Route::middleware('auth:sanctum')->group(function () {
+    // `active` (not just auth): a deactivated account must stop reading its
+    // own profile too - the SPA's identity refresh lands here, so a 403 is
+    // what turns into the forced logout on the next page load.
+    Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('/logout', [SessionController::class, 'logout']);
         Route::get('/me', [SessionController::class, 'me']);
     });
@@ -211,7 +214,7 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
  * governs its JSON. No role restriction beyond being signed in - the
  * ownership check does the actual work.
  */
-Route::middleware('auth:sanctum')->prefix('files')->group(function () {
+Route::middleware(['auth:sanctum', 'active'])->prefix('files')->group(function () {
     Route::get('/achievements/{ulid}/sertifikat', [FileController::class, 'achievementSertifikat']);
     Route::get('/achievements/{ulid}/foto', [FileController::class, 'achievementFoto']);
     Route::get('/points/{ulid}/evidence', [FileController::class, 'pointEvidence']);
@@ -240,7 +243,6 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/bills/{ulid}/pdf', [AdminBillController::class, 'pdf']);
     Route::post('/bills/{ulid}/waive', [AdminBillController::class, 'waive']);
     Route::post('/bills/{ulid}/cancel', [AdminBillController::class, 'cancel']);
-    Route::post('/bills/{ulid}/payments', [AdminBillController::class, 'recordPayment']);
 
     // No manual verification endpoints: the bank's callback settles online
     // payments on its own, and cash at the front desk is settled the moment the

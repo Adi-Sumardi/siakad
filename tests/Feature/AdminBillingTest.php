@@ -6,10 +6,12 @@ use App\Models\AcademicYear;
 use App\Models\Bill;
 use App\Models\FeeRate;
 use App\Models\FeeType;
+use App\Models\Payment;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\User;
 use App\Services\Billing\BillGenerator;
+use App\Services\Billing\PaymentAllocator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -270,9 +272,22 @@ class AdminBillingTest extends TestCase
         $bill = Bill::first();
         $admin = $this->staff('admin');
 
-        $this->actingAs($admin)
-            ->postJson("/api/admin/bills/{$bill->ulid}/payments", ['amount' => 200000, 'method' => 'cash'])
-            ->assertStatus(201);
+        // Keep the bill inside its due window regardless of when the suite
+        // runs - the subject here is the cancel refusal, and a partly-paid
+        // PAST-due bill is 'overdue' now that overdue outranks partial.
+        $bill->forceFill(['due_date' => now()->addDays(7)->startOfDay()])->save();
+
+        // Money on the bill via the ledger (the cash-recording endpoint is
+        // gone by school decision - payment is VA-only), so the payment is
+        // written the way a settled VA would leave it.
+        $payment = Payment::create([
+            'payment_number' => 'PAY-CANCEL-1',
+            'amount' => 200000,
+            'method' => 'virtual_account',
+            'status' => 'pending',
+        ]);
+        app(PaymentAllocator::class)->allocate($payment, [$bill->id => 200000]);
+        app(PaymentAllocator::class)->settle($payment);
 
         // Cancelling now would strand a real payment against nothing.
         $this->actingAs($admin)
@@ -280,28 +295,6 @@ class AdminBillingTest extends TestCase
             ->assertStatus(422);
 
         $this->assertSame('partial', $bill->fresh()->status);
-    }
-
-    public function test_recording_cash_settles_the_bill_through_the_ledger(): void
-    {
-        $this->studentIn($this->sd, 'Anak SD');
-        $this->generateAll();
-        $bill = Bill::first();
-
-        $this->actingAs($this->staff('admin_unit', $this->sd))
-            ->postJson("/api/admin/bills/{$bill->ulid}/payments", [
-                'amount' => 650000,
-                'method' => 'cash',
-                'notes' => 'Dibayar di TU',
-            ])
-            ->assertStatus(201);
-
-        $bill->refresh();
-        $this->assertSame('paid', $bill->status);
-        // Recorded as a payment with an allocation, not by editing the bill -
-        // so it appears in the collections report like any other money.
-        $this->assertDatabaseCount('payments', 1);
-        $this->assertDatabaseCount('payment_allocations', 1);
     }
 
     public function test_the_receivables_report_is_scoped_and_grouped_by_class(): void

@@ -140,10 +140,19 @@ class PaymentAllocator
         // owed, which is how PMB's progress bar once exceeded 100%.
         $remaining = round(max(0, $total - $paid), 2);
 
+        // Overdue outranks partial - "still owing, past due" is the more
+        // urgent truth, and ranking it this way makes this recompute write
+        // exactly what bills:mark-overdue writes. The old order (partial
+        // first) flipped a partly-paid overdue bill back to 'partial' on
+        // every payment event and back to 'overdue' every night, so
+        // tunggakan counts and reminders oscillated with whoever wrote last.
+        // paid_amount still carries the partial payment either way.
+        // Comparison mirrors the sweep: strictly before the start of today,
+        // so a bill due today is not overdue until tomorrow.
         $status = match (true) {
             $remaining <= 0 => 'paid',
+            $bill->due_date->lt(now()->startOfDay()) => 'overdue',
             $paid > 0 => 'partial',
-            $bill->due_date->isPast() => 'overdue',
             default => 'unpaid',
         };
 

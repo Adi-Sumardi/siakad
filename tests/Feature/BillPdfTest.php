@@ -171,7 +171,16 @@ class BillPdfTest extends TestCase
             'role' => 'admin', 'is_active' => true, 'activated_at' => now(),
         ]);
 
-        app(CheckoutService::class)->recordManual($bill, 650000, 'cash', $admin);
+        // Payment is VA-only now; a settled VA leaves the same completed
+        // payment + allocation the receipt template reads.
+        $payment = Payment::create([
+            'payment_number' => 'PAY-PDF-1',
+            'amount' => 650000,
+            'method' => 'virtual_account',
+            'status' => 'pending',
+        ]);
+        app(PaymentAllocator::class)->allocate($payment, [$bill->id => 650000]);
+        app(PaymentAllocator::class)->settle($payment);
 
         $response = $this->actingAs($admin)->get("/api/admin/bills/{$bill->fresh()->ulid}/pdf");
 

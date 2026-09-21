@@ -4,10 +4,8 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\BillReasonRequest;
-use App\Http\Requests\Admin\RecordBillPaymentRequest;
 use App\Http\Requests\Admin\StoreManualBillRequest;
 use App\Http\Resources\BillResource;
-use App\Http\Resources\PaymentResource;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Bill;
@@ -55,9 +53,9 @@ class BillController extends Controller
      * A one-off bill for the cases the scheduled generator never knows about
      * (replacement uniform, a mid-year entry's missed month, a fine). The
      * money context is identical to a generated bill: same fee type
-     * catalogue, same statuses, same payment lanes - VA checkout when e-SPP
-     * has a prefix for the type (SPP, jamiyyah, ekskul, ...), cash at the
-     * desk recorded through the usual lane otherwise. A per-unit admin only
+     * catalogue, same statuses, same payment lane - VA checkout, which the
+     * family can actually complete only once e-SPP has a prefix for the
+     * type (SPP, jamiyyah, ekskul, ...). A per-unit admin only
      * reaches students inside their own unit (visibleTo, R3 - 404 not 403).
      */
     public function storeManual(StoreManualBillRequest $request): JsonResponse
@@ -136,7 +134,7 @@ class BillController extends Controller
      * Writes the bill off. Requires a reason, because the alternative is a
      * balance that silently disappeared and nobody can account for at audit.
      */
-    public function waive(BillReasonRequest $request, string $ulid): JsonResponse
+    public function waive(BillReasonRequest $request, string $ulid, CheckoutService $checkout): JsonResponse
     {
         $validated = $request->validated();
 
@@ -145,6 +143,17 @@ class BillController extends Controller
         if (! $bill->isOpen()) {
             return response()->json(['message' => 'Hanya tagihan yang belum lunas yang bisa dibebaskan.'], 422);
         }
+
+        // A waived bill must not keep a live bank invoice: the parent paying
+        // the VA an hour later is money against a decision, not a bill. Voids
+        // first and aborts loudly if the bank says the VA was already paid.
+        try {
+            $checkout->voidPendingPaymentsFor($bill, 'Tagihan dibebaskan: '.$validated['reason']);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $bill->refresh();
 
         $bill->forceFill([
             'status' => 'waived',
@@ -161,7 +170,7 @@ class BillController extends Controller
         return response()->json(['bill' => new BillResource($bill->fresh())]);
     }
 
-    public function cancel(BillReasonRequest $request, string $ulid): JsonResponse
+    public function cancel(BillReasonRequest $request, string $ulid, CheckoutService $checkout): JsonResponse
     {
         $validated = $request->validated();
 
@@ -174,6 +183,18 @@ class BillController extends Controller
                 'message' => 'Tagihan yang sudah menerima pembayaran tidak bisa dibatalkan. Gunakan refund.',
             ], 422);
         }
+
+        // Same guard as waive: no live bank invoice may outlive a cancelled
+        // bill. If the bank reports the VA already paid, the void settles it
+        // and the exception aborts the cancellation - the bill is now paid,
+        // which is the opposite of what the admin came here to do.
+        try {
+            $checkout->voidPendingPaymentsFor($bill, 'Tagihan dibatalkan: '.$validated['reason']);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $bill->refresh();
 
         $bill->forceFill([
             'status' => 'cancelled',
@@ -191,35 +212,11 @@ class BillController extends Controller
         return response()->json(['bill' => new BillResource($bill->fresh())]);
     }
 
-    /** Cash at the front desk, or a transfer the admin has already confirmed. */
-    public function recordPayment(RecordBillPaymentRequest $request, string $ulid, CheckoutService $checkout): JsonResponse
-    {
-        $validated = $request->validated();
-
-        $bill = Bill::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
-
-        try {
-            $payment = $checkout->recordManual(
-                $bill,
-                (float) $validated['amount'],
-                $validated['method'],
-                $request->user(),
-                $bill->student->guardians()->wherePivot('is_billing_contact', true)->first(),
-                $validated['notes'] ?? null,
-            );
-        } catch (RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
-
-        ActivityLog::record($request->user(), 'payment.recorded_manually', $payment, [
-            'bill_number' => $bill->bill_number,
-            'amount' => (float) $validated['amount'],
-            'method' => $validated['method'],
-        ]);
-
-        return response()->json([
-            'payment' => new PaymentResource($payment),
-            'bill' => new BillResource($bill->fresh()),
-        ], 201);
-    }
+    /**
+     * Note: there is deliberately no staff-recorded cash/transfer lane any
+     * more (school decision 2026-09-21: payment flows ONLY through the
+     * Virtual Account channels e-SPP provides). A fee type without a VA
+     * prefix therefore cannot be paid through the system at all until e-SPP
+     * registers its prefix - see the has_va_prefix flag on fee-types.
+     */
 }
