@@ -24,11 +24,11 @@ class Guardian extends Model
         'alamat',
     ];
 
-    protected $hidden = ['no_hp_hash'];
+    protected $hidden = ['no_hp_hash', 'email_hash'];
 
-    protected $encrypted = ['no_hp'];
+    protected $encrypted = ['no_hp', 'email'];
 
-    protected $encryptedHashes = ['no_hp' => 'no_hp_hash'];
+    protected $encryptedHashes = ['no_hp' => 'no_hp_hash', 'email' => 'email_hash'];
 
     public function user(): BelongsTo
     {

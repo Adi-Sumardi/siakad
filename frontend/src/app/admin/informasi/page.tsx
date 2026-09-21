@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileDown, Megaphone, Pin, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { FileDown, Megaphone, Pencil, Pin, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -193,6 +193,41 @@ export default function AdminAnnouncementsPage() {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [showForm, setShowForm] = useState(false);
 
+  // Inline edit (PATCH): title/body/pin only - scope stays locked, the same
+  // way a rule's code stays locked; retargeting a notice is a new notice.
+  const [editing, setEditing] = useState<Announcement | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [editPinned, setEditPinned] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  function openEdit(a: Announcement) {
+    setEditing(a);
+    setEditTitle(a.title);
+    setEditBody(a.body);
+    setEditPinned(a.is_pinned);
+  }
+
+  async function saveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editing) return;
+    setSavingEdit(true);
+    try {
+      await api.patch(`/api/admin/announcements/${editing.ulid}`, {
+        title: editTitle,
+        body: editBody,
+        is_pinned: editPinned,
+      });
+      toast.success("Pengumuman berhasil diperbarui.");
+      setEditing(null);
+      load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal memperbarui pengumuman.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   function load() {
     api
       .get<{ announcements: Announcement[] }>("/api/admin/announcements")
@@ -287,14 +322,25 @@ export default function AdminAnnouncementsPage() {
                   </Badge>
                 )}
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => remove(a)}
-                className="text-destructive hover:bg-destructive/10 h-8 w-8 p-0"
-              >
-                <Trash2 className="size-4" />
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => openEdit(a)}
+                  className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                  title="Edit pengumuman"
+                >
+                  <Pencil className="size-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => remove(a)}
+                  className="text-destructive hover:bg-destructive/10 h-8 w-8 p-0"
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
             </div>
 
             <p className="mt-2 text-sm text-muted-foreground whitespace-pre-line leading-relaxed">{a.body}</p>
@@ -326,6 +372,66 @@ export default function AdminAnnouncementsPage() {
           </Card>
         ))}
       </div>
+
+      {/* MODAL: EDIT PENGUMUMAN */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-lg p-6 border-border shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-lg font-bold text-foreground">Edit Pengumuman</h2>
+              <button onClick={() => setEditing(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <form onSubmit={saveEdit} className="space-y-4">
+              <div>
+                <Label className="text-xs">Judul Pengumuman</Label>
+                <Input
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  required
+                  className="mt-1 font-bold"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs">Isi Pengumuman</Label>
+                <textarea
+                  value={editBody}
+                  onChange={(e) => setEditBody(e.target.value)}
+                  required
+                  rows={6}
+                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:ring-2 focus:ring-primary focus:outline-hidden"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editPinned}
+                  onChange={(e) => setEditPinned(e.target.checked)}
+                  className="rounded border-input text-primary"
+                />
+                <span>Sematkan di atas (Pin)</span>
+              </label>
+
+              <p className="text-[11px] text-muted-foreground">
+                Cakupan ({SCOPE_LABEL[editing.scope]}) tidak bisa diubah — peruntukkan pengumuman baru bila sasaran berbeda.
+              </p>
+
+              <div className="flex justify-end gap-2.5 pt-1">
+                <Button type="button" variant="outline" onClick={() => setEditing(null)}>
+                  Batal
+                </Button>
+                <Button type="submit" disabled={savingEdit} className="font-bold shadow-xs">
+                  {savingEdit ? "Menyimpan…" : "Simpan Perubahan"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

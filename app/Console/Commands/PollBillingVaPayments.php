@@ -14,30 +14,39 @@ use Illuminate\Support\Facades\Log;
  */
 class PollBillingVaPayments extends Command
 {
-    protected $signature = 'payments:poll-billing-va {--limit=50 : Maximum number of payments to check}';
+    protected $signature = 'payments:poll-billing-va {--limit=0 : Maximum payments per run (0 = periksa SEMUA yang pending)}';
 
     protected $description = 'Poll the e-SPP Billing API for settled Virtual Account payments';
 
     public function handle(BillingApiClient $client, PaymentAllocator $allocator): int
     {
-        $payments = Payment::query()
+        // Oldest first, every run: the old "latest 50" meant a backlog larger
+        // than 50 was never fully scanned - the payments at the back of the
+        // queue were starved no matter how many times this fired. Ids are
+        // plucked up front so the settle() touches (updated_at) can't
+        // reshuffle the list mid-run.
+        $limit = max(0, (int) $this->option('limit'));
+
+        $paymentIds = Payment::query()
             ->whereIn('status', ['processing', 'pending'])
             ->where(function ($q) {
                 $q->whereIn('gateway_response->provider', ['bank_muamalat', 'bank_bsi'])
                     ->orWhereNotNull('gateway_response->va_number');
             })
-            ->latest('updated_at')
-            ->limit((int) $this->option('limit'))
-            ->get();
+            ->orderBy('updated_at')
+            ->when($limit > 0, fn ($q) => $q->limit($limit))
+            ->pluck('id');
 
-        if ($payments->isEmpty()) {
+        if ($paymentIds->isEmpty()) {
             $this->info('No pending VA payments to poll.');
 
             return self::SUCCESS;
         }
 
-        $this->info("Polling {$payments->count()} pending VA payment(s)...");
+        $this->info('Polling '.$paymentIds->count().' pending VA payment(s)...');
         $settledCount = 0;
+
+        $payments = Payment::whereIn('id', $paymentIds)->orderBy('updated_at')->get();
 
         foreach ($payments as $payment) {
             // gateway_response.va_number is already the chosen bank's VA

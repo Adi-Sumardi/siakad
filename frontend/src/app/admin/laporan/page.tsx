@@ -39,6 +39,13 @@ type Collections = {
   by_fee_type: { fee_type: string; total: number }[];
 };
 
+type Attendance = {
+  period: { from: string; to: string };
+  summary: { total_records: number; hadir: number; sakit: number; izin: number; alpa: number };
+  by_class: { kelas: string; hadir: number; sakit: number; izin: number; alpa: number }[];
+  by_unit: { unit: string; hadir: number; sakit: number; izin: number; alpa: number }[];
+};
+
 /** The 1st of the current month, in Jakarta - see todayJakarta() for why UTC-based conversion loses a day near midnight WIB. */
 function firstOfMonth(): string {
   return todayJakarta().slice(0, 7) + "-01";
@@ -47,6 +54,7 @@ function firstOfMonth(): string {
 export default function ReportsPage() {
   const [receivables, setReceivables] = useState<Receivables | null>(null);
   const [collections, setCollections] = useState<Collections | null>(null);
+  const [attendance, setAttendance] = useState<Attendance | null>(null);
   const [from, setFrom] = useState(firstOfMonth());
   const [to, setTo] = useState(todayJakarta());
   const [loading, setLoading] = useState(false);
@@ -54,12 +62,14 @@ export default function ReportsPage() {
   async function loadData() {
     setLoading(true);
     try {
-      const [recData, colData] = await Promise.all([
+      const [recData, colData, attData] = await Promise.all([
         api.get<Receivables>("/api/admin/reports/receivables"),
         api.get<Collections>(`/api/admin/reports/collections?from=${from}&to=${to}`),
+        api.get<Attendance>(`/api/admin/reports/attendance?from=${from}&to=${to}`),
       ]);
       setReceivables(recData);
       setCollections(colData);
+      setAttendance(attData);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal memuat laporan.");
     } finally {
@@ -232,6 +242,87 @@ export default function ReportsPage() {
                         <td className="px-5 py-3.5 text-right">
                           {row.overdue > 0 ? (
                             <span className="font-bold text-destructive">{rupiah(row.overdue)}</span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </>
+        )}
+      </div>
+
+      {/* SECTION 3: PRESENSI HARIAN */}
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-muted/40 p-4 rounded-2xl border border-border">
+          <div>
+            <h2 className="text-base font-bold text-foreground flex items-center gap-2">
+              <Users className="size-4.5 text-primary" />
+              <span>Rekap Presensi Harian</span>
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Hadir/Sakit/Izin/Alpa dalam HARI (lapis harian - sumber resmi), rentang tanggal sama dgn laporan kas.
+            </p>
+          </div>
+        </div>
+
+        {attendance === null ? (
+          <Skeleton className="h-40 w-full" />
+        ) : attendance.summary.total_records === 0 ? (
+          <Card className="p-6 border-border/80 text-center text-sm text-muted-foreground">
+            Belum ada data presensi pada rentang {attendance.period.from} s/d {attendance.period.to}.
+          </Card>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <Card className="p-4 border-border/80">
+                <span className="text-xs text-muted-foreground">Hadir</span>
+                <p className="mt-1 text-xl font-bold text-good">{attendance.summary.hadir}</p>
+              </Card>
+              <Card className="p-4 border-border/80">
+                <span className="text-xs text-muted-foreground">Sakit</span>
+                <p className="mt-1 text-xl font-bold text-foreground">{attendance.summary.sakit}</p>
+              </Card>
+              <Card className="p-4 border-border/80">
+                <span className="text-xs text-muted-foreground">Izin</span>
+                <p className="mt-1 text-xl font-bold text-foreground">{attendance.summary.izin}</p>
+              </Card>
+              <Card className="p-4 border-border/80">
+                <span className="text-xs text-muted-foreground">Alpa</span>
+                <p className="mt-1 text-xl font-bold text-destructive">{attendance.summary.alpa}</p>
+              </Card>
+            </div>
+
+            <Card className="overflow-hidden border-border/80">
+              <div className="border-b border-border bg-muted/30 px-5 py-3 flex items-center justify-between">
+                <p className="text-sm font-bold text-foreground">Rekap Presensi per Kelas</p>
+                <span className="text-xs text-muted-foreground">{attendance.by_class.length} kelas terdata</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-border bg-muted/40 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    <tr>
+                      <th className="px-5 py-3.5">Rombel / Kelas</th>
+                      <th className="px-5 py-3.5 text-right">Hadir</th>
+                      <th className="px-5 py-3.5 text-right">Sakit</th>
+                      <th className="px-5 py-3.5 text-right">Izin</th>
+                      <th className="px-5 py-3.5 text-right">Alpa</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {attendance.by_class.map((row) => (
+                      <tr key={row.kelas} className="hover:bg-muted/20 transition-colors">
+                        <td className="px-5 py-3.5 font-bold text-foreground">{row.kelas}</td>
+                        <td className="px-5 py-3.5 text-right font-bold text-good">{row.hadir}</td>
+                        <td className="px-5 py-3.5 text-right text-muted-foreground">{row.sakit}</td>
+                        <td className="px-5 py-3.5 text-right text-muted-foreground">{row.izin}</td>
+                        <td className="px-5 py-3.5 text-right">
+                          {row.alpa > 0 ? (
+                            <span className="font-bold text-destructive">{row.alpa}</span>
                           ) : (
                             <span className="text-muted-foreground">—</span>
                           )}

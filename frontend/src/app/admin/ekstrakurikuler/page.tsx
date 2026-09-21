@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, UserMinus } from "lucide-react";
+import { ChevronDown, ChevronUp, Pencil, UserMinus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ type EkskulRow = {
   school_unit: { code: string; label: string } | null;
   academic_year: string | null;
   pembina: string | null;
+  pembina_ulid?: string | null;
   capacity: number | null;
   member_count: number;
   is_active: boolean;
@@ -199,6 +200,45 @@ export default function EkstrakurikulerPage() {
   const [activities, setActivities] = useState<EkskulRow[] | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  // Inline edit (PATCH): name/description/pembina/capacity/active. Unit dan
+  // tahun ajaran terkunci - identitas ekskul; salah tahun = buat baru.
+  const [editing, setEditing] = useState<EkskulRow | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", description: "", pembinaUlid: "", capacity: "", isActive: true });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  function openEdit(e: EkskulRow) {
+    setEditing(e);
+    setEditForm({
+      name: e.name,
+      description: e.description ?? "",
+      pembinaUlid: e.pembina_ulid ?? "",
+      capacity: e.capacity ? String(e.capacity) : "",
+      isActive: e.is_active,
+    });
+  }
+
+  async function saveEdit(ev: React.FormEvent) {
+    ev.preventDefault();
+    if (!editing) return;
+    setSavingEdit(true);
+    try {
+      await api.patch(`/api/admin/extracurriculars/${editing.ulid}`, {
+        name: editForm.name,
+        description: editForm.description || null,
+        pembina_ulid: editForm.pembinaUlid || null,
+        capacity: editForm.capacity ? Number(editForm.capacity) : null,
+        is_active: editForm.isActive,
+      });
+      toast.success("Ekstrakurikuler diperbarui.");
+      setEditing(null);
+      loadActivities();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal memperbarui ekstrakurikuler.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   useEffect(() => {
     api.get<{ school_units: SchoolUnitOption[] }>("/api/admin/school-units").then((d) => setUnits(d.school_units));
     api.get<{ academic_years: AcademicYearOption[] }>("/api/admin/academic-years").then((d) => setYears(d.academic_years));
@@ -246,15 +286,102 @@ export default function EkstrakurikulerPage() {
                   {e.pembina ?? "Belum ada pembina"} · {e.member_count} anggota{e.capacity ? ` / ${e.capacity}` : ""}
                 </p>
               </div>
-              <Button size="sm" variant="outline" onClick={() => setExpanded(expanded === e.ulid ? null : e.ulid)}>
-                {expanded === e.ulid ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-                <span className="ml-1">Kelola Anggota</span>
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="ghost" onClick={() => openEdit(e)} className="text-muted-foreground hover:text-foreground" title="Edit ekskul">
+                  <Pencil className="size-4" />
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setExpanded(expanded === e.ulid ? null : e.ulid)}>
+                  {expanded === e.ulid ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+                  <span className="ml-1">Kelola Anggota</span>
+                </Button>
+              </div>
             </div>
             {expanded === e.ulid && <RosterPanel ekskul={e} students={students} onChanged={loadActivities} />}
           </Card>
         ))}
       </div>
+
+      {/* MODAL: EDIT EKSKUL */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-md p-6 border-border shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-lg font-bold text-foreground">Edit Ekstrakurikuler</h2>
+              <button onClick={() => setEditing(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <form onSubmit={saveEdit} className="space-y-3">
+              <div>
+                <Label className="text-xs">Nama kegiatan</Label>
+                <Input
+                  value={editForm.name}
+                  onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                  required
+                  className="mt-1 font-bold"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Deskripsi</Label>
+                <Input
+                  value={editForm.description}
+                  onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="Opsional"
+                  className="mt-1"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Pembina</Label>
+                  <select
+                    value={editForm.pembinaUlid}
+                    onChange={(e) => setEditForm((f) => ({ ...f, pembinaUlid: e.target.value }))}
+                    className="mt-1 h-10 w-full rounded-lg border border-input bg-card px-3 text-sm"
+                  >
+                    <option value="">Belum ditentukan</option>
+                    {teachers.map((t) => <option key={t.ulid} value={t.ulid}>{t.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <Label className="text-xs">Kapasitas</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={editForm.capacity}
+                    onChange={(e) => setEditForm((f) => ({ ...f, capacity: e.target.value }))}
+                    placeholder="30"
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editForm.isActive}
+                  onChange={(e) => setEditForm((f) => ({ ...f, isActive: e.target.checked }))}
+                  className="rounded border-input text-primary"
+                />
+                <span>Aktif (terbuka pendaftaran & tagihan)</span>
+              </label>
+
+              <p className="text-[11px] text-muted-foreground">
+                Unit ({editing.school_unit?.label ?? "Sekolah-luas"}) dan tahun ajaran ({editing.academic_year ?? "—"}) terkunci;
+                salah sasaran tahun = buat ekskul baru.
+              </p>
+
+              <div className="flex justify-end gap-2.5 pt-1">
+                <Button type="button" variant="outline" onClick={() => setEditing(null)}>Batal</Button>
+                <Button type="submit" disabled={savingEdit} className="font-bold shadow-xs">
+                  {savingEdit ? "Menyimpan…" : "Simpan Perubahan"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

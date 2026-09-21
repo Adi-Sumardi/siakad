@@ -196,7 +196,9 @@ class PmbHandoffProcessor
     private function findGuardian(array $data): ?Guardian
     {
         if (! empty($data['email'])) {
-            if ($found = Guardian::where('email', $data['email'])->first()) {
+            // email is encrypted like no_hp - a plain where() can never match
+            // ciphertext, so the lookup rides the blind-index hash instead.
+            if ($found = Guardian::where('email_hash', $this->encrypter->blindIndex($data['email']))->first()) {
                 return $found;
             }
         }

@@ -141,6 +141,9 @@ class ExtracurricularController extends Controller
             'school_unit' => $e->schoolUnit ? ['code' => $e->schoolUnit->code, 'label' => $e->schoolUnit->label] : null,
             'academic_year' => $e->academicYear?->year,
             'pembina' => $e->pembina?->name,
+            // The ULID behind the name - the edit form needs it to preselect
+            // the current pembina in the teacher dropdown.
+            'pembina_ulid' => $e->pembina?->ulid,
             'capacity' => $e->capacity,
             'member_count' => $e->member_count ?? $e->activeMembers()->count(),
             'is_active' => $e->is_active,

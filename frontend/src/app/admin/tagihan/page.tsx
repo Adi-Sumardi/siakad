@@ -63,6 +63,8 @@ function AdminBillsContent() {
 
   const [bills, setBills] = useState<Paginated<Bill> | null>(null);
   const [status, setStatus] = useState("open");
+  const [feeTypeCode, setFeeTypeCode] = useState("");
+  const [month, setMonth] = useState("");
   const [q, setQ] = useState("");
   const [unitCode, setUnitCode] = useState("");
   const [page, setPage] = useState(1);
@@ -146,6 +148,8 @@ function AdminBillsContent() {
     if (q) params.set("q", q);
     if (unitCode) params.set("unit", unitCode);
     if (academicYear) params.set("year", academicYear);
+    if (feeTypeCode) params.set("type", feeTypeCode);
+    if (month) params.set("month", month);
     params.set("page", String(page));
     params.set("per_page", "20");
 
@@ -153,7 +157,7 @@ function AdminBillsContent() {
       .get<{ bills: Paginated<Bill> }>(`/api/admin/bills?${params}`)
       .then((d) => setBills(d.bills))
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan."));
-  }, [status, q, unitCode, academicYear, page]);
+  }, [status, q, unitCode, academicYear, feeTypeCode, month, page]);
 
   useEffect(() => {
     load();
@@ -168,6 +172,13 @@ function AdminBillsContent() {
     api
       .get<{ academic_years: { ulid: string; year: string; is_active: boolean }[] }>("/api/admin/academic-years")
       .then((d) => setYears(d.academic_years))
+      .catch(() => {});
+
+    // The jenis filter needs the catalogue even before the manual-bill modal
+    // is ever opened (that modal has its own lazy load with the same guard).
+    api
+      .get<{ fee_types: FeeTypeOption[] }>("/api/admin/fee-types")
+      .then((d) => setFeeTypes(d.fee_types.filter((t) => t.is_active)))
       .catch(() => {});
   }, []);
 
@@ -351,6 +362,36 @@ function AdminBillsContent() {
             <option value="waived">Dibebaskan</option>
             <option value="cancelled">Dibatalkan</option>
             <option value="">Semua Status</option>
+          </select>
+
+          <select
+            value={feeTypeCode}
+            onChange={(e) => {
+              setFeeTypeCode(e.target.value);
+              setPage(1);
+            }}
+            className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
+          >
+            <option value="">Semua Jenis Biaya</option>
+            {feeTypes.map((t) => (
+              <option key={t.ulid} value={t.code}>{t.name}</option>
+            ))}
+          </select>
+
+          <select
+            value={month}
+            onChange={(e) => {
+              setMonth(e.target.value);
+              setPage(1);
+            }}
+            className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-2xs"
+          >
+            <option value="">Semua Bulan</option>
+            {["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"].map(
+              (nama, i) => (
+                <option key={i + 1} value={i + 1}>{nama}</option>
+              ),
+            )}
           </select>
         </div>
       </div>

@@ -261,6 +261,30 @@ class StudentController extends Controller
 
         if (array_key_exists('school_unit_ulid', $validated)) {
             $unit = SchoolUnit::where('ulid', $validated['school_unit_ulid'])->firstOrFail();
+
+            // A unit move is not a label swap: while an enrollment is live,
+            // changing the unit strands the student between two worlds - the
+            // old class's rosters and sweeps still carry them, the new unit's
+            // don't. The official lane for crossing units is promotion into
+            // the next academic year (PromotionService), so refuse here and
+            // point there rather than silently splitting the records.
+            $movingUnits = $unit->id !== (int) $student->school_unit_id;
+
+            if ($movingUnits && $student->enrollments()
+                ->where('status', 'active')
+                ->where('academic_year_id', AcademicYear::current()?->id ?? 0)
+                ->exists()) {
+                $classroom = $student->enrollments()
+                    ->where('status', 'active')
+                    ->where('academic_year_id', AcademicYear::current()?->id ?? 0)
+                    ->first()
+                    ?->classroom?->name;
+
+                return response()->json([
+                    'message' => "Siswa masih terdaftar aktif di kelas {$classroom} tahun ajaran berjalan. Pindah unit harus lewat alur kenaikan kelas antar tahun ajaran (menu Kenaikan Kelas), atau kosongkan kelasnya dulu.",
+                ], 422);
+            }
+
             $student->school_unit_id = $unit->id;
         }
 

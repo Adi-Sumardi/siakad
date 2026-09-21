@@ -6,6 +6,7 @@ import {
   BadgePercent,
   CheckCircle2,
   Filter,
+  Pencil,
   Plus,
   Search,
   Trash2,
@@ -73,6 +74,40 @@ export default function AdminDiscountPage() {
   const [showSchemeModal, setShowSchemeModal] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Set while the scheme modal is editing an existing row (null = creating).
+  // Code stays locked in edit mode - the catalogue key grants point to.
+  const [editingScheme, setEditingScheme] = useState<DiscountScheme | null>(null);
+
+  function openEditScheme(s: DiscountScheme) {
+    setEditingScheme(s);
+    setSchemeForm({
+      code: s.code,
+      name: s.name,
+      type: s.type,
+      value: String(s.value),
+      fee_type_ulid: s.fee_type?.ulid ?? "",
+      school_unit_ulid: s.school_unit?.ulid ?? "",
+      is_active: s.is_active,
+      notes: s.notes ?? "",
+    });
+    setShowSchemeModal(true);
+  }
+
+  function closeSchemeModal() {
+    setShowSchemeModal(false);
+    setEditingScheme(null);
+    setSchemeForm({
+      code: "",
+      name: "",
+      type: "percent",
+      value: "",
+      fee_type_ulid: "",
+      school_unit_ulid: "",
+      is_active: true,
+      notes: "",
+    });
+  }
 
   // Scheme Form
   const [schemeForm, setSchemeForm] = useState({
@@ -162,29 +197,32 @@ export default function AdminDiscountPage() {
     setSubmitting(true);
 
     try {
-      await api.post("/api/admin/discount-schemes", {
-        code: schemeForm.code,
-        name: schemeForm.name,
-        type: schemeForm.type,
-        value: parseFloat(schemeForm.value),
-        fee_type_ulid: schemeForm.fee_type_ulid || null,
-        school_unit_ulid: schemeForm.school_unit_ulid || null,
-        is_active: schemeForm.is_active,
-        notes: schemeForm.notes || null,
-      });
+      if (editingScheme) {
+        await api.patch(`/api/admin/discount-schemes/${editingScheme.ulid}`, {
+          name: schemeForm.name,
+          type: schemeForm.type,
+          value: parseFloat(schemeForm.value),
+          fee_type_ulid: schemeForm.fee_type_ulid || null,
+          school_unit_ulid: schemeForm.school_unit_ulid || null,
+          is_active: schemeForm.is_active,
+          notes: schemeForm.notes || null,
+        });
+        toast.success("Skema diskon berhasil diperbarui.");
+      } else {
+        await api.post("/api/admin/discount-schemes", {
+          code: schemeForm.code,
+          name: schemeForm.name,
+          type: schemeForm.type,
+          value: parseFloat(schemeForm.value),
+          fee_type_ulid: schemeForm.fee_type_ulid || null,
+          school_unit_ulid: schemeForm.school_unit_ulid || null,
+          is_active: schemeForm.is_active,
+          notes: schemeForm.notes || null,
+        });
+        toast.success("Skema diskon baru berhasil disimpan.");
+      }
 
-      toast.success("Skema diskon baru berhasil disimpan.");
-      setShowSchemeModal(false);
-      setSchemeForm({
-        code: "",
-        name: "",
-        type: "percent",
-        value: "",
-        fee_type_ulid: "",
-        school_unit_ulid: "",
-        is_active: true,
-        notes: "",
-      });
+      closeSchemeModal();
       loadData();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menyimpan skema diskon.");
@@ -396,14 +434,25 @@ export default function AdminDiscountPage() {
                       </Badge>
                     </td>
                     <td className="px-5 py-4 text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteScheme(s.ulid, s.name)}
-                        className="text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openEditScheme(s)}
+                          className="text-muted-foreground hover:text-foreground"
+                          title="Edit skema"
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteScheme(s.ulid, s.name)}
+                          className="text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -492,9 +541,13 @@ export default function AdminDiscountPage() {
       {showSchemeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
           <div className="w-full max-w-lg rounded-2xl bg-card p-6 shadow-2xl border border-border">
-            <h2 className="text-lg font-bold text-foreground">Tambah Skema Diskon Baru</h2>
+            <h2 className="text-lg font-bold text-foreground">
+              {editingScheme ? `Edit Skema: ${editingScheme.name}` : "Tambah Skema Diskon Baru"}
+            </h2>
             <p className="text-xs text-muted-foreground mt-1">
-              Buat aturan potongan biaya atau beasiswa baru.
+              {editingScheme
+                ? "Kode terkunci - identitas katalog yang dipakai penetapan diskon siswa."
+                : "Buat aturan potongan biaya atau beasiswa baru."}
             </p>
 
             <form onSubmit={handleCreateScheme} className="mt-5 space-y-4">
@@ -506,8 +559,9 @@ export default function AdminDiscountPage() {
                     placeholder="misal: beasiswa_prestasi"
                     value={schemeForm.code}
                     onChange={(e) => setSchemeForm({ ...schemeForm, code: e.target.value.toLowerCase().replace(/\s+/g, "_") })}
+                    readOnly={!!editingScheme}
                     required
-                    className="mt-1"
+                    className={`mt-1 ${editingScheme ? "bg-muted/40 text-muted-foreground" : ""}`}
                   />
                 </div>
                 <div>
@@ -595,11 +649,11 @@ export default function AdminDiscountPage() {
               </div>
 
               <div className="flex justify-end gap-2.5 pt-3">
-                <Button type="button" variant="outline" onClick={() => setShowSchemeModal(false)}>
+                <Button type="button" variant="outline" onClick={closeSchemeModal}>
                   Batal
                 </Button>
                 <Button type="submit" disabled={submitting}>
-                  {submitting ? "Menyimpan..." : "Simpan Skema"}
+                  {submitting ? "Menyimpan..." : editingScheme ? "Simpan Perubahan" : "Simpan Skema"}
                 </Button>
               </div>
             </form>

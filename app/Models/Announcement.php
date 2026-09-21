@@ -82,7 +82,14 @@ class Announcement extends Model
      */
     public function scopeVisibleTo($query, ?User $user)
     {
-        if (! $user || $user->isSuperAdmin()) {
+        if (! $user) {
+            // Fail closed: no caller today passes null, but if one ever does
+            // (a new route, a refactor), "show every notice" is the wrong
+            // default for a scope whose whole job is deciding visibility.
+            return $query->whereRaw('1 = 0');
+        }
+
+        if ($user->isSuperAdmin()) {
             return $query;
         }
 

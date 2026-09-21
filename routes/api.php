@@ -10,7 +10,6 @@ use App\Http\Controllers\Api\Admin\BillingRunController;
 use App\Http\Controllers\Api\Admin\ClassroomController;
 use App\Http\Controllers\Api\Admin\DailyAttendanceSessionController;
 use App\Http\Controllers\Api\Admin\DailyAttendanceSettingController;
-use App\Http\Controllers\Api\Admin\DashboardChartController;
 use App\Http\Controllers\Api\Admin\DashboardSummaryController;
 use App\Http\Controllers\Api\Admin\DiscountController;
 use App\Http\Controllers\Api\Admin\FailedJobController;
@@ -228,8 +227,8 @@ Route::middleware(['auth:sanctum', 'active'])->prefix('files')->group(function (
  * alone would let one unit's admin open another unit's student.
  */
 Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->group(function () {
-    Route::get('/dashboard/billing-chart', [DashboardChartController::class, 'billingChart']);
-    Route::get('/dashboard/achievements-chart', [DashboardChartController::class, 'achievementsChart']);
+    // (billing-chart / achievements-chart were removed 2026-09-21: no screen
+    // ever read them - everything visual lives in /dashboard/summary.)
     Route::get('/dashboard/summary', [DashboardSummaryController::class, 'summary']);
     Route::get('/students', [StudentController::class, 'index']);
     // The named students behind the dashboard's watchlist counts (T20) -
