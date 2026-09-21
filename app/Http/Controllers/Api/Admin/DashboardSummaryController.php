@@ -45,7 +45,12 @@ class DashboardSummaryController extends Controller
         $billingLabel = $billingPeriod === 'year' && $year?->year
             ? 'TA '.$year->year
             : 'Semua periode';
-        $term = $year?->activeTerm() ?? $year?->terms()->latest('starts_on')->first();
+        // One definition of "the running semester" for the whole app: the
+        // active term, exactly what the grade/point write lanes file under.
+        // The old derivation here (active TA -> its active term -> else its
+        // latest term) could disagree with Term::current() right after a
+        // year rollover, showing numbers from a semester nobody writes to.
+        $term = Term::current();
         $prevTerm = $watchlist->previousTerm($term);
 
         $units = SchoolUnit::active()->ordered()

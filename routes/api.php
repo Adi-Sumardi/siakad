@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\Admin\ScheduleController;
 use App\Http\Controllers\Api\Admin\SchoolUnitController;
 use App\Http\Controllers\Api\Admin\StudentController;
 use App\Http\Controllers\Api\Admin\SubjectController;
+use App\Http\Controllers\Api\Admin\TermController;
 use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\Auth\InvitationController;
 use App\Http\Controllers\Api\Auth\OtpController;
@@ -398,6 +399,12 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     // Academic year management
     Route::post('/academic-years', [ReferenceController::class, 'storeAcademicYear']);
     Route::post('/academic-years/{academicYear}/activate', [ReferenceController::class, 'activateAcademicYear']);
+
+    // Semester (term) management - the December/July flip. Creating and
+    // activating a semester is central-only, same line as its academic year:
+    // every write lane in every unit files under the one active term.
+    Route::post('/terms', [TermController::class, 'store']);
+    Route::post('/terms/{term}/activate', [TermController::class, 'activate']);
 
     // School-wide holiday calendar: on a listed date no unit's daily
     // attendance opens, so a national holiday can never sweep the school

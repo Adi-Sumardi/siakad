@@ -176,9 +176,20 @@ class ImportController extends Controller
                 // Handle Classroom & Enrollment
                 $kelasName = $data['kelas'] ?? '';
                 if (! empty($kelasName)) {
-                    // Try to parse tingkat e.g. "1-A" -> 1, "7B" -> 7, "TK-A" -> 0
+                    // Try to parse tingkat e.g. "1-A" -> 1, "7B" -> 7. A name
+                    // with no number is only valid in the kindergarten
+                    // jenjang, whose rung on the ladder is 0 ("TK-A" -> 0) -
+                    // the old null made the classroom permanently invisible
+                    // as a promotion target/source (tingkat+1 finds nothing).
                     preg_match('/\d+/', $kelasName, $matches);
-                    $tingkat = ! empty($matches[0]) ? (int) $matches[0] : null;
+
+                    if (! empty($matches[0])) {
+                        $tingkat = (int) $matches[0];
+                    } elseif (in_array((string) $unit->jenjang_group, ['pg', 'ra', 'tk'], true)) {
+                        $tingkat = 0;
+                    } else {
+                        $tingkat = null;
+                    }
 
                     $classroom = Classroom::firstOrCreate(
                         [

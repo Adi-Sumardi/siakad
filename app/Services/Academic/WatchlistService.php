@@ -2,7 +2,6 @@
 
 namespace App\Services\Academic;
 
-use App\Models\AcademicYear;
 use App\Models\Term;
 use Illuminate\Support\Collection;
 
@@ -129,31 +128,22 @@ class WatchlistService
             ->map(fn (Collection $finals) => round($finals->avg(), 2));
     }
 
-    /** The term before this one: earlier term in the same year, else the previous year's matching/latest term. */
+    /**
+     * The term immediately before this one: the latest term that starts
+     * earlier, across year boundaries too. Strictly chronological - the old
+     * cross-year branch matched by NAME first ("ganjil vs ganjil a year
+     * apart"), which skipped the genap sitting directly in between and made
+     * the grade-drop detector compare against a year-old baseline.
+     */
     public function previousTerm(?Term $term): ?Term
     {
         if (! $term) {
             return null;
         }
 
-        $prev = Term::where('academic_year_id', $term->academic_year_id)
+        return Term::query()
             ->where('starts_on', '<', $term->starts_on)
             ->orderByDesc('starts_on')
             ->first();
-
-        if ($prev) {
-            return $prev;
-        }
-
-        $prevYear = AcademicYear::where('starts_on', '<', $term->academicYear->starts_on)
-            ->latest('starts_on')
-            ->first();
-
-        if (! $prevYear) {
-            return null;
-        }
-
-        return $prevYear->terms()->where('name', $term->name)->first()
-            ?? $prevYear->terms()->latest('starts_on')->first();
     }
 }

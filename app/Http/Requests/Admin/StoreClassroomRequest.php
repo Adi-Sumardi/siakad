@@ -20,7 +20,7 @@ class StoreClassroomRequest extends FormRequest
     {
         return [
             'name' => 'required|string|max:60',
-            'tingkat' => 'required|integer|min:1|max:12',
+            'tingkat' => 'required|integer|min:0|max:12',
             'school_unit_code' => 'nullable|exists:school_units,code',
             'academic_year_ulid' => 'required|string',
             'capacity' => 'nullable|integer|min:1|max:100',

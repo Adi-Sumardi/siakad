@@ -15,7 +15,7 @@ class UpdateClassroomRequest extends FormRequest
     {
         return [
             'name' => 'sometimes|string|max:60',
-            'tingkat' => 'sometimes|integer|min:1|max:12',
+            'tingkat' => 'sometimes|integer|min:0|max:12',
             'capacity' => 'nullable|integer|min:1|max:100',
             'homeroom_teacher_ulid' => 'nullable|string',
             'is_active' => 'boolean',

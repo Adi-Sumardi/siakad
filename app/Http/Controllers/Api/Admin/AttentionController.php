@@ -28,9 +28,11 @@ class AttentionController extends Controller
         $user = $request->user();
         $validated = $request->validated();
 
-        // Same period resolution as DashboardSummaryController::summary().
+        // Same period resolution as DashboardSummaryController::summary():
+        // Term::current() is the one definition of the running semester, so
+        // the tile count and this name list behind it cannot disagree.
         $year = AcademicYear::current() ?? AcademicYear::latest('starts_on')->first();
-        $term = $year?->activeTerm() ?? $year?->terms()->latest('starts_on')->first();
+        $term = Term::current();
         $prevTerm = $watchlist->previousTerm($term);
 
         $students = Student::query()

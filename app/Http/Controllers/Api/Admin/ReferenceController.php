@@ -43,12 +43,19 @@ class ReferenceController extends Controller
         ]);
     }
 
-    /** Every semester that has ever existed - so a past one stays pickable for grade oversight and archived rapor downloads once a newer one activates. */
+    /** Every semester that has ever existed - so a past one stays pickable for grade oversight and archived rapor downloads once a newer one activates. Year/dates included so the term-management screen can group and create without a second round-trip. */
     public function terms(): JsonResponse
     {
         return response()->json([
-            'terms' => Term::orderByDesc('starts_on')->get()->map(fn (Term $t) => [
-                'ulid' => $t->ulid, 'label' => $t->label(), 'is_active' => $t->is_active,
+            'terms' => Term::with('academicYear')->orderByDesc('starts_on')->get()->map(fn (Term $t) => [
+                'ulid' => $t->ulid,
+                'label' => $t->label(),
+                'is_active' => $t->is_active,
+                'name' => $t->name,
+                'academic_year_ulid' => $t->academicYear?->ulid,
+                'academic_year' => $t->academicYear?->year,
+                'starts_on' => $t->starts_on?->format('Y-m-d'),
+                'ends_on' => $t->ends_on?->format('Y-m-d'),
             ]),
         ]);
     }

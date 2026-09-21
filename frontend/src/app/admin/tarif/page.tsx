@@ -67,6 +67,17 @@ type Rate = {
 
 type Option = { ulid: string; code?: string; label?: string; year?: string; is_active?: boolean; starts_on?: string; ends_on?: string };
 
+type TermRow = {
+  ulid: string;
+  label: string;
+  is_active: boolean;
+  name: string;
+  academic_year_ulid: string | null;
+  academic_year: string | null;
+  starts_on: string | null;
+  ends_on: string | null;
+};
+
 const RECURRENCE_LABEL: Record<string, string> = {
   monthly: "Bulanan (SPP)",
   per_term: "Per Semester",
@@ -142,6 +153,15 @@ export default function FeeRatesPage() {
   const [newYearName, setNewYearName] = useState("2027/2028");
   const [newYearStarts, setNewYearStarts] = useState("2027-07-01");
   const [newYearEnds, setNewYearEnds] = useState("2028-06-30");
+
+  // Semester (term) management - the December/July flip lives next to the
+  // year it belongs to. Loading only while the modal is open keeps the
+  // page's initial payload unchanged.
+  const [terms, setTerms] = useState<TermRow[]>([]);
+  const [newTermYear, setNewTermYear] = useState("");
+  const [newTermName, setNewTermName] = useState("ganjil");
+  const [newTermStarts, setNewTermStarts] = useState("");
+  const [newTermEnds, setNewTermEnds] = useState("");
 
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
@@ -275,6 +295,45 @@ export default function FeeRatesPage() {
       loadData();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal mengaktifkan tahun ajaran.");
+    }
+  }
+
+  async function loadTerms() {
+    const d = await api.get<{ terms: TermRow[] }>("/api/admin/terms");
+    setTerms(d.terms);
+    setNewTermYear((prev) => prev
+      || d.terms.find((t) => t.is_active)?.academic_year_ulid
+      || years.find((y) => y.is_active)?.ulid
+      || "");
+    return d.terms;
+  }
+
+  async function handleCreateTerm(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      await api.post("/api/admin/terms", {
+        academic_year_ulid: newTermYear,
+        name: newTermName,
+        starts_on: newTermStarts,
+        ends_on: newTermEnds,
+      });
+      toast.success(`Semester ${newTermName} berhasil ditambahkan.`);
+      await loadTerms();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal menambahkan semester.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleActivateTerm(termUlid: string, termLabel: string) {
+    try {
+      await api.post(`/api/admin/terms/${termUlid}/activate`);
+      toast.success(`Semester ${termLabel} kini aktif — semester lain otomatis dinonaktifkan.`);
+      await loadTerms();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengaktifkan semester.");
     }
   }
 
@@ -478,7 +537,10 @@ export default function FeeRatesPage() {
 
         <div className="flex flex-wrap items-center gap-2">
           <Button
-            onClick={() => setShowYearModal(true)}
+            onClick={() => {
+              setShowYearModal(true);
+              loadTerms().catch(() => toast.error("Gagal memuat daftar semester."));
+            }}
             variant="outline"
             size="sm"
             className="gap-1.5 font-semibold text-xs h-9"
@@ -864,6 +926,95 @@ export default function FeeRatesPage() {
                 </Button>
               </div>
             </form>
+
+            {/* KELOLA SEMESTER - pergantian semester (Desember/Juli) tanpa menyentuh database */}
+            <div className="border-t border-border pt-4 space-y-3 text-xs">
+              <p className="font-bold text-foreground">Kelola Semester:</p>
+              <p className="text-[11px] text-muted-foreground -mt-2">
+                Hanya satu semester boleh aktif — mengaktifkan satu otomatis menonaktifkan lainnya. Semua input nilai,
+                poin, dan presensi tercatat di semester aktif.
+              </p>
+
+              <div className="space-y-2 max-h-56 overflow-y-auto">
+                {terms.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground italic">Belum ada semester terdaftar.</p>
+                )}
+                {terms.map((t) => (
+                  <div
+                    key={t.ulid}
+                    className={`flex items-center justify-between p-3 rounded-xl border transition-colors ${
+                      t.is_active ? "border-primary bg-primary/10" : "border-border bg-card"
+                    }`}
+                  >
+                    <div>
+                      <p className="font-bold text-sm text-foreground flex items-center gap-2">
+                        <span>{t.label}</span>
+                        {t.is_active && <Badge variant="primary" className="text-[10px]">Aktif</Badge>}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {t.starts_on || "?"} s/d {t.ends_on || "?"}
+                      </p>
+                    </div>
+
+                    {!t.is_active && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleActivateTerm(t.ulid, t.label)}
+                        className="text-xs font-semibold h-8"
+                      >
+                        Jadikan Aktif
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <form onSubmit={handleCreateTerm} className="space-y-3 pt-1">
+                <p className="font-semibold text-foreground">Tambah Semester Baru:</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Tahun Ajaran</Label>
+                    <select
+                      value={newTermYear}
+                      onChange={(e) => setNewTermYear(e.target.value)}
+                      required
+                      className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Pilih tahun ajaran…</option>
+                      {years.map((y) => (
+                        <option key={y.ulid} value={y.ulid}>TA {y.year}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Nama Semester</Label>
+                    <Input
+                      value={newTermName}
+                      onChange={(e) => setNewTermName(e.target.value)}
+                      placeholder="ganjil / genap"
+                      required
+                      className="mt-1"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Tanggal Mulai</Label>
+                    <Input type="date" value={newTermStarts} onChange={(e) => setNewTermStarts(e.target.value)} required className="mt-1" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Tanggal Selesai</Label>
+                    <Input type="date" value={newTermEnds} onChange={(e) => setNewTermEnds(e.target.value)} required className="mt-1" />
+                  </div>
+                </div>
+                <div className="flex justify-end pt-1">
+                  <Button type="submit" disabled={submitting} className="font-bold shadow-xs">
+                    {submitting ? "Menyimpan…" : "Simpan Semester"}
+                  </Button>
+                </div>
+              </form>
+            </div>
           </Card>
         </div>
       )}

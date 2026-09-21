@@ -22,6 +22,18 @@ class SchoolUnit extends Model
         'ra' => 'tk', 'pg' => 'tk', 'tk' => 'sd', 'sd' => 'smp', 'smp' => 'sma', 'sma' => null,
     ];
 
+    /**
+     * The grade rung each jenjang starts its classroom numbering at. SD-SMP-
+     * SMA are the national ladder (1-6, 7-9, 10-12) where "one grade up"
+     * simply continues across a jenjang change; below SD there is no number
+     * in class names ("TK-A"), so kindergarten rungs are 0 and promotion
+     * across a jenjang boundary lands on the destination's entry rung
+     * instead of on source+1 (RA's "one up" is TK's 0, not 1).
+     */
+    private const ENTRY_TINGKAT = [
+        'pg' => 0, 'ra' => 0, 'tk' => 0, 'sd' => 1, 'smp' => 7, 'sma' => 10,
+    ];
+
     protected $fillable = [
         'code',
         'label',
@@ -81,6 +93,12 @@ class SchoolUnit extends Model
     public function nextJenjangGroup(): ?string
     {
         return self::NEXT_JENJANG[(string) $this->jenjang_group] ?? null;
+    }
+
+    /** The tingkat a student ENTERS this jenjang at, or null for an unknown group. */
+    public static function entryTingkatFor(string $jenjangGroup): ?int
+    {
+        return self::ENTRY_TINGKAT[$jenjangGroup] ?? null;
     }
 
     /**

@@ -79,7 +79,7 @@ function NewClassroomForm({
       </div>
       <div className="flex flex-col gap-1.5">
         <Label>Tingkat</Label>
-        <Input type="number" min={1} max={12} value={tingkat} onChange={(e) => setTingkat(e.target.value)} required className="w-20" />
+        <Input type="number" min={0} max={12} value={tingkat} onChange={(e) => setTingkat(e.target.value)} required className="w-20" />
       </div>
       {isCentral && (
         <div className="flex flex-col gap-1.5">
@@ -314,7 +314,7 @@ export default function KelasPage() {
                 </div>
                 <div>
                   <Label className="text-xs">Tingkat</Label>
-                  <Input type="number" min={1} max={12} value={editForm.tingkat} onChange={(e) => setEditForm((f) => ({ ...f, tingkat: e.target.value }))} required className="mt-1" />
+                  <Input type="number" min={0} max={12} value={editForm.tingkat} onChange={(e) => setEditForm((f) => ({ ...f, tingkat: e.target.value }))} required className="mt-1" />
                 </div>
               </div>
               <div>

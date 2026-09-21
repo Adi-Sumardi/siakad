@@ -25,7 +25,10 @@ class DatabaseSeeder extends Seeder
     {
         $units = [
             ['code' => 'PG-SAKINAH', 'label' => 'Playgroup Sakinah Rawamangun', 'jenjang_group' => 'pg'],
-            ['code' => 'RA-SAKINAH', 'label' => 'RA Sakinah Kebayoran Baru', 'jenjang_group' => 'tk'],
+            // jenjang 'ra' (bukan 'tk'): NEXT_JENJANG('ra') = 'tk', jadi
+            // tamatan RA ditawarkan lanjut ke TK-13. Label lama 'tk'
+            // membuat RA dihitung langsung menuju SD - TK terlewati.
+            ['code' => 'RA-SAKINAH', 'label' => 'RA Sakinah Kebayoran Baru', 'jenjang_group' => 'ra'],
             ['code' => 'TK-13', 'label' => 'TKI Al Azhar 13 Rawamangun', 'jenjang_group' => 'tk'],
             ['code' => 'SD-13', 'label' => 'SDI Al Azhar 13 Rawamangun', 'jenjang_group' => 'sd'],
             ['code' => 'SMP-12', 'label' => 'SMPI Al Azhar 12 Rawamangun', 'jenjang_group' => 'smp'],

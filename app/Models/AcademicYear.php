@@ -40,12 +40,23 @@ class AcademicYear extends Model
      * Wrapped in a transaction and written as "clear all, then set one" because
      * two active years would make every "current year" query ambiguous - and the
      * first thing that reads it is the SPP generator.
+     *
+     * A year rolling over also closes the OLD year's still-lit semesters:
+     * grades and points file under Term::current(), and an old term left
+     * active would keep collecting writes nobody reads while the new year
+     * has no open semester yet (an honest "no active semester" beats a
+     * silently wrong one).
      */
     public function activate(): void
     {
         DB::transaction(function () {
             static::query()->where('is_active', true)->update(['is_active' => false]);
             static::whereKey($this->getKey())->update(['is_active' => true]);
+
+            Term::query()
+                ->where('is_active', true)
+                ->where('academic_year_id', '!=', $this->getKey())
+                ->update(['is_active' => false]);
         });
     }
 
