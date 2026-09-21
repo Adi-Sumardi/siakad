@@ -54,6 +54,10 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  // The same public link serves the masuk window in the morning and the
+  // pulang window in the afternoon - whichever the server says is live.
+  const isPulang = info?.session?.type === "pulang";
+
   // The scanner needs to submit the moment it reads a code, but that closure
   // goes stale the moment state changes - the hook keeps the latest callback
   // behind a ref instead of re-running the stream for every keystroke.
@@ -72,9 +76,13 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
         setInfo(d);
 
         if (d.state !== "open") {
+          // The state carries no reason text, so rebuild it here; the window
+          // may be masuk or pulang now, and "closed" covers both "already
+          // ended" and "not started yet" - the times disambiguate for humans.
+          const jenis = d.session?.type === "pulang" ? "pulang" : "masuk";
           const reason =
             d.state === "closed"
-              ? `Sesi absen masuk sudah ditutup${d.session ? ` pukul ${d.session.closes_at} WIB` : ""}.`
+              ? `Sesi absen ${jenis}${d.session ? ` ${d.session.opens_at}–${d.session.closes_at} WIB` : ""} sedang tidak terbuka.`
               : d.state === "inactive"
                 ? "Presensi harian unit ini belum diaktifkan."
                 : d.state === "wrong_mode"
@@ -231,7 +239,7 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
           <div className="flex flex-col gap-4">
             <QrCode className="mx-auto size-12 text-primary" />
             <div>
-              <h1 className="text-lg font-bold">Absen Masuk</h1>
+              <h1 className="text-lg font-bold">Absen {info?.session?.type === "pulang" ? "Pulang" : "Masuk"}</h1>
               <p className="text-sm text-muted-foreground">
                 {info?.session && `Jendela absen ${info.session.opens_at}–${info.session.closes_at} WIB`}
                 {info?.session?.late_after && ` · terlambat lewat ${info.session.late_after}`}
@@ -369,7 +377,13 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
         {screen.step === "success" && (
           <div className="flex flex-col items-center gap-3 py-6">
             <CheckCircle2 className={`size-12 ${screen.late ? "text-warn" : "text-good"}`} />
-            <p className="text-lg font-bold">{screen.late ? "Tercatat hadir — terlambat" : "Berhasil dicatat hadir"}</p>
+            <p className="text-lg font-bold">
+              {isPulang
+                ? "Berhasil dicatat pulang"
+                : screen.late
+                  ? "Tercatat hadir — terlambat"
+                  : "Berhasil dicatat hadir"}
+            </p>
             <p className="text-sm text-muted-foreground">
               {screen.name} · pukul {screen.jam} WIB
             </p>
@@ -379,7 +393,9 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
         {screen.step === "already" && (
           <div className="flex flex-col items-center gap-3 py-6">
             <CheckCircle2 className="size-12 text-muted-foreground" />
-            <p className="text-sm font-medium">Sudah tercatat hadir sebelumnya hari ini.</p>
+            <p className="text-sm font-medium">
+              {isPulang ? "Sudah tercatat pulang sebelumnya hari ini." : "Sudah tercatat hadir sebelumnya hari ini."}
+            </p>
             {screen.name && <p className="text-sm text-muted-foreground">{screen.name}</p>}
           </div>
         )}

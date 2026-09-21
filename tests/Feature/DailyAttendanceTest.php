@@ -818,7 +818,18 @@ class DailyAttendanceTest extends TestCase
         $this->assertSame('15:00:00', $session->opens_at->format('H:i:s'));
         $this->assertSame('16:00:00', $session->closes_at->format('H:i:s'));
 
-        // The public link now tells the student the new window, not 08:00.
+        // Before the new window starts, the link honestly says closed - "open"
+        // must mean "inside the window", never "not yet closed" (that let the
+        // gate accept scans from midnight).
+        $this->getJson('/api/absen/publik-smp')
+            ->assertStatus(200)
+            ->assertJsonPath('state', 'closed')
+            ->assertJsonPath('session.opens_at', '15:00');
+
+        // The public link now tells the student the new window, not 08:00 -
+        // and once the window actually starts, it is open.
+        Carbon::setTestNow($this->monday->copy()->setTime(15, 10)->utc());
+
         $this->getJson('/api/absen/publik-smp')
             ->assertStatus(200)
             ->assertJsonPath('state', 'open')
@@ -867,7 +878,11 @@ class DailyAttendanceTest extends TestCase
         $this->assertSame(0, $bolos->currentEnrollment()->fresh()->absent_count);
         $this->assertSame('sakit', DailyRecord::where('student_id', $sakit->id)->first()->attendance_status);
 
-        // And the freed student can actually check in at the gate.
+        // And the freed student can actually check in at the gate - inside
+        // the reopened window (15:00-16:00), not at 08:05 where the old
+        // isOpen would have happily accepted a scan before opening time.
+        Carbon::setTestNow($this->monday->copy()->setTime(15, 10)->utc());
+
         $this->postJson('/api/absen/publik-smp/check-in', [
             'nis' => '20034',
             'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($masuk->ulid)),

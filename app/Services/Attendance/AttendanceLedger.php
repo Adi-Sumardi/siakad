@@ -4,6 +4,7 @@ namespace App\Services\Attendance;
 
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
+use App\Models\DailyRecord;
 use App\Models\Student;
 use App\Models\Term;
 use App\Models\User;
@@ -79,6 +80,20 @@ class AttendanceLedger
                     ->where('student_id', '!=', $student->id)
                     ->exists()) {
                     throw new RuntimeException('Perangkat ini sudah dipakai presensi siswa lain hari ini.');
+                }
+
+                if ($deviceHash && DailyRecord::query()
+                    ->where('device_hash', $deviceHash)
+                    ->active()
+                    ->whereDate('date', $session->occurred_on)
+                    ->where('student_id', '!=', $student->id)
+                    ->exists()) {
+                    // Cross-layer: the daily (gate) and lesson tables each
+                    // kept their own device ledger, so one phone could serve
+                    // student A at the morning gate and student B in first
+                    // period. One device, one student, one day - wherever
+                    // the scan happens.
+                    throw new RuntimeException('Perangkat ini sudah dipakai absen siswa lain hari ini.');
                 }
 
                 $schedule = $session->classSchedule;

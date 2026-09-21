@@ -364,8 +364,8 @@ class DailyAttendanceService
      */
     public function selfCheckIn(DailySession $session, Student $student, array $input): DailyRecord
     {
-        if ($session->type !== 'masuk') {
-            throw new RuntimeException('Check-in mandiri hanya untuk sesi absen masuk.');
+        if (! in_array($session->type, ['masuk', 'pulang'], true)) {
+            throw new RuntimeException('Jenis sesi absen tidak dikenal.');
         }
 
         $setting = $session->schoolUnit->dailyAttendanceSetting;
@@ -425,11 +425,25 @@ class DailyAttendanceService
             $record = DB::transaction(function () use ($session, $student, $term, $at, $isLate, $deviceHash, $ipHash) {
                 // Serialise concurrent scans for this session the same way
                 // AttendanceLedger::checkIn does: lock the window, then look.
-                DailySession::whereKey($session->id)->lockForUpdate()->first();
+                $fresh = DailySession::whereKey($session->id)->lockForUpdate()->first();
+
+                // The close-sweep takes this same lock, so by the time we
+                // hold it the window's fate is final: a scan that raced the
+                // closing minute must lose cleanly here, not write a record
+                // into an already-swept window. The opens edge is re-checked
+                // too - the window is 'open' in the database before it
+                // starts, and that must not be a side door.
+                if (! $fresh || $fresh->status !== 'open' || $at->lt($fresh->opens_at) || $at->gte($fresh->closes_at)) {
+                    throw new RuntimeException('Jendela absen belum dibuka atau sudah ditutup.');
+                }
+
+                $alreadyMessage = $session->type === 'pulang'
+                    ? 'Sudah tercatat pulang sebelumnya.'
+                    : 'Sudah tercatat hadir sebelumnya.';
 
                 if (DailyRecord::where('daily_session_id', $session->id)
                     ->where('student_id', $student->id)->active()->exists()) {
-                    throw new RuntimeException('Sudah tercatat hadir sebelumnya.');
+                    throw new RuntimeException($alreadyMessage);
                 }
 
                 if ($deviceHash && DailyRecord::query()
@@ -445,6 +459,20 @@ class DailyAttendanceService
                     // repeat check-in at pulang is exempt - the rule binds the
                     // device to one student, not to one scan.
                     throw new RuntimeException('Perangkat ini sudah dipakai absen siswa lain hari ini.');
+                }
+
+                if ($deviceHash && AttendanceRecord::query()
+                    ->where('device_hash', $deviceHash)
+                    ->active()
+                    ->whereDate('occurred_on', $session->date)
+                    ->where('student_id', '!=', $student->id)
+                    ->exists()) {
+                    // The same rule across LAYERS: the daily (gate) and
+                    // lesson tables each kept their own device ledger, so a
+                    // phone could serve student A at the gate and student B
+                    // in first period. One device, one student, one day -
+                    // wherever the scan happens.
+                    throw new RuntimeException('Perangkat ini sudah dipakai presensi siswa lain hari ini.');
                 }
 
                 return DailyRecord::create([
@@ -467,7 +495,9 @@ class DailyAttendanceService
             // Which one tripped decides the message the student sees.
             if (DailyRecord::where('daily_session_id', $session->id)
                 ->where('student_id', $student->id)->active()->exists()) {
-                throw new RuntimeException('Sudah tercatat hadir sebelumnya.');
+                throw new RuntimeException($session->type === 'pulang'
+                    ? 'Sudah tercatat pulang sebelumnya.'
+                    : 'Sudah tercatat hadir sebelumnya.');
             }
 
             throw new RuntimeException('Perangkat ini sudah dipakai absen siswa lain hari ini.');
@@ -686,33 +716,45 @@ class DailyAttendanceService
         $term = Term::current();
 
         [$missed, $records] = DB::transaction(function () use ($session, $by, $term) {
-            $session->forceFill([
+            // Lock the window row FIRST, then re-decide on fresh state. The
+            // closing minute is exactly when a scan and the sweep can land in
+            // the same second; without this lock both ran, and a student who
+            // scanned on time could still be swept into alpa (or the scan
+            // wrote into a window the sweep had just declared closed).
+            // selfCheckIn takes the same lock, so the two are serialised.
+            $fresh = DailySession::whereKey($session->id)->lockForUpdate()->first();
+
+            if (! $fresh || $fresh->status === 'closed') {
+                return [collect(), collect()];
+            }
+
+            $fresh->forceFill([
                 'status' => 'closed',
                 'closed_at' => now(),
             ])->save();
 
-            if ($session->type !== 'masuk' || ! $term || $this->isHoliday($session->date)) {
+            if ($fresh->type !== 'masuk' || ! $term || $this->isHoliday($fresh->date)) {
                 // No auto-alpa on a holiday: the school was shut, nobody
                 // "missed" anything.
                 return [collect(), collect()];
             }
 
-            $marked = DailyRecord::where('daily_session_id', $session->id)
+            $marked = DailyRecord::where('daily_session_id', $fresh->id)
                 ->active()
                 ->pluck('student_id');
 
             $missed = Student::query()
                 ->active()
-                ->where('school_unit_id', $session->school_unit_id)
+                ->where('school_unit_id', $fresh->school_unit_id)
                 ->whereNotIn('id', $marked)
                 ->get();
 
             $records = $missed->map(fn (Student $student) => DailyRecord::create([
-                'daily_session_id' => $session->id,
+                'daily_session_id' => $fresh->id,
                 'student_id' => $student->id,
                 'classroom_id' => $student->currentEnrollment()?->classroom_id,
                 'term_id' => $term->id,
-                'date' => $session->date,
+                'date' => $fresh->date,
                 'attendance_status' => 'alpa',
                 'source' => 'tu',
                 'description' => self::AUTO_SWEEP_DESCRIPTION,

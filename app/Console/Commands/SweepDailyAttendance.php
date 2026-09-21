@@ -2,7 +2,10 @@
 
 namespace App\Console\Commands;
 
+use App\Models\DailyAttendanceSetting;
 use App\Models\DailySession;
+use App\Models\Holiday;
+use App\Models\Term;
 use App\Services\Attendance\DailyAttendanceService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -34,9 +37,46 @@ class SweepDailyAttendance extends Command
     {
         $now = Carbon::now('Asia/Jakarta');
 
+        // The dry run must come FIRST and write nothing: ensureSessionsForDate
+        // creates rows (firstOrCreate), so the old order - open pass, then
+        // check the flag - left sessions behind on a --dry-run, the exact
+        // opposite of the option's own description.
+        if ($this->option('dry-run')) {
+            $willOpen = 0;
+            $holiday = Holiday::query()->whereDate('date', $now->toDateString())->exists();
+            $hasTerm = Term::current() !== null;
+
+            foreach (DailyAttendanceSetting::query()->where('enabled', true)->get() as $setting) {
+                if (! $hasTerm || $holiday || ! $setting->runsOn($now->dayOfWeekIso)) {
+                    continue;
+                }
+
+                foreach ($setting->pulang_enabled ? ['masuk', 'pulang'] : ['masuk'] as $type) {
+                    $exists = DailySession::query()
+                        ->where('school_unit_id', $setting->school_unit_id)
+                        ->whereDate('date', $now->toDateString())
+                        ->where('type', $type)
+                        ->exists();
+
+                    if (! $exists) {
+                        $willOpen++;
+                    }
+                }
+            }
+
+            $due = DailySession::query()
+                ->where('status', 'open')
+                ->where('closes_at', '<=', $now)
+                ->count();
+
+            $this->info("Dry run: {$willOpen} sesi akan dibuka, {$due} akan ditutup.");
+
+            return self::SUCCESS;
+        }
+
         $opened = 0;
 
-        foreach (\App\Models\DailyAttendanceSetting::query()
+        foreach (DailyAttendanceSetting::query()
             ->where('enabled', true)
             ->with('schoolUnit')
             ->get() as $setting) {
@@ -49,12 +89,6 @@ class SweepDailyAttendance extends Command
             ->where('status', 'open')
             ->where('closes_at', '<=', $now)
             ->get();
-
-        if ($this->option('dry-run')) {
-            $this->info("Dry run: {$opened} sesi akan dibuka, ".count($due).' akan ditutup.');
-
-            return self::SUCCESS;
-        }
 
         $swept = 0;
 

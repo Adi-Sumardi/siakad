@@ -5,12 +5,14 @@ namespace App\Services\Attendance;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\ClassSchedule;
+use App\Models\Holiday;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 /**
  * Opens and closes the "roll call windows" a teacher runs one lesson period
@@ -29,6 +31,13 @@ class AttendanceSessionService
      */
     public function open(ClassSchedule $schedule, Carbon $date, User $openedBy): AttendanceSession
     {
+        // The same calendar the daily layer consults: a national holiday
+        // opens no lesson sessions either, or the school ends up with
+        // attendance on a day the gates never opened.
+        if (Holiday::query()->whereDate('date', $date->toDateString())->exists()) {
+            throw new RuntimeException('Hari ini hari libur sekolah - tidak ada sesi pelajaran yang bisa dibuka.');
+        }
+
         $existing = AttendanceSession::where('class_schedule_id', $schedule->id)
             ->whereDate('occurred_on', $date->toDateString())
             ->first();

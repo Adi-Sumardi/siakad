@@ -54,8 +54,15 @@ class DailySession extends Model
 
     public function isOpen(?Carbon $now = null): bool
     {
+        $now ??= Carbon::now('Asia/Jakarta');
+
+        // Both edges, not just the close: the scheduler creates a window
+        // 'open' before its start time, so honouring only closes_at let the
+        // gate accept scans from midnight - "open" must mean "inside the
+        // window", never "after closing has not happened yet".
         return $this->status === 'open'
-            && ($now ?? Carbon::now('Asia/Jakarta'))->lt($this->closes_at);
+            && $now->gte($this->opens_at)
+            && $now->lt($this->closes_at);
     }
 
     /**

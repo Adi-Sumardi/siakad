@@ -139,7 +139,16 @@ class DailyGateController extends Controller
         }
 
         if (! $session->isOpen()) {
-            return [$setting, null, response()->json(['message' => 'Sesi absen masuk sudah ditutup.'], 410)];
+            $now = Carbon::now('Asia/Jakarta');
+            $label = $session->type === 'pulang' ? 'pulang' : 'masuk';
+
+            if ($now->lt($session->opens_at)) {
+                return [$setting, null, response()->json([
+                    'message' => 'Jendela absen '.$label.' belum dibuka - mulai pukul '.$session->opens_at?->format('H:i').' WIB.',
+                ], 410)];
+            }
+
+            return [$setting, null, response()->json(['message' => 'Sesi absen '.$label.' sudah ditutup.'], 410)];
         }
 
         return [$setting, $session, null];
@@ -154,10 +163,21 @@ class DailyGateController extends Controller
 
     private function todaySession(DailyAttendanceSetting $setting): ?DailySession
     {
-        return DailySession::where('school_unit_id', $setting->school_unit_id)
-            ->whereDate('date', Carbon::now('Asia/Jakarta')->toDateString())
-            ->where('type', 'masuk')
-            ->first();
+        $today = Carbon::now('Asia/Jakarta')->toDateString();
+
+        $sessions = DailySession::where('school_unit_id', $setting->school_unit_id)
+            ->whereDate('date', $today)
+            ->whereIn('type', ['masuk', 'pulang'])
+            ->get();
+
+        // The gate serves whichever window is live right now - the same link
+        // and screen carry the afternoon pulang too. When none is open (the
+        // midday gap, or before/after everything), fall back to the window
+        // nearest in time so the page can honestly say which one and when.
+        return $sessions->first(fn (DailySession $s) => $s->isOpen())
+            ?? $sessions->sortBy(fn (DailySession $s) => abs(
+                Carbon::now('Asia/Jakarta')->getTimestamp() - $s->opens_at?->getTimestamp()
+            ))->first();
     }
 
     private function studentIn(DailyAttendanceSetting $setting, string $nis): ?Student
