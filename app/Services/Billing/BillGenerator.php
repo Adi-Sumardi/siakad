@@ -467,15 +467,23 @@ class BillGenerator
         return now()->addDays(14);
     }
 
-    /** `spp:2026-2027:07` - stable for a given student, fee, and period. */
+    /**
+     * `spp:2026-2027:07` - stable for a given student, fee, and period.
+     *
+     * A `once` type pins to the year alone: appending the active term (the
+     * old non-monthly default) meant a run in semester ganjil and a re-run
+     * in genap minted two "once" bills for the same year.
+     */
     private function dedupKey(FeeType $type, AcademicYear $year, ?int $month, ?Term $term): string
     {
         $parts = [$type->code, str_replace('/', '-', $year->year)];
 
-        if ($month) {
-            $parts[] = str_pad((string) $month, 2, '0', STR_PAD_LEFT);
-        } elseif ($term) {
-            $parts[] = $term->name;
+        if ($type->recurrence !== 'once') {
+            if ($month) {
+                $parts[] = str_pad((string) $month, 2, '0', STR_PAD_LEFT);
+            } elseif ($term) {
+                $parts[] = $term->name;
+            }
         }
 
         return implode(':', $parts);

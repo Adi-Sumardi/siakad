@@ -35,6 +35,12 @@ class BillingApiClient
 
     public const PREFIX_EKSKUL_SMP55 = '802008';
 
+    public const PREFIX_CAMBRIDGE_SD = '802009';
+
+    public const PREFIX_CAMBRIDGE_SMP12 = '802010';
+
+    public const PREFIX_CAMBRIDGE_SMP55 = '802011';
+
     // Default Virtual Account 6-digit Prefixes for Bank Syariah Indonesia (BSI - Kode Bank 451)
     public const PREFIX_BSI_SPP = '365601';
 
@@ -51,6 +57,12 @@ class BillingApiClient
     public const PREFIX_BSI_EKSKUL_SMP12 = '365607';
 
     public const PREFIX_BSI_EKSKUL_SMP55 = '365608';
+
+    public const PREFIX_BSI_CAMBRIDGE_SD = '365609';
+
+    public const PREFIX_BSI_CAMBRIDGE_SMP12 = '365610';
+
+    public const PREFIX_BSI_CAMBRIDGE_SMP55 = '365611';
 
     private const TOKEN_CACHE_KEY = 'billing_api:access_token';
 
@@ -86,6 +98,26 @@ class BillingApiClient
                 str_contains($unitCode, 'SMP-12') || str_contains($unitCode, 'SMP12') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_smp12", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP12 : self::PREFIX_EKSKUL_SMP12),
                 str_contains($unitCode, 'SMP-55') || str_contains($unitCode, 'SMP55') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_smp55", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP55 : self::PREFIX_EKSKUL_SMP55),
                 default => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD),
+            };
+        }
+
+        // Cambridge bills only SD and the two SMP units (school decision
+        // 2026-09-22), so - unlike ekskul - an unmatched unit keeps null:
+        // TK/RA/PG/SMA must never mint a Cambridge VA. A missing unit falls
+        // back to the SD prefix so catalogue listings can show the type as
+        // VA-capable.
+        if (str_contains($normalizedFee, 'cambridge')) {
+            $unitCode = strtoupper((string) ($unit?->code ?? ''));
+
+            if ($unitCode === '') {
+                return (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.cambridge_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_CAMBRIDGE_SD : self::PREFIX_CAMBRIDGE_SD);
+            }
+
+            return match (true) {
+                str_contains($unitCode, 'SMP-12') || str_contains($unitCode, 'SMP12') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.cambridge_smp12", $bankKey === 'bsi' ? self::PREFIX_BSI_CAMBRIDGE_SMP12 : self::PREFIX_CAMBRIDGE_SMP12),
+                str_contains($unitCode, 'SMP-55') || str_contains($unitCode, 'SMP55') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.cambridge_smp55", $bankKey === 'bsi' ? self::PREFIX_BSI_CAMBRIDGE_SMP55 : self::PREFIX_CAMBRIDGE_SMP55),
+                str_contains($unitCode, 'SD') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.cambridge_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_CAMBRIDGE_SD : self::PREFIX_CAMBRIDGE_SD),
+                default => null,
             };
         }
 

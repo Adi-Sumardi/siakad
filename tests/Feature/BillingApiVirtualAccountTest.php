@@ -197,6 +197,132 @@ class BillingApiVirtualAccountTest extends TestCase
         $this->assertEquals('365608'.'2627'.str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55Bsi);
     }
 
+    /**
+     * Cambridge runs on its own per-unit prefixes (school decision
+     * 2026-09-22): SD 09, SMP-12 10, SMP-55 11 after ekskul's 05-08 - and,
+     * unlike ekskul, no prefix at all for units outside the program.
+     */
+    public function test_it_generates_unit_specific_va_prefixes_for_cambridge(): void
+    {
+        $cambridgeType = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+
+        // SD Unit -> 802009 (Muamalat) & 365609 (BSI)
+        $studentSd = Student::create([
+            'nama_lengkap' => 'Cambridge SD',
+            'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->sdUnit->id,
+            'entry_year_id' => $this->year->id,
+            'nis' => '900',
+        ]);
+        $vaSd = BillingApiClient::generateVaNumber($studentSd, $cambridgeType, 'muamalat');
+        $this->assertEquals('802009'.'2627'.str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSd);
+        $this->assertEquals(16, strlen($vaSd));
+        $vaSdBsi = BillingApiClient::generateVaNumber($studentSd, $cambridgeType, 'bsi');
+        $this->assertEquals('365609'.'2627'.str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSdBsi);
+
+        // SMP-12 Unit -> 802010 (Muamalat) & 365610 (BSI)
+        $studentSmp12 = Student::create([
+            'nama_lengkap' => 'Cambridge SMP 12',
+            'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->smp12Unit->id,
+            'entry_year_id' => $this->year->id,
+            'nis' => '901',
+        ]);
+        $vaSmp12 = BillingApiClient::generateVaNumber($studentSmp12, $cambridgeType, 'muamalat');
+        $this->assertEquals('802010'.'2627'.str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12);
+        $vaSmp12Bsi = BillingApiClient::generateVaNumber($studentSmp12, $cambridgeType, 'bsi');
+        $this->assertEquals('365610'.'2627'.str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12Bsi);
+
+        // SMP-55 Unit -> 802011 (Muamalat) & 365611 (BSI)
+        $studentSmp55 = Student::create([
+            'nama_lengkap' => 'Cambridge SMP 55',
+            'jenis_kelamin' => 'P',
+            'school_unit_id' => $this->smp55Unit->id,
+            'entry_year_id' => $this->year->id,
+            'nis' => '902',
+        ]);
+        $vaSmp55 = BillingApiClient::generateVaNumber($studentSmp55, $cambridgeType, 'muamalat');
+        $this->assertEquals('802011'.'2627'.str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55);
+        $vaSmp55Bsi = BillingApiClient::generateVaNumber($studentSmp55, $cambridgeType, 'bsi');
+        $this->assertEquals('365611'.'2627'.str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55Bsi);
+    }
+
+    public function test_cambridge_has_no_prefix_outside_the_participating_units(): void
+    {
+        // TK/RA/PG/SMA are not in the Cambridge program - null, never a
+        // borrowed SD prefix, so no student there can ever mint a Cambridge VA.
+        $this->assertNull(BillingApiClient::resolvePrefix('cambridge', $this->tkUnit));
+
+        $raUnit = SchoolUnit::create(['code' => 'RA-SAKINAH', 'label' => 'RA Al Azhar Sakinah', 'jenjang_group' => 'ra', 'is_active' => true]);
+        $smaUnit = SchoolUnit::create(['code' => 'SMA-33', 'label' => 'SMA Islam Al Azhar 33', 'jenjang_group' => 'sma', 'is_active' => true]);
+        $this->assertNull(BillingApiClient::resolvePrefix('cambridge', $raUnit));
+        $this->assertNull(BillingApiClient::resolvePrefix('cambridge', $smaUnit));
+
+        // Without a unit the SD prefix stands in - the catalogue listing only
+        // asks "can this type mint a VA at all", never for one student.
+        $this->assertSame('802009', BillingApiClient::resolvePrefix('cambridge'));
+        $this->assertSame('365609', BillingApiClient::resolvePrefix('cambridge', null, 'bsi'));
+
+        $studentTk = Student::create([
+            'nama_lengkap' => 'Cambridge TK',
+            'jenis_kelamin' => 'P',
+            'school_unit_id' => $this->tkUnit->id,
+            'entry_year_id' => $this->year->id,
+            'nis' => '903',
+        ]);
+        $cambridgeType = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+
+        $this->expectException(BillingApiException::class);
+        BillingApiClient::generateVaNumber($studentTk, $cambridgeType);
+    }
+
+    public function test_a_cambridge_bill_checks_out_on_its_own_sd_va(): void
+    {
+        $user = User::create(['name' => 'Wali Cambridge', 'role' => 'orangtua', 'phone' => '081292702090', 'email' => 'walicambridge@example.com', 'is_active' => true]);
+        $guardian = Guardian::create(['user_id' => $user->id, 'nama' => 'Wali Cambridge', 'hubungan' => 'ayah', 'no_hp' => '081292702090']);
+
+        $student = Student::create([
+            'nama_lengkap' => 'Anak Cambridge',
+            'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->sdUnit->id,
+            'entry_year_id' => $this->year->id,
+            'nis' => '904',
+        ]);
+        $student->guardians()->attach($guardian->id, ['relationship' => 'ayah', 'is_primary' => true, 'is_billing_contact' => true]);
+
+        $cambridgeType = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+        $bill = Bill::create([
+            'bill_number' => 'CAM/2026/00001',
+            'dedup_key' => 'cambridge:2026-2027:'.$student->id,
+            'description' => 'Cambridge TA 2026/2027',
+            'student_id' => $student->id,
+            'academic_year_id' => $this->year->id,
+            'fee_type_id' => $cambridgeType->id,
+            'subtotal' => 500000,
+            'total_amount' => 500000,
+            'remaining_amount' => 500000,
+            'status' => 'unpaid',
+            'due_date' => now()->addDays(7)->toDateString(),
+            'issued_at' => now(),
+        ]);
+
+        $mockClient = Mockery::mock(BillingApiClient::class);
+        $mockClient->shouldReceive('createBilling')
+            ->once()
+            ->andReturn(['uuid' => 'bill-uuid-cambridge', 'status' => 'success']);
+        $this->app->instance(BillingApiClient::class, $mockClient);
+
+        $response = $this->actingAs($user)->postJson('/api/wali/checkout', [
+            'bill_ulids' => [$bill->ulid],
+            'method' => 'virtual_account',
+            'bank' => 'muamalat',
+        ]);
+
+        $response->assertStatus(201);
+        $expectedStudentCode = str_pad((string) $student->id, 6, '0', STR_PAD_LEFT);
+        $this->assertEquals('8020092627'.$expectedStudentCode, $response->json('payment.virtual_account.va_number'));
+    }
+
     public function test_it_formats_student_code_from_the_students_own_id_not_nis(): void
     {
         $s1 = Student::create(['nama_lengkap' => 'S1', 'jenis_kelamin' => 'L', 'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'nis' => '1000027001']);

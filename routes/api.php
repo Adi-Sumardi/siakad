@@ -318,6 +318,14 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     // unit regardless of what was asked for.
     Route::get('/fee-types', [FeeSettingController::class, 'types']);
     Route::get('/fee-rates', [FeeSettingController::class, 'rates']);
+
+    // Rate writes live here for one exception: the Cambridge rate, whose
+    // nominal each unit sets for itself (school decision 2026-09-22).
+    // FeeSettingController draws the line - a per-unit admin may only write
+    // the cambridge type, and the unit is forced from their account, never
+    // taken from the request (the BillingRun line).
+    Route::post('/fee-rates', [FeeSettingController::class, 'storeRate']);
+    Route::patch('/fee-rates/{feeRate}', [FeeSettingController::class, 'updateRate']);
     Route::get('/discount-schemes', [DiscountController::class, 'schemes']);
     Route::get('/student-discounts', [DiscountController::class, 'studentDiscounts']);
 
@@ -335,8 +343,9 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 
     // Students CSV works the same way for a per-unit admin - every row lands
     // in their own unit, the file's unit column is ignored (ImportController
-    // forces it) - while fee rates stay central-only: prices are a
-    // foundation-level decision.
+    // forces it) - while fee rates stay a foundation-level decision, except
+    // the Cambridge rate each unit manages itself (see the fee-rate routes
+    // above).
     Route::post('/import/students', [ImportController::class, 'importStudents']);
     Route::get('/import/students/template', [ImportController::class, 'downloadStudentTemplate']);
 
@@ -366,15 +375,15 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 });
 
 /*
- * Setting prices & discounts and full user CRUD is central-admin only.
+ * Setting prices & discounts and full user CRUD is central-admin only - the
+ * sole rate exception (a unit's own Cambridge nominal) lives in the shared
+ * group above; deleting any rate, Cambridge included, stays here.
  */
 Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
     Route::post('/fee-types', [FeeSettingController::class, 'storeType']);
     Route::patch('/fee-types/{feeType}', [FeeSettingController::class, 'updateType']);
     Route::delete('/fee-types/{feeType}', [FeeSettingController::class, 'destroyType']);
 
-    Route::post('/fee-rates', [FeeSettingController::class, 'storeRate']);
-    Route::patch('/fee-rates/{feeRate}', [FeeSettingController::class, 'updateRate']);
     Route::delete('/fee-rates/{feeRate}', [FeeSettingController::class, 'destroyRate']);
 
     Route::post('/discount-schemes', [DiscountController::class, 'storeScheme']);

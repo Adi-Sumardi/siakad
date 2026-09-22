@@ -91,6 +91,10 @@ class DatabaseSeeder extends Seeder
             ['code' => 'ekskul', 'name' => 'Ekstrakurikuler', 'recurrence' => 'per_term'],
             ['code' => 'seragam', 'name' => 'Seragam & atribut', 'recurrence' => 'once', 'allow_installment' => true, 'requires_selection' => true],
             ['code' => 'buku', 'name' => 'Buku', 'recurrence' => 'per_term'],
+            // Nominal is deliberately NOT seeded here: each unit sets its own
+            // (admin unit of SD-13/SMP-12/SMP-55) - no rate means the unit is
+            // simply not billed until they set one.
+            ['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once'],
         ];
 
         foreach ($feeTypes as $i => $type) {

@@ -59,6 +59,7 @@ class BillingApiGateway implements PaymentGateway
         $studentCode = BillingApiClient::formatStudentCode($student);
         $prefixRef = match (true) {
             str_contains($feeTypeCode, 'ekskul') => 'YAPI-EKS',
+            str_contains($feeTypeCode, 'cambridge') => 'YAPI-CAM',
             str_contains($feeTypeCode, 'jamiyyah') => 'YAPI-JAM',
             str_contains($feeTypeCode, 'spp') => 'YAPI-SPP',
             default => 'YAPI-PAY',

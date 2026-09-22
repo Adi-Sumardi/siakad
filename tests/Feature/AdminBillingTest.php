@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use App\Models\AcademicYear;
 use App\Models\Bill;
+use App\Models\BillingRun;
 use App\Models\FeeRate;
 use App\Models\FeeType;
 use App\Models\Payment;
 use App\Models\SchoolUnit;
 use App\Models\Student;
+use App\Models\Term;
 use App\Models\User;
 use App\Services\Billing\BillGenerator;
 use App\Services\Billing\PaymentAllocator;
@@ -336,5 +338,68 @@ class AdminBillingTest extends TestCase
             ])
             ->assertStatus(422)
             ->assertJsonPath('message', 'Tarif untuk kombinasi jenis biaya, unit, tingkat, dan tahun ajaran ini sudah ada.');
+    }
+
+    public function test_a_cambridge_run_bills_only_the_units_that_set_a_nominal(): void
+    {
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+        FeeRate::create([
+            'fee_type_id' => $cambridge->id,
+            'school_unit_id' => $this->sd->id,
+            'academic_year_id' => $this->year->id,
+            'amount' => 650000,
+        ]);
+        $this->studentIn($this->sd, 'Anak SD');
+        $this->studentIn($this->smp, 'Anak SMP'); // unit tanpa tarif Cambridge
+
+        // No month - Cambridge is a once-a-year type.
+        $this->actingAs($this->staff('admin'))
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'cambridge'])
+            ->assertStatus(201)
+            ->assertJsonPath('run.bills_created', 1)
+            ->assertJsonPath('run.bills_skipped', 1);
+
+        $this->assertSame(1, Bill::count());
+        $this->assertSame('Anak SD', Bill::first()->student->nama_lengkap);
+
+        // The SMP student is named with a reason, not silently unpriced.
+        $skipped = BillingRun::first()->skipped_detail;
+        $this->assertSame('Anak SMP', $skipped[0]['student']);
+        $this->assertSame('Tarif belum ada', $skipped[0]['reason']);
+    }
+
+    public function test_a_once_type_is_billed_once_per_year_even_after_the_semester_flips(): void
+    {
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+        FeeRate::create([
+            'fee_type_id' => $cambridge->id,
+            'school_unit_id' => $this->sd->id,
+            'academic_year_id' => $this->year->id,
+            'amount' => 650000,
+        ]);
+        $this->studentIn($this->sd, 'Anak SD');
+
+        $ganjil = Term::create(['academic_year_id' => $this->year->id, 'name' => 'ganjil', 'starts_on' => '2026-07-01', 'ends_on' => '2026-12-31']);
+        $ganjil->activate();
+
+        $this->actingAs($this->staff('admin'))
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'cambridge'])
+            ->assertStatus(201)
+            ->assertJsonPath('run.bills_created', 1);
+
+        // The December/July flip: a re-run in genap must not mint a second
+        // "once" bill for the same year - the old dedup key appended the
+        // active term's name, so it did.
+        $genap = Term::create(['academic_year_id' => $this->year->id, 'name' => 'genap', 'starts_on' => '2027-01-01', 'ends_on' => '2027-06-30']);
+        $genap->activate();
+
+        $this->actingAs($this->staff('admin'))
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'cambridge'])
+            ->assertStatus(201)
+            ->assertJsonPath('run.bills_created', 0)
+            ->assertJsonPath('run.bills_skipped', 1);
+
+        $this->assertSame(1, Bill::count());
+        $this->assertSame('Sudah punya tagihan', BillingRun::latest('id')->first()->skipped_detail[0]['reason']);
     }
 }

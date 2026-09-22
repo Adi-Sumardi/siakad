@@ -16,6 +16,10 @@ use Tests\TestCase;
  * Deleting a fee type or a rate ("Master Jenis Biaya" / "Daftar Tarif
  * Berlaku" on /admin/tarif) is central-admin only, same tier as the rest of
  * this controller's writes - reading stays open to a unit's own admin_unit.
+ *
+ * The one write exception is the Cambridge rate (school decision 2026-09-22):
+ * a unit admin may store/update their OWN unit's Cambridge nominal - anything
+ * else, or any other unit, is refused by the controller itself.
  */
 class FeeSettingAdminCrudTest extends TestCase
 {
@@ -111,5 +115,127 @@ class FeeSettingAdminCrudTest extends TestCase
 
         $this->actingAs($this->unitAdmin)->deleteJson("/api/admin/fee-types/{$type->ulid}")->assertForbidden();
         $this->actingAs($this->unitAdmin)->deleteJson("/api/admin/fee-rates/{$rate->ulid}")->assertForbidden();
+    }
+
+    private function cambridgePayload(string $typeUlid, string $unitUlid, float $amount = 750000): array
+    {
+        return [
+            'fee_type_ulid' => $typeUlid,
+            'school_unit_ulid' => $unitUlid,
+            'academic_year_ulid' => $this->year->ulid,
+            'tingkat' => null,
+            'amount' => $amount,
+        ];
+    }
+
+    public function test_a_unit_admin_can_set_their_own_units_cambridge_rate(): void
+    {
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+
+        $this->actingAs($this->unitAdmin)
+            ->postJson('/api/admin/fee-rates', $this->cambridgePayload($cambridge->ulid, $this->unit->ulid, 650000))
+            ->assertCreated();
+
+        $this->assertDatabaseHas('fee_rates', [
+            'fee_type_id' => $cambridge->id,
+            'school_unit_id' => $this->unit->id,
+            'amount' => 650000,
+        ]);
+    }
+
+    public function test_a_unit_admins_cambridge_rate_lands_on_their_own_unit_even_when_naming_another(): void
+    {
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+        $smp55 = SchoolUnit::create(['code' => 'SMP-55', 'label' => 'SMP Islam Al Azhar 55', 'jenjang_group' => 'smp', 'is_active' => true]);
+
+        // The request names SMP-55; the account belongs to the SD unit. The
+        // unit is forced from the account, never trusted from the request -
+        // the same line BillingRunController draws.
+        $this->actingAs($this->unitAdmin)
+            ->postJson('/api/admin/fee-rates', $this->cambridgePayload($cambridge->ulid, $smp55->ulid))
+            ->assertCreated();
+
+        $this->assertDatabaseHas('fee_rates', ['fee_type_id' => $cambridge->id, 'school_unit_id' => $this->unit->id]);
+        $this->assertDatabaseMissing('fee_rates', ['fee_type_id' => $cambridge->id, 'school_unit_id' => $smp55->id]);
+    }
+
+    public function test_a_unit_admin_cannot_set_a_non_cambridge_rate(): void
+    {
+        $spp = FeeType::create(['code' => 'spp', 'name' => 'SPP', 'recurrence' => 'monthly']);
+
+        $this->actingAs($this->unitAdmin)
+            ->postJson('/api/admin/fee-rates', $this->cambridgePayload($spp->ulid, $this->unit->ulid))
+            ->assertForbidden();
+
+        $this->assertDatabaseCount('fee_rates', 0);
+    }
+
+    public function test_a_unit_admin_of_a_non_cambridge_unit_cannot_set_the_rate_either(): void
+    {
+        // TK is not in the Cambridge program - a rate there could never mint
+        // a VA, so the controller refuses before the row exists.
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+        $tkUnit = SchoolUnit::create(['code' => 'TK-13', 'label' => 'TK Islam Al Azhar 13', 'jenjang_group' => 'tk', 'is_active' => true]);
+        $tkAdmin = User::create([
+            'name' => 'Admin TK', 'email' => 'admin-tk@example.com', 'phone' => '081111111113',
+            'role' => 'admin_unit', 'school_unit_id' => $tkUnit->id, 'is_active' => true,
+        ]);
+
+        $this->actingAs($tkAdmin)
+            ->postJson('/api/admin/fee-rates', $this->cambridgePayload($cambridge->ulid, $tkUnit->ulid))
+            ->assertForbidden();
+
+        $this->assertDatabaseCount('fee_rates', 0);
+    }
+
+    public function test_a_unit_admin_can_update_their_own_cambridge_rate_but_nothing_else(): void
+    {
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+        $spp = FeeType::create(['code' => 'spp', 'name' => 'SPP', 'recurrence' => 'monthly']);
+
+        $ownCambridge = FeeRate::create([
+            'fee_type_id' => $cambridge->id, 'school_unit_id' => $this->unit->id, 'academic_year_id' => $this->year->id,
+            'tingkat' => null, 'amount' => 650000, 'is_active' => true,
+        ]);
+        $ownSpp = FeeRate::create([
+            'fee_type_id' => $spp->id, 'school_unit_id' => $this->unit->id, 'academic_year_id' => $this->year->id,
+            'tingkat' => null, 'amount' => 500000, 'is_active' => true,
+        ]);
+
+        $smp12 = SchoolUnit::create(['code' => 'SMP-12', 'label' => 'SMP Islam Al Azhar 12', 'jenjang_group' => 'smp', 'is_active' => true]);
+        $foreignCambridge = FeeRate::create([
+            'fee_type_id' => $cambridge->id, 'school_unit_id' => $smp12->id, 'academic_year_id' => $this->year->id,
+            'tingkat' => null, 'amount' => 900000, 'is_active' => true,
+        ]);
+
+        // Own Cambridge: allowed.
+        $this->actingAs($this->unitAdmin)
+            ->patchJson("/api/admin/fee-rates/{$ownCambridge->ulid}", ['amount' => 700000])
+            ->assertOk();
+        $this->assertDatabaseHas('fee_rates', ['id' => $ownCambridge->id, 'amount' => 700000]);
+
+        // Own unit, but not Cambridge: refused.
+        $this->actingAs($this->unitAdmin)
+            ->patchJson("/api/admin/fee-rates/{$ownSpp->ulid}", ['amount' => 550000])
+            ->assertForbidden();
+        $this->assertDatabaseHas('fee_rates', ['id' => $ownSpp->id, 'amount' => 500000]);
+
+        // Cambridge, but another unit's: refused.
+        $this->actingAs($this->unitAdmin)
+            ->patchJson("/api/admin/fee-rates/{$foreignCambridge->ulid}", ['amount' => 950000])
+            ->assertForbidden();
+        $this->assertDatabaseHas('fee_rates', ['id' => $foreignCambridge->id, 'amount' => 900000]);
+    }
+
+    public function test_a_central_admin_still_prices_cambridge_for_any_participating_unit(): void
+    {
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+        $smp12 = SchoolUnit::create(['code' => 'SMP-12', 'label' => 'SMP Islam Al Azhar 12', 'jenjang_group' => 'smp', 'is_active' => true]);
+
+        $this->actingAs($this->admin)
+            ->postJson('/api/admin/fee-rates', $this->cambridgePayload($cambridge->ulid, $smp12->ulid, 900000))
+            ->assertCreated();
+
+        $this->assertDatabaseHas('fee_rates', ['fee_type_id' => $cambridge->id, 'school_unit_id' => $smp12->id, 'amount' => 900000]);
     }
 }
