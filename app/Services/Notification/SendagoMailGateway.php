@@ -108,6 +108,22 @@ class SendagoMailGateway implements MailGateway
                     .'Terima kasih.',
             ],
             /**
+             * The lost-access lane: this address is NEW (the old contact is
+             * dead), so the message must explain what opening the link does -
+             * it replaces the account's only way in.
+             */
+            'school_account_reset' => [
+                'Pembaruan kontak akun Siakad YAPI',
+                "Yth. {$data['guardian_name']},\n\n"
+                    ."Kami menerima permintaan memperbarui kontak akun aplikasi sekolah Anda.\n\n"
+                    ."Buka tautan berikut untuk mengaktifkan alamat ini sebagai kontak akun Anda:\n\n"
+                    ."{$data['activation_url']}\n\n"
+                    ."Setelah tautan dibuka, alamat ini ({$data['login_identifier']}) menjadi "
+                    ."satu-satunya tempat kode masuk dikirim.\n\n"
+                    ."Tautan berlaku sampai {$data['expires_at']}. Bila Anda tidak meminta "
+                    .'perubahan ini, abaikan email ini.',
+            ],
+            /**
              * The sign-in code. Short, and it says the one thing that matters
              * for this kind of message: nobody legitimate will ever ask for it.
              */

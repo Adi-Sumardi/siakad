@@ -193,6 +193,7 @@ class NotificationRetryService
     {
         return match ($template) {
             'school_account_invite' => fn (NotificationLog $log) => $this->invitations->resend($log),
+            'school_account_reset' => fn (NotificationLog $log) => $this->invitations->resend($log),
             'bill_reminder' => fn (NotificationLog $log) => $this->billReminders->resend($log),
             'payment_receipt' => fn (NotificationLog $log) => $this->paymentReceipts->resend($log),
             'va_issued' => fn (NotificationLog $log) => $this->vaIssued->resend($log),

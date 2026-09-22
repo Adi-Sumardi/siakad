@@ -6,6 +6,7 @@ import {
   Download,
   Edit2,
   FileUp,
+  KeyRound,
   Mail,
   Phone,
   Plus,
@@ -61,6 +62,11 @@ export default function UserManagementPage() {
   const [units, setUnits] = useState<SchoolUnit[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+
+  // "Reset Akses" - the lost-contact lane (central admin only)
+  const [resettingUser, setResettingUser] = useState<UserItem | null>(null);
+  const [resetContact, setResetContact] = useState("");
+  const [resetting, setResetting] = useState(false);
 
   // Guru CSV import
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -548,6 +554,21 @@ export default function UserManagementPage() {
                       {/* hidden rather than left to 403 on click. */}
                       {!isUnitAdmin && (
                         <div className="flex items-center justify-end gap-1.5">
+                          {(u.role === "orangtua" || u.role === "guru") && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setResettingUser(u);
+                                setResetContact("");
+                              }}
+                              title="Kirim tautan pembaruan kontak ke email/HP baru"
+                              className="h-8 px-2.5 text-xs font-semibold gap-1"
+                            >
+                              <KeyRound className="size-3.5" />
+                              <span>Reset Akses</span>
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"
@@ -803,6 +824,77 @@ export default function UserManagementPage() {
                 </Button>
                 <Button type="submit" disabled={submitting} className="font-bold shadow-xs">
                   {submitting ? "Menyimpan…" : "Simpan Perubahan"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* Modal Reset Akses */}
+      {resettingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-md p-6 border-border shadow-2xl space-y-4 my-8">
+            <div>
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <KeyRound className="size-5 text-primary" />
+                <span>Reset Akses — {resettingUser.name}</span>
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Untuk wali/guru yang kehilangan email DAN nomor HP sekaligus. Tautan pembaruan kontak dikirim ke kontak
+                baru di bawah (kumpulkan langsung dari yang bersangkutan setelah memastikan identitasnya). Kontak baru
+                aktif setelah tautan dibuka; tautan berlaku 7 hari.
+              </p>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setResetting(true);
+                try {
+                  const res = await api.post<{
+                    invitation: { channel: "email" | "whatsapp"; sent_to: string };
+                    delivered: boolean;
+                  }>(`/api/admin/users/${resettingUser.ulid}/reset-access`, { contact: resetContact });
+
+                  toast.success(
+                    `Tautan reset dikirim ke ${res.invitation.sent_to} via ${res.invitation.channel === "email" ? "email" : "WhatsApp"}. Kontak baru aktif setelah tautan dibuka.`,
+                  );
+                  setResettingUser(null);
+                  setResetContact("");
+                } catch (err) {
+                  toast.error(err instanceof ApiError ? err.message : "Gagal mengirim tautan reset.");
+                } finally {
+                  setResetting(false);
+                }
+              }}
+              className="space-y-3.5 text-xs"
+            >
+              <div>
+                <Label className="text-xs">Kontak baru (email atau No. HP/WhatsApp)</Label>
+                <Input
+                  value={resetContact}
+                  onChange={(e) => setResetContact(e.target.value)}
+                  placeholder="mis. wali@email.com atau 081234567890"
+                  required
+                  className="mt-1"
+                  autoFocus
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {resetContact.includes("@")
+                    ? "Terkirim via Email."
+                    : /^[\d+\-\s()]{9,}$/.test(resetContact)
+                      ? "Terkirim via WhatsApp."
+                      : "Kanal terdeteksi otomatis dari bentuk isian."}
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="ghost" onClick={() => setResettingUser(null)} disabled={resetting}>
+                  Batal
+                </Button>
+                <Button type="submit" disabled={resetting || !resetContact.trim()} className="font-bold shadow-xs">
+                  {resetting ? "Mengirim…" : "Kirim Tautan Reset"}
                 </Button>
               </div>
             </form>

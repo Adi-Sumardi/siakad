@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\ResetUserAccessRequest;
 use App\Http\Requests\Admin\StoreUserRequest;
 use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Models\ActivityLog;
@@ -10,6 +11,7 @@ use App\Models\Guardian;
 use App\Models\SchoolUnit;
 use App\Models\StaffProfile;
 use App\Models\User;
+use App\Services\Handoff\AccountInvitationSender;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -199,5 +201,67 @@ class UserController extends Controller
         $user->delete();
 
         return response()->json(['message' => 'User berhasil dihapus.']);
+    }
+
+    /**
+     * "Reset Akses" - the lost-access lane. A parent or teacher who lost BOTH
+     * their email and their phone has no OTP to receive and no other way in;
+     * this sends a reset invitation to a NEW contact the admin collected in
+     * person. Opening the link (InvitationController::activate) writes the
+     * new contact onto the account. Central admin only, like every other
+     * user write - the new contact becomes the account's only way in.
+     */
+    public function resetAccess(ResetUserAccessRequest $request, User $user, AccountInvitationSender $invitations): JsonResponse
+    {
+        if (! in_array($user->role, ['orangtua', 'guru'], true)) {
+            return response()->json([
+                'message' => 'Jalur reset hanya untuk akun wali murid dan guru - akun admin dikelola lewat jalur lain.',
+            ], 422);
+        }
+
+        $contact = $request->normalized;
+
+        // The new contact must not silently point at somebody ELSE's account:
+        // a duplicate means OTP codes for one identifier reach two accounts.
+        // Email compares in SQL (plaintext column); phone goes through the
+        // blind index because the column is ciphertext.
+        $existing = $request->channel === 'email'
+            ? User::where('email', $contact)->where('id', '!=', $user->id)->first()
+            : User::findByEncrypted('phone', $contact);
+
+        if ($existing !== null && $existing->id !== $user->id) {
+            return response()->json([
+                'message' => 'Kontak ini sudah dipakai akun lain - tidak bisa menjadi kontak akun ini.',
+            ], 422);
+        }
+
+        $result = $invitations->sendReset($user, $contact, $request->user());
+
+        // Delivery failure is not issuance failure: the invitation row exists
+        // and the retry sweep (or a manual resend from ruang kontrol) delivers
+        // it - the same stance PMB handoff takes.
+        if (! $result->success) {
+            report(new \RuntimeException("Reset invitation for user {$user->ulid} failed to deliver: ".(string) $result->message));
+        }
+
+        ActivityLog::record($request->user(), 'user.reset_access_issued', $user, [
+            'channel' => $request->channel,
+            'sent_to' => $contact,
+            'delivered' => $result->success,
+        ]);
+
+        $invitation = $user->invitations()->where('purpose', 'reset')->whereNull('used_at')->latest('id')->first();
+
+        return response()->json([
+            'invitation' => [
+                'ulid' => $invitation?->ulid,
+                'channel' => $request->channel,
+                'sent_to' => $contact,
+                'expires_at' => $invitation?->expires_at,
+                'purpose' => 'reset',
+            ],
+            'delivered' => $result->success,
+            'delivery_message' => $result->message,
+        ], 201);
     }
 }

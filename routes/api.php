@@ -403,6 +403,12 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::patch('/users/{user}', [UserController::class, 'update']);
     Route::delete('/users/{user}', [UserController::class, 'destroy']);
 
+    // The lost-access lane: sends a reset invitation to a NEW contact an
+    // admin collected in person. Throttled like the invitation consume lane -
+    // both mint single-use credentials.
+    Route::post('/users/{user}/reset-access', [UserController::class, 'resetAccess'])
+        ->middleware('throttle:20,1');
+
     Route::patch('/students/{student}', [StudentController::class, 'update']);
     Route::delete('/students/{student}', [StudentController::class, 'destroy']);
 

@@ -114,7 +114,12 @@ class OtpController extends Controller
             'email_verified_at' => $user->email && ! $user->email_verified_at ? now() : $user->email_verified_at,
         ])->save();
 
-        Auth::login($user, remember: true);
+        // Explicit session guard - an auth:sanctum-authenticated request
+        // earlier in the same process would otherwise leave the ambient
+        // default pointing at the (login-less) Sanctum request guard. The SPA
+        // session is what this lane always means; same as SessionController
+        // and InvitationController.
+        Auth::guard('web')->login($user, remember: true);
 
         if ($request->hasSession()) {
             $request->session()->regenerate();
