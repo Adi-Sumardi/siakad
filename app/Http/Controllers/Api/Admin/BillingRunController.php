@@ -26,7 +26,7 @@ class BillingRunController extends Controller
     public function index(Request $request): JsonResponse
     {
         $runs = BillingRun::query()
-            ->with(['feeType'])
+            ->with(['feeType', 'schoolUnit:id,ulid,code,label', 'runBy:id,name'])
             // A per-unit admin sees their own unit's runs plus the school-wide
             // ones that produced their students' bills.
             ->when($request->user()->isUnitScoped(), fn ($q) => $q
@@ -40,11 +40,17 @@ class BillingRunController extends Controller
             'runs' => $runs->map(fn (BillingRun $run) => [
                 'ulid' => $run->ulid,
                 'fee_type' => $run->feeType->name,
+                'unit' => $run->schoolUnit ? [
+                    'code' => $run->schoolUnit->code,
+                    'label' => $run->schoolUnit->label,
+                ] : null,
                 'period_month' => $run->period_month,
                 'status' => $run->status,
                 'bills_created' => $run->bills_created,
                 'bills_skipped' => $run->bills_skipped,
                 'total_amount' => (float) $run->total_amount,
+                'run_by' => $run->runBy?->name,
+                'started_at' => $run->started_at,
                 'finished_at' => $run->finished_at,
             ]),
         ]);

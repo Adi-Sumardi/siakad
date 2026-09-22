@@ -443,4 +443,52 @@ class AdminBillingTest extends TestCase
         $this->assertSame(1, Bill::where('fee_type_id', $cambridge->id)->count());
         $this->assertTrue($manual->exists());
     }
+
+    public function test_the_run_history_names_the_unit_and_actor_and_scopes_per_unit(): void
+    {
+        $this->studentIn($this->sd, 'Anak SD');
+        $admin = $this->staff('admin');
+
+        // A school-wide SPP run by the central admin...
+        $this->actingAs($admin)
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'spp', 'month' => 8])
+            ->assertStatus(201);
+
+        // ...and a run scoped to the other unit, which an SD admin must not see.
+        $this->actingAs($this->staff('admin_unit', $this->smp))
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'spp', 'month' => 9])
+            ->assertStatus(201);
+
+        $rows = $this->actingAs($admin)
+            ->getJson('/api/admin/bills') // warm - not the subject
+            ->assertOk();
+
+        $this->assertNotNull($rows);
+
+        $history = $this->actingAs($admin)
+            ->getJson('/api/admin/billing-runs')
+            ->assertOk()
+            ->json('runs');
+
+        $this->assertCount(2, $history);
+        // The school-wide run names its actor and carries a null unit.
+        $schoolWide = collect($history)->firstWhere('unit', null);
+        $this->assertNotNull($schoolWide);
+        $this->assertSame($admin->name, $schoolWide['run_by']);
+        $this->assertSame('SPP', $schoolWide['fee_type']);
+        $this->assertSame(8, $schoolWide['period_month']);
+        // The SMP run carries its unit.
+        $smpRun = collect($history)->first(fn ($r) => $r['unit'] !== null);
+        $this->assertSame('SMP-SAKINAH', $smpRun['unit']['code']);
+
+        // A per-unit admin sees their own unit's runs plus school-wide ones -
+        // never another unit's.
+        $scoped = $this->actingAs($this->staff('admin_unit', $this->sd))
+            ->getJson('/api/admin/billing-runs')
+            ->assertOk()
+            ->json('runs');
+
+        $this->assertCount(1, $scoped);
+        $this->assertNull($scoped[0]['unit']);
+    }
 }
