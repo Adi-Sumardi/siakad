@@ -7,7 +7,7 @@ use App\Models\SchoolUnit;
 use App\Models\User;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
-use App\Services\Notification\WhatsAppGateway;
+use App\Services\Notification\QontakWhatsAppGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\RateLimiter;
 use Tests\TestCase;
@@ -24,7 +24,7 @@ class OtpLoginTest extends TestCase
     /** @var list<array{to: string, template: string, data: array}> */
     private array $sentMail = [];
 
-    /** @var list<array{phone: string, message: string}> */
+    /** @var list<array{phone: string, code: string}> */
     private array $sentWhatsApp = [];
 
     protected function setUp(): void
@@ -46,13 +46,18 @@ class OtpLoginTest extends TestCase
             }
         });
 
-        $this->app->bind(WhatsAppGateway::class, fn () => new class($this->sentWhatsApp) implements WhatsAppGateway
+        // Login OTP travels through Qontak's approved template
+        // (SendOtpWhatsAppMessage), not the free-text Sendago path
+        // (WhatsAppGateway) every other WhatsApp send in this app still
+        // uses - so this test fakes the concrete gateway class directly,
+        // same as PMB's own OtpLoginTest.
+        $this->app->bind(QontakWhatsAppGateway::class, fn () => new class($this->sentWhatsApp) extends QontakWhatsAppGateway
         {
             public function __construct(private array &$sent) {}
 
-            public function sendMessage(string $phone, string $message): NotificationResult
+            public function sendOtp(string $phone, string $code): NotificationResult
             {
-                $this->sent[] = compact('phone', 'message');
+                $this->sent[] = compact('phone', 'code');
 
                 return NotificationResult::ok();
             }
@@ -113,9 +118,9 @@ class OtpLoginTest extends TestCase
 
         $this->assertCount(1, $this->sentWhatsApp);
         $this->assertEmpty($this->sentMail);
-        $this->assertMatchesRegularExpression('/\d{6}/', $this->sentWhatsApp[0]['message']);
+        $this->assertMatchesRegularExpression('/^\d{6}$/', $this->sentWhatsApp[0]['code']);
 
-        // The send is queued (App\Jobs\SendWhatsAppMessage) rather than made
+        // The send is queued (App\Jobs\SendOtpWhatsAppMessage) rather than made
         // inline - under QUEUE_CONNECTION=sync it still runs within this same
         // request, so the log row it owns should already read 'sent', not
         // stuck on the 'queued' state it starts at.

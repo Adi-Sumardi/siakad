@@ -2,7 +2,7 @@
 
 namespace App\Services\Auth;
 
-use App\Jobs\SendWhatsAppMessage;
+use App\Jobs\SendOtpWhatsAppMessage;
 use App\Models\LoginOtp;
 use App\Models\NotificationLog;
 use App\Models\User;
@@ -160,18 +160,21 @@ class OtpService
 
     /**
      * Queues the WhatsApp send instead of making it inline - see
-     * App\Jobs\SendWhatsAppMessage for why. The NotificationLog row is
+     * App\Jobs\SendOtpWhatsAppMessage for why. The NotificationLog row is
      * created here, up front, as 'queued' (a real state in the status enum,
      * not a workaround) so there is still an immediate record even before
      * the job runs; the job updates this same row to sent/failed once it
      * actually attempts delivery.
+     *
+     * Goes through Mekari Qontak's approved 'otp_login' template
+     * (SendOtpWhatsAppMessage), not the free-text Sendago path every other
+     * WhatsApp send in this app uses - an official WhatsApp Business line
+     * can only ever send an approved template to a cold number, so there is
+     * no message string to build here anymore; the code travels as the
+     * template's own variable.
      */
     private function queueWhatsApp(LoginOtp $otp, string $phone, string $code): NotificationResult
     {
-        $message = "Kode masuk Siakad YAPI Anda: *{$code}*\n\n"
-            ."Berlaku ".LoginOtp::TTL_MINUTES." menit. Jangan berikan kode ini kepada siapa pun, "
-            .'termasuk yang mengaku dari sekolah.';
-
         $log = NotificationLog::create([
             'channel' => 'whatsapp',
             'template' => 'login_otp',
@@ -183,7 +186,7 @@ class OtpService
             'notifiable_id' => $otp->id,
         ]);
 
-        SendWhatsAppMessage::dispatch($phone, $message, $log->ulid);
+        SendOtpWhatsAppMessage::dispatch($phone, $code, $log->ulid);
 
         return NotificationResult::ok(['mode' => 'queued']);
     }

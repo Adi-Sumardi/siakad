@@ -42,8 +42,38 @@ return [
         'api_key' => env('SENDAGO_API_KEY'),
         // Sendago is an unofficial gateway behind one connected number - see
         // App\Jobs\SendWhatsAppMessage. Messages/minute across the whole app,
-        // not per recipient.
+        // not per recipient. Login OTP no longer shares this risk at all -
+        // see 'qontak' below.
         'send_rate_per_minute' => env('WHATSAPP_SEND_RATE_PER_MINUTE', 60),
+    ],
+
+    // Mekari Qontak - the yayasan's own verified WhatsApp Cloud API line,
+    // same account/WABA PMB uses (see PMB's config/services.php and
+    // App\Services\Notification\QontakWhatsAppGateway for the full HMAC
+    // contract notes). Login OTP only for now
+    // (QontakWhatsAppGateway::sendOtp(), the 'otp_login' Authentication
+    // template) - every other WhatsApp send in this app stays on Sendago
+    // (App\Jobs\SendWhatsAppMessage), since an official Business line can
+    // only ever send an approved template to a number that hasn't
+    // messaged first, never free text.
+    'qontak' => [
+        'base_url' => env('QONTAK_BASE_URL', 'https://api.mekari.com/qontak/chat/v1'),
+        // Signs every request (Mekari's own HMAC scheme, not a Bearer
+        // token) - see QontakWhatsAppGateway::post(). No access/refresh
+        // token to manage.
+        'client_id' => env('QONTAK_CLIENT_ID'),
+        'client_secret' => env('QONTAK_CLIENT_SECRET'),
+        // GET {base_url}/../../open/v1/integrations?target_channel=wa (Bearer
+        // auth there, a different scheme from the send endpoint above) - the
+        // WhatsApp channel's own id inside the Qontak account, required on
+        // every broadcast send alongside the template id. Same value as
+        // PMB's, since it's the same WABA.
+        'channel_integration_id' => env('QONTAK_CHANNEL_INTEGRATION_ID'),
+        // UUID of the approved 'otp_login' Authentication template - reused
+        // from PMB (same Qontak account/template, generic copy that never
+        // names either app). Body has exactly one variable (the code
+        // itself); the template's own copy-code button repeats it.
+        'otp_template_id' => env('QONTAK_OTP_TEMPLATE_ID'),
     ],
 
     // Email gateway. Auth is memberId+secret in the request body, not a header.
