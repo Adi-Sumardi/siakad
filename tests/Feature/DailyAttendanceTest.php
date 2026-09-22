@@ -992,4 +992,25 @@ class DailyAttendanceTest extends TestCase
         $this->assertDatabaseCount('daily_records', 0);
         $this->assertEmpty($this->sentWa);
     }
+
+    public function test_the_holiday_calendar_names_the_weekday_and_reports_active_days(): void
+    {
+        // One enabled unit running Mon-Fri is enough to derive the union.
+        $this->enabledSetting($this->sd);
+
+        // 2026-09-19 is a Saturday - no enabled unit runs it.
+        $saturday = Carbon::create(2026, 9, 19, 8, 0, 0, 'Asia/Jakarta');
+        Holiday::create(['date' => $saturday->toDateString(), 'label' => 'Cuti Bersama']);
+
+        $this->actingAs($this->staff('admin'))
+            ->getJson('/api/admin/holidays')
+            ->assertOk()
+            ->assertJsonPath('holidays.0.weekday', 'Sabtu')
+            ->assertJsonPath('active_days', [1, 2, 3, 4, 5]);
+
+        $this->actingAs($this->staff('admin'))
+            ->postJson('/api/admin/holidays', ['date' => '2026-09-21', 'label' => 'Hari Besar'])
+            ->assertCreated()
+            ->assertJsonPath('holiday.weekday', 'Senin');
+    }
 }

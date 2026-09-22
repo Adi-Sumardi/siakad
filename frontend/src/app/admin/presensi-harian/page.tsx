@@ -567,16 +567,28 @@ export default function AdminDailyAttendancePage() {
  * unit's attendance sessions open, so a national holiday falling on a school
  * day can never sweep everyone into alpa at 08:00.
  */
+type HolidayRow = { ulid: string; date: string; weekday: string; label: string };
+
+/** ISO weekday (1=Mon..7=Sun) of a YYYY-MM-DD string, timezone-safe. */
+function isoWeekday(dateStr: string): number {
+  const d = new Date(`${dateStr}T00:00:00`).getDay();
+  return d === 0 ? 7 : d;
+}
+
 function HolidayCalendarCard() {
-  const [holidays, setHolidays] = useState<Array<{ ulid: string; date: string; label: string }> | null>(null);
+  const [holidays, setHolidays] = useState<HolidayRow[] | null>(null);
+  const [activeDays, setActiveDays] = useState<number[]>([]);
   const [date, setDate] = useState("");
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api
-      .get<{ holidays: Array<{ ulid: string; date: string; label: string }> }>("/api/admin/holidays")
-      .then((d) => setHolidays(d.holidays))
+      .get<{ holidays: HolidayRow[]; active_days: number[] }>("/api/admin/holidays")
+      .then((d) => {
+        setHolidays(d.holidays);
+        setActiveDays(d.active_days ?? []);
+      })
       .catch(() => setHolidays([]));
   }, []);
 
@@ -584,11 +596,11 @@ function HolidayCalendarCard() {
     e.preventDefault();
     setBusy(true);
     try {
-      const res = await api.post<{ holiday: { ulid: string; date: string; label: string } }>("/api/admin/holidays", {
+      const res = await api.post<{ holiday: HolidayRow }>("/api/admin/holidays", {
         date,
         label,
       });
-      toast.success(`Hari libur ${res.holiday.date} terdaftar.`);
+      toast.success(`Hari libur ${res.holiday.date} (${res.holiday.weekday}) terdaftar.`);
       setHolidays((prev) => [...(prev ?? []), res.holiday].sort((a, b) => a.date.localeCompare(b.date)));
       setDate("");
       setLabel("");
@@ -608,6 +620,11 @@ function HolidayCalendarCard() {
       toast.error(err instanceof ApiError ? err.message : "Gagal menghapus hari libur.");
     }
   }
+
+  // A hint, not a refusal: units can change their active days any time, and
+  // runsOn() already gates sessions - this only marks calendar noise.
+  const noUnitRuns = (d: string) => activeDays.length > 0 && !activeDays.includes(isoWeekday(d));
+  const pickedHint = date && noUnitRuns(date);
 
   return (
     <Card className="p-5 border-border/80 shadow-xs">
@@ -645,6 +662,11 @@ function HolidayCalendarCard() {
         <Button type="submit" size="sm" disabled={busy || !date || !label} className="text-xs font-bold">
           Tambah
         </Button>
+        {pickedHint && (
+          <p className="w-full text-[11px] text-warn">
+            Tidak ada unit aktif yang beroperasi pada hari itu — libur ini tidak akan mengubah apa pun.
+          </p>
+        )}
       </form>
 
       {holidays === null ? (
@@ -659,7 +681,13 @@ function HolidayCalendarCard() {
             <li key={h.ulid} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-xs font-semibold">{h.date}</span>
+                <span className="text-xs font-medium text-foreground/70">{h.weekday}</span>
                 <span className="truncate text-xs text-muted-foreground">{h.label}</span>
+                {noUnitRuns(h.date) && (
+                  <span className="rounded-full bg-warn-soft px-2 py-0.5 text-[10px] font-semibold text-warn">
+                    tanpa unit aktif
+                  </span>
+                )}
               </div>
               <Button
                 type="button"

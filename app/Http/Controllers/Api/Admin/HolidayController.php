@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreHolidayRequest;
+use App\Models\DailyAttendanceSetting;
 use App\Models\Holiday;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,11 +23,12 @@ class HolidayController extends Controller
             'holidays' => Holiday::query()
                 ->orderBy('date')
                 ->get()
-                ->map(fn (Holiday $h) => [
-                    'ulid' => $h->ulid,
-                    'date' => $h->date->toDateString(),
-                    'label' => $h->label,
-                ]),
+                ->map(fn (Holiday $h) => $this->row($h)),
+            // The weekdays at least one enabled unit actually operates on -
+            // lets the calendar mark a holiday that lands on a day no unit
+            // runs anyway (harmless noise: runsOn() already gates sessions,
+            // and units may change their days later, so it stays a hint).
+            'active_days' => $this->activeDays(),
         ]);
     }
 
@@ -34,13 +36,7 @@ class HolidayController extends Controller
     {
         $holiday = Holiday::create($request->validated());
 
-        return response()->json([
-            'holiday' => [
-                'ulid' => $holiday->ulid,
-                'date' => $holiday->date->toDateString(),
-                'label' => $holiday->label,
-            ],
-        ], 201);
+        return response()->json(['holiday' => $this->row($holiday)], 201);
     }
 
     public function destroy(Request $request, string $ulid): JsonResponse
@@ -49,5 +45,32 @@ class HolidayController extends Controller
         $holiday->delete();
 
         return response()->json(['message' => 'Hari libur dihapus.']);
+    }
+
+    /** @return array{ulid: string, date: string, weekday: string, label: string} */
+    private function row(Holiday $h): array
+    {
+        return [
+            'ulid' => $h->ulid,
+            'date' => $h->date->toDateString(),
+            'weekday' => $h->date->locale('id')->translatedFormat('l'),
+            'label' => $h->label,
+        ];
+    }
+
+    /** @return list<int> */
+    private function activeDays(): array
+    {
+        $days = DailyAttendanceSetting::query()
+            ->where('enabled', true)
+            ->get(['days'])
+            ->flatMap(fn ($s) => $s->days ?? [])
+            ->unique()
+            ->values()
+            ->all();
+
+        sort($days);
+
+        return $days;
     }
 }
