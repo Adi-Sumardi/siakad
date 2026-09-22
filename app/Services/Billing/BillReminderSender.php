@@ -198,11 +198,7 @@ class BillReminderSender
      */
     private function billingContactFor(Bill $bill): ?Guardian
     {
-        $guardians = $bill->student->guardians;
-
-        return $guardians->firstWhere('pivot.is_billing_contact', true)
-            ?? $guardians->firstWhere('pivot.is_primary', true)
-            ?? $guardians->first();
+        return $bill->student->billingContact();
     }
 
     /**

@@ -232,7 +232,32 @@ class BillGenerator
 
         $dedup = $this->dedupKey($type, $year, $month, $term);
 
-        if (Bill::where('student_id', $student->id)->where('dedup_key', $dedup)->exists()) {
+        if ($type->recurrence === 'once') {
+            // Both lanes issue once-types (cambridge: billing run AND admin's
+            // manual bills), and a manual bill never carries the generator's
+            // key ('manual:{student}:{uniqid}') - so for a once-type the
+            // (student, fee type, year) tuple is the only honest guard. This
+            // check is therefore the sole cross-lane protection: issue()'s
+            // firstOrCreate on dedup_key still catches run-vs-run races, but
+            // a run racing a manual bill has no DB constraint (the same
+            // exposure two manual bills already have). Cancelled/waived bills
+            // count too, matching dedup_key semantics below, where a
+            // cancelled bill keeps its key and keeps blocking.
+            $existing = Bill::where('student_id', $student->id)
+                ->where('fee_type_id', $type->id)
+                ->where('academic_year_id', $year->id)
+                ->first();
+
+            if ($existing) {
+                $manual = str_starts_with((string) $existing->dedup_key, 'manual:');
+
+                return $base + [
+                    'reason' => 'Sudah punya tagihan',
+                    'detail' => $type->name.' TA '.$year->year.' sudah terbit'
+                        .($manual ? ' (dibuat manual)' : ''),
+                ];
+            }
+        } elseif (Bill::where('student_id', $student->id)->where('dedup_key', $dedup)->exists()) {
             return $base + [
                 'reason' => 'Sudah punya tagihan',
                 'detail' => $type->name.($month ? ' bulan '.$this->monthName($month) : '').' sudah terbit',

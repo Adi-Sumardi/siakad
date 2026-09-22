@@ -5,6 +5,7 @@ namespace App\Services\Notification;
 use App\Models\NotificationLog;
 use App\Services\Billing\BillReminderSender;
 use App\Services\Billing\PaymentReceiptNotifier;
+use App\Services\Billing\VaIssuedNotifier;
 use App\Services\Handoff\AccountInvitationSender;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -46,6 +47,7 @@ class NotificationRetryService
         private AccountInvitationSender $invitations,
         private BillReminderSender $billReminders,
         private PaymentReceiptNotifier $paymentReceipts,
+        private VaIssuedNotifier $vaIssued,
     ) {}
 
     /** @return Collection<int, NotificationLog> */
@@ -193,6 +195,7 @@ class NotificationRetryService
             'school_account_invite' => fn (NotificationLog $log) => $this->invitations->resend($log),
             'bill_reminder' => fn (NotificationLog $log) => $this->billReminders->resend($log),
             'payment_receipt' => fn (NotificationLog $log) => $this->paymentReceipts->resend($log),
+            'va_issued' => fn (NotificationLog $log) => $this->vaIssued->resend($log),
             default => null,
         };
     }

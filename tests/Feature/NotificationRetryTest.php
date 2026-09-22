@@ -312,4 +312,89 @@ class NotificationRetryTest extends TestCase
     {
         $this->getJson('/api/admin/notification-failures')->assertUnauthorized();
     }
+
+    public function test_a_failed_va_issued_whatsapp_is_retried_by_the_sweep(): void
+    {
+        $guardian = \App\Models\Guardian::create([
+            'nama' => 'Wali VA',
+            'hubungan' => 'ayah',
+            'no_hp' => '081299900011',
+        ]);
+
+        $payment = \App\Models\Payment::create([
+            'payment_number' => 'YAPI-CAM-2026-0001',
+            'payer_guardian_id' => $guardian->id,
+            'amount' => 900000,
+            'method' => 'virtual_account',
+            'status' => 'processing',
+            'gateway_response' => [
+                'provider' => 'bank_muamalat',
+                'va_number' => '8020092627000042',
+                'bank_name' => 'Bank Muamalat',
+            ],
+        ]);
+
+        // The first push dies at the gateway; the row is the paper trail.
+        $this->whatsappShouldFail = true;
+        app(\App\Services\Billing\VaIssuedNotifier::class)->notify($payment);
+
+        $row = NotificationLog::query()->where('template', 'va_issued')->sole();
+        $this->assertSame('failed', $row->status);
+
+        // The gateway recovered by the time the sweep runs.
+        $this->whatsappShouldFail = false;
+        $this->artisan('notifications:retry-failed')->assertSuccessful();
+
+        $this->assertDatabaseHas('notification_logs', [
+            'ulid' => $row->ulid,
+            'status' => 'sent',
+            'attempts' => 2,
+        ]);
+        $this->assertCount(2, $this->sentWhatsApp);
+        $this->assertStringContainsString('8020092627000042', $this->sentWhatsApp[1]['message']);
+        $this->assertSame('081299900011', $this->sentWhatsApp[1]['phone']);
+    }
+
+    public function test_a_va_whose_payment_already_settled_is_never_repushed(): void
+    {
+        $guardian = \App\Models\Guardian::create([
+            'nama' => 'Wali VA Lunas',
+            'hubungan' => 'ibu',
+            'no_hp' => '081299900012',
+        ]);
+
+        $payment = \App\Models\Payment::create([
+            'payment_number' => 'YAPI-CAM-2026-0002',
+            'payer_guardian_id' => $guardian->id,
+            'amount' => 900000,
+            'method' => 'virtual_account',
+            'status' => 'completed',
+            'paid_at' => now(),
+            'gateway_response' => [
+                'provider' => 'bank_muamalat',
+                'va_number' => '8020092627000043',
+                'bank_name' => 'Bank Muamalat',
+            ],
+        ]);
+
+        $row = NotificationLog::create([
+            'channel' => 'whatsapp',
+            'template' => 'va_issued',
+            'recipient' => '081299900012',
+            'payload' => [],
+            'status' => 'failed',
+            'error' => 'gateway sedang down',
+            'notifiable_type' => \App\Models\Payment::class,
+            'notifiable_id' => $payment->id,
+        ]);
+
+        $this->artisan('notifications:retry-failed')->assertSuccessful();
+
+        // A settled payment's VA must not arrive as if it were still open.
+        $row->refresh();
+        $this->assertSame('failed', $row->status);
+        $this->assertSame(2, $row->attempts);
+        $this->assertStringContainsString('completed', (string) $row->error);
+        $this->assertCount(0, $this->sentWhatsApp);
+    }
 }

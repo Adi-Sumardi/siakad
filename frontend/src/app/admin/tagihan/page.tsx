@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Download, FilePlus2, Filter, RefreshCw, Search } from "lucide-react";
+import { CreditCard, Download, FilePlus2, Filter, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError, API_BASE } from "@/lib/api";
 import { useAuth } from "@/lib/auth/auth-context";
 import { dueLabel, rupiah, tanggal } from "@/lib/format";
-import { isOpen, OPEN_STATUSES, type Bill } from "@/lib/types/billing";
+import { isOpen, OPEN_STATUSES, type Bill, type Payment } from "@/lib/types/billing";
 import { Pagination } from "@/components/ui/pagination";
 
 type Paginated<T> = {
@@ -87,6 +87,19 @@ function AdminBillsContent() {
   const [searchingStudents, setSearchingStudents] = useState(false);
   const [creatingManual, setCreatingManual] = useState(false);
 
+  // Cambridge model (school decision 2026-09-22): a unit admin's manual bills
+  // are cambridge-shaped only - nominal prefilled from their unit's rate,
+  // buku folded in as itemised lines, one bill one VA.
+  const [manualLines, setManualLines] = useState<{ name: string; qty: string; unit_price: string }[]>([]);
+  const [existingCambridge, setExistingCambridge] = useState(false);
+
+  // "Buat VA" - an admin mints the Virtual Account for one bill on the
+  // family's behalf; the number is pushed to the wali's WhatsApp.
+  const [vaBill, setVaBill] = useState<Bill | null>(null);
+  const [vaBank, setVaBank] = useState<"muamalat" | "bsi">("muamalat");
+  const [creatingVa, setCreatingVa] = useState(false);
+  const [vaResult, setVaResult] = useState<{ payment: Payment; whatsapp: { sent: boolean; reason: string | null } } | null>(null);
+
   // Debounced student search for the manual-bill picker - same endpoint and
   // debounce shape as the diskon page's assignment picker.
   useEffect(() => {
@@ -111,6 +124,70 @@ function AdminBillsContent() {
   }, [showManualModal, manual.student_search]);
 
   const selectedFeeType = feeTypes.find((t) => t.ulid === manual.fee_type_ulid) ?? null;
+  const cambridgeType = feeTypes.find((t) => t.code === "cambridge") ?? null;
+  const manualIsCambridge = selectedFeeType?.code === "cambridge";
+  const linesTotal = manualLines.reduce(
+    (s, l) => s + (parseInt(l.qty || "0", 10) || 0) * (parseFloat(l.unit_price || "0") || 0),
+    0,
+  );
+
+  // A unit admin's manual bills are cambridge-shaped only (the API refuses
+  // anything else) - the form opens pre-locked to it, nominal prefilled from
+  // their own unit's cambridge rate for the active year. Server-side the
+  // rates list is already unit-scoped for admin_unit.
+  useEffect(() => {
+    if (!showManualModal || isCentral || !manualIsCambridge || manual.amount || manualLines.length > 0) return;
+
+    let cancelled = false;
+    api
+      .get<{ rates: { academic_year: string; tingkat: number | null; amount: number }[] }>(
+        "/api/admin/fee-rates?type=cambridge",
+      )
+      .then((d) => {
+        if (cancelled) return;
+        const activeYear = years.find((y) => y.is_active)?.year;
+        const rate =
+          d.rates.find((r) => r.academic_year === activeYear && r.tingkat === null)
+          ?? d.rates.find((r) => r.academic_year === activeYear)
+          ?? d.rates[0];
+        if (rate && !manual.amount) {
+          setManual((m) => ({ ...m, amount: String(rate.amount) }));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showManualModal, manualIsCambridge, isCentral, years]);
+
+  // Soft duplicate guard (manual → run direction): both lanes issue
+  // cambridge, so warn before a second bill lands on the same student. Soft
+  // on purpose - a follow-up bill (extra buku, a second program year-half)
+  // is legitimate.
+  useEffect(() => {
+    if (!manual.student_ulid || !manualIsCambridge) {
+      setExistingCambridge(false);
+      return;
+    }
+
+    let cancelled = false;
+    const activeYear = years.find((y) => y.is_active)?.year;
+    const params = new URLSearchParams({ student: manual.student_ulid, type: "cambridge", per_page: "1" });
+    if (activeYear) params.set("year", activeYear);
+
+    api
+      .get<{ bills: { data: unknown[] } }>(`/api/admin/bills?${params.toString()}`)
+      .then((d) => {
+        if (!cancelled) setExistingCambridge((d.bills.data ?? []).length > 0);
+      })
+      .catch(() => {
+        if (!cancelled) setExistingCambridge(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [manual.student_ulid, manualIsCambridge, years]);
 
   async function submitManualBill(e: React.FormEvent) {
     e.preventDefault();
@@ -120,16 +197,25 @@ function AdminBillsContent() {
     }
     setCreatingManual(true);
     try {
+      // With itemised rows the total IS the rows' sum (the input is locked to
+      // it); without them the typed amount stands.
+      const lines = manualLines
+        .filter((l) => l.name.trim() && parseInt(l.qty, 10) > 0 && parseFloat(l.unit_price) > 0)
+        .map((l) => ({ name: l.name.trim(), qty: parseInt(l.qty, 10), unit_price: parseFloat(l.unit_price) }));
+
       const res = await api.post<{ bill: Bill }>("/api/admin/bills/manual", {
         student_ulid: manual.student_ulid,
         fee_type_ulid: manual.fee_type_ulid,
         description: manual.description,
-        amount: parseFloat(manual.amount),
+        amount: lines.length > 0 ? linesTotal : parseFloat(manual.amount),
         due_date: manual.due_date,
+        ...(lines.length > 0 ? { lines } : {}),
       });
       toast.success(`Tagihan manual ${res.bill.bill_number} diterbitkan.`);
       setShowManualModal(false);
       setManual(emptyManualForm());
+      setManualLines([]);
+      setExistingCambridge(false);
       setPage(1);
       load();
     } catch (err) {
@@ -270,15 +356,25 @@ function AdminBillsContent() {
             size="sm"
             className="gap-2"
             onClick={async () => {
-              setShowManualModal(true);
+              setManualLines([]);
+              setExistingCambridge(false);
+              let current = feeTypes;
               if (feeTypes.length === 0) {
                 try {
                   const d = await api.get<{ fee_types: FeeTypeOption[] }>("/api/admin/fee-types");
-                  setFeeTypes(d.fee_types.filter((t) => t.is_active));
+                  current = d.fee_types.filter((t) => t.is_active);
+                  setFeeTypes(current);
                 } catch {
                   toast.error("Gagal memuat daftar jenis biaya.");
                 }
               }
+              // The one type a unit admin may issue by hand - pre-locked so a
+              // submit can never name something the API would refuse.
+              if (!isCentral) {
+                const cambridge = current.find((t) => t.code === "cambridge");
+                setManual((m) => ({ ...m, fee_type_ulid: m.fee_type_ulid || (cambridge?.ulid ?? "") }));
+              }
+              setShowManualModal(true);
             }}
           >
             <FilePlus2 className="size-4" />
@@ -441,6 +537,21 @@ function AdminBillsContent() {
             {isOpen(bill) && (
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
                 <div className="flex items-center gap-2">
+                  {(isCentral || bill.fee_type?.code === "cambridge") && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setVaBill(bill);
+                        setVaBank("muamalat");
+                        setVaResult(null);
+                      }}
+                      className="h-7 gap-1.5 border-primary/40 text-xs font-semibold text-primary hover:bg-primary/10"
+                    >
+                      <CreditCard className="size-3.5" />
+                      <span>Buat VA</span>
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -547,16 +658,24 @@ function AdminBillsContent() {
                   <select
                     value={manual.fee_type_ulid}
                     onChange={(e) => setManual({ ...manual, fee_type_ulid: e.target.value })}
+                    disabled={!isCentral}
                     required
-                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs disabled:opacity-70"
                   >
-                    <option value="">Pilih jenis...</option>
-                    {feeTypes.map((t) => (
-                      <option key={t.ulid} value={t.ulid}>
-                        {t.name}
-                      </option>
-                    ))}
+                    <option value="">{isCentral ? "Pilih jenis..." : cambridgeType ? "" : "Memuat..."}</option>
+                    {!isCentral
+                      ? cambridgeType && <option value={cambridgeType.ulid}>{cambridgeType.name}</option>
+                      : feeTypes.map((t) => (
+                          <option key={t.ulid} value={t.ulid}>
+                            {t.name}
+                          </option>
+                        ))}
                   </select>
+                  {!isCentral && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Admin unit hanya bisa menerbitkan tagihan manual jenis Cambridge (biaya buku digabung di sini).
+                    </p>
+                  )}
                 </div>
                 <div>
                   <Label className="text-xs">Jatuh Tempo</Label>
@@ -578,6 +697,73 @@ function AdminBillsContent() {
                 </p>
               )}
 
+              {existingCambridge && (
+                <p className="rounded-lg border border-warn/30 bg-warn-soft px-3 py-2 text-[11px] font-medium text-warn">
+                  Siswa ini sudah punya tagihan Cambridge tahun ajaran aktif. Tetap terbitkan tagihan baru?
+                  (Sah bila memang ada penambahan program/buku.)
+                </p>
+              )}
+
+              {manualIsCambridge && (
+                <div className="border-t border-border pt-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-bold">Rincian (opsional — mis. Cambridge + Buku)</Label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      onClick={() => setManualLines((ls) => [...ls, { name: "", qty: "1", unit_price: "" }])}
+                    >
+                      <Plus className="size-3" /> Baris
+                    </Button>
+                  </div>
+                  {manualLines.length > 0 && (
+                    <div className="mt-2 space-y-2">
+                      {manualLines.map((l, i) => (
+                        <div key={i} className="flex items-end gap-2">
+                          <Input
+                            placeholder="Nama (mis. Buku)"
+                            value={l.name}
+                            onChange={(e) => setManualLines((ls) => ls.map((x, xi) => (xi === i ? { ...x, name: e.target.value } : x)))}
+                            className="h-8 flex-1 text-xs"
+                          />
+                          <Input
+                            type="number"
+                            min="1"
+                            placeholder="Qty"
+                            value={l.qty}
+                            onChange={(e) => setManualLines((ls) => ls.map((x, xi) => (xi === i ? { ...x, qty: e.target.value } : x)))}
+                            className="h-8 w-16 text-xs"
+                          />
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder="Harga satuan"
+                            value={l.unit_price}
+                            onChange={(e) => setManualLines((ls) => ls.map((x, xi) => (xi === i ? { ...x, unit_price: e.target.value } : x)))}
+                            className="h-8 w-32 text-xs"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 px-2 text-destructive hover:bg-destructive/10"
+                            onClick={() => setManualLines((ls) => ls.filter((_, xi) => xi !== i))}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                      <p className="text-[11px] font-semibold text-muted-foreground">
+                        Total rincian: <span className="text-foreground">{rupiah(linesTotal)}</span> — nominal
+                        tagihan mengikuti total ini.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Nominal (Rp)</Label>
@@ -585,12 +771,18 @@ function AdminBillsContent() {
                     type="number"
                     min={1000}
                     step={500}
-                    value={manual.amount}
+                    value={manualLines.length > 0 ? (linesTotal || "") : manual.amount}
                     onChange={(e) => setManual({ ...manual, amount: e.target.value })}
+                    disabled={manualLines.length > 0}
                     required
                     placeholder="mis. 450000"
-                    className="mt-1 font-bold"
+                    className="mt-1 font-bold disabled:opacity-70"
                   />
+                  {!isCentral && manualIsCambridge && manualLines.length === 0 && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Nominal terisi dari tarif Cambridge unit — sesuaikan bila perlu.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <Label className="text-xs">Deskripsi</Label>
@@ -616,6 +808,98 @@ function AdminBillsContent() {
                 </Button>
               </div>
             </form>
+          </Card>
+        </div>
+      )}
+
+      {/* MODAL: BUAT VA (admin mints the Virtual Account for one bill) */}
+      {vaBill && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-md p-6 border-border shadow-2xl space-y-4 my-8">
+            <div>
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <CreditCard className="size-5 text-primary" />
+                <span>Buat Virtual Account</span>
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Nomor VA dibuat atas nama wali penagih siswa dan dikirim ke WhatsApp-nya. VA berlaku 3 hari; VA lama
+                yang masih terbuka otomatis digantikan.
+              </p>
+            </div>
+
+            <div className="p-3 bg-muted/40 rounded-xl text-xs space-y-1">
+              <p><strong>Tagihan:</strong> {vaBill.description}</p>
+              <p><strong>Siswa:</strong> {vaBill.student?.nama_lengkap}</p>
+              <p><strong>Sisa Tagihan:</strong> {rupiah(vaBill.remaining_amount)}</p>
+            </div>
+
+            {vaResult ? (
+              <div className="space-y-3 text-xs">
+                <div className="rounded-xl border border-good/40 bg-good/5 p-4 space-y-2">
+                  <p className="font-semibold text-good">Virtual Account berhasil dibuat</p>
+                  <p className="text-muted-foreground">{vaResult.payment.virtual_account?.bank_name}</p>
+                  <p className="font-mono text-lg font-bold tracking-wider text-foreground">
+                    {vaResult.payment.virtual_account?.va_number}
+                  </p>
+                  <p className="text-muted-foreground">
+                    Jumlah: <strong className="text-foreground">{rupiah(vaResult.payment.amount)}</strong> · Bayar
+                    sebelum{" "}
+                    {vaResult.payment.virtual_account?.due_date
+                      ? tanggal(vaResult.payment.virtual_account.due_date)
+                      : "-"}
+                  </p>
+                </div>
+                <p className={`text-[11px] ${vaResult.whatsapp.sent ? "text-muted-foreground" : "text-warn"}`}>
+                  {vaResult.whatsapp.sent
+                    ? "Nomor VA sudah dikirim ke wali via WhatsApp."
+                    : `Nomor VA belum terkirim ke wali: ${vaResult.whatsapp.reason ?? "alasan tidak diketahui"} — akan dicoba ulang otomatis; wali tetap bisa melihatnya di aplikasi.`}
+                </p>
+                <Button onClick={() => setVaBill(null)} className="w-full font-bold">
+                  Selesai
+                </Button>
+              </div>
+            ) : (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setCreatingVa(true);
+                  try {
+                    const res = await api.post<{
+                      payment: Payment;
+                      whatsapp: { sent: boolean; reason: string | null };
+                    }>(`/api/admin/bills/${vaBill.ulid}/va`, { bank: vaBank });
+                    setVaResult(res);
+                    load();
+                  } catch (err) {
+                    toast.error(err instanceof ApiError ? err.message : "Gagal membuat Virtual Account.");
+                  } finally {
+                    setCreatingVa(false);
+                  }
+                }}
+                className="space-y-3.5 text-xs"
+              >
+                <div>
+                  <Label className="text-xs">Bank</Label>
+                  <select
+                    value={vaBank}
+                    onChange={(e) => setVaBank(e.target.value as "muamalat" | "bsi")}
+                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                  >
+                    <option value="muamalat">Bank Muamalat</option>
+                    <option value="bsi">Bank Syariah Indonesia (BSI)</option>
+                  </select>
+                </div>
+
+                <div className="flex justify-end gap-2 border-t border-border pt-4">
+                  <Button type="button" variant="ghost" onClick={() => setVaBill(null)} disabled={creatingVa}>
+                    Batal
+                  </Button>
+                  <Button type="submit" disabled={creatingVa} className="font-bold shadow-xs">
+                    {creatingVa ? "Membuat VA…" : "Buat Virtual Account"}
+                  </Button>
+                </div>
+              </form>
+            )}
           </Card>
         </div>
       )}

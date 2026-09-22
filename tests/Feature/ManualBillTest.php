@@ -98,14 +98,18 @@ class ManualBillTest extends TestCase
 
     public function test_a_unit_admin_can_only_issue_bills_for_their_own_students(): void
     {
+        // The one fee type a unit admin may issue by hand (school decision
+        // 2026-09-22) - the scoping subject of this test, not the type.
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once', 'is_active' => true]);
+
         $this->actingAs($this->admin('admin_unit', $this->smp))
-            ->postJson('/api/admin/bills/manual', $this->payload())
+            ->postJson('/api/admin/bills/manual', $this->payload(['fee_type_ulid' => $cambridge->ulid]))
             ->assertNotFound(); // student is SD-13, caller is SMP-12 - 404, not 403 (R3)
 
         $this->assertDatabaseCount('bills', 0);
 
         $this->actingAs($this->admin('admin_unit', $this->sd))
-            ->postJson('/api/admin/bills/manual', $this->payload())
+            ->postJson('/api/admin/bills/manual', $this->payload(['fee_type_ulid' => $cambridge->ulid]))
             ->assertCreated();
     }
 

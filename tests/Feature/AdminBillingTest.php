@@ -402,4 +402,45 @@ class AdminBillingTest extends TestCase
         $this->assertSame(1, Bill::count());
         $this->assertSame('Sudah punya tagihan', BillingRun::latest('id')->first()->skipped_detail[0]['reason']);
     }
+
+    public function test_a_once_run_skips_a_student_already_billed_on_the_manual_lane(): void
+    {
+        // Both lanes issue cambridge (run + admin's manual bills), and a
+        // manual bill never carries the generator's dedup key - the
+        // (student, type, year) tuple is what must block the run.
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+        FeeRate::create([
+            'fee_type_id' => $cambridge->id,
+            'school_unit_id' => $this->sd->id,
+            'academic_year_id' => $this->year->id,
+            'amount' => 650000,
+        ]);
+        $student = $this->studentIn($this->sd, 'Anak Manual');
+        $year = AcademicYear::where('is_active', true)->first();
+
+        $manual = Bill::create([
+            'bill_number' => 'CAM/M/0001',
+            'dedup_key' => 'manual:'.$student->id.':'.uniqid(),
+            'description' => 'Cambridge & Buku TA 2026/2027',
+            'student_id' => $student->id,
+            'academic_year_id' => $year->id,
+            'fee_type_id' => $cambridge->id,
+            'subtotal' => 900000, 'total_amount' => 900000, 'remaining_amount' => 900000,
+            'status' => 'unpaid', 'due_date' => now()->addDays(7)->toDateString(), 'issued_at' => now(),
+        ]);
+
+        $this->actingAs($this->staff('admin'))
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'cambridge'])
+            ->assertStatus(201)
+            ->assertJsonPath('run.bills_created', 0)
+            ->assertJsonPath('run.bills_skipped', 1);
+
+        // The run names the manual bill as the reason, and the family keeps
+        // exactly one cambridge bill.
+        $skipped = BillingRun::latest('id')->first()->skipped_detail;
+        $this->assertSame('Sudah punya tagihan', $skipped[0]['reason']);
+        $this->assertStringContainsString('manual', $skipped[0]['detail']);
+        $this->assertSame(1, Bill::where('fee_type_id', $cambridge->id)->count());
+        $this->assertTrue($manual->exists());
+    }
 }

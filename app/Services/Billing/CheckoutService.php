@@ -44,7 +44,35 @@ class CheckoutService
             throw new RuntimeException('Akun ini tidak terdaftar sebagai wali murid.');
         }
 
-        $bills = $this->collectPayable($user, $billUlids);
+        return $this->checkout($user, $guardian, $billUlids, $method, $customAmounts, $bank);
+    }
+
+    /**
+     * The admin's door into the same lane the wali walks: same basket rules,
+     * same prefix assertion, same supersede guards, same allocator - only the
+     * payer differs, resolved by the caller (the student's billing contact)
+     * so the payment stays visible to that family under /api/wali/payments.
+     */
+    public function startForGuardian(
+        User $collector,
+        Guardian $guardian,
+        array $billUlids,
+        string $method = 'virtual_account',
+        array $customAmounts = [],
+        string $bank = 'muamalat',
+    ): Payment {
+        return $this->checkout($collector, $guardian, $billUlids, $method, $customAmounts, $bank);
+    }
+
+    private function checkout(
+        User $collector,
+        Guardian $guardian,
+        array $billUlids,
+        string $method,
+        array $customAmounts,
+        string $bank,
+    ): Payment {
+        $bills = $this->collectPayable($collector, $billUlids);
 
         if ($bills->isEmpty()) {
             throw new RuntimeException('Tidak ada tagihan yang dapat dibayar.');

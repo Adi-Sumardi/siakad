@@ -240,6 +240,13 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     // payment lanes as generated bills; VA follows the fee type's prefix
     // (cash at the desk for types e-SPP has no prefix for).
     Route::post('/bills/manual', [AdminBillController::class, 'storeManual']);
+
+    // An admin minting a VA walks the same checkout lane a wali walks - the
+    // same basket, prefix, and supersede guards - with the student's billing
+    // contact as payer so the family still sees it under /api/wali/payments.
+    // Throttled like the wali's own checkout: both mint bank billings.
+    Route::post('/bills/{ulid}/va', [AdminBillController::class, 'storeVa'])
+        ->middleware('throttle:20,1');
     Route::get('/bills/{ulid}/pdf', [AdminBillController::class, 'pdf']);
     Route::post('/bills/{ulid}/waive', [AdminBillController::class, 'waive']);
     Route::post('/bills/{ulid}/cancel', [AdminBillController::class, 'cancel']);
