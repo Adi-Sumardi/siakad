@@ -48,6 +48,14 @@ RUN rm -f bootstrap/cache/*.php \
 COPY docker/php/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# This base image's own defaults (upload_max_filesize=2M, post_max_size=8M)
+# are smaller than what Laravel's own validation already allows (achievement
+# uploads can total ~10MB across two files) - PHP would silently drop the
+# whole request before the validator ever runs. Same gap PMB found and fixed
+# 2026-09-18, confirmed present here too - see docker/php/uploads.ini for
+# the exact worst-case sizing.
+COPY docker/php/uploads.ini /usr/local/etc/php/conf.d/uploads.ini
+
 # Default pm.max_children=5 (this base image) queues nearly everything past a
 # handful of concurrent requests - PMB hit this exact gap the day before its
 # own launch (infra/memory.md, 2026-09-17). sed edits the base image's

@@ -56,9 +56,19 @@ Schedule::command('units:sync')
     ->description('Sinkronkan master unit dari PMB');
 
 // Polling status Virtual Account Bank Muamalat (e-SPP)
+// withoutOverlapping(5) minutes, not the bare default: an unqualified
+// withoutOverlapping() expires its mutex after Laravel's default 1440
+// minutes (24h). A run killed mid-flight (a container recreate landing on
+// a due tick - e.g. a deploy) never reaches its own cleanup, so the lock
+// sits in cache_locks for a full day, silently blocking every future tick
+// with nothing logged anywhere - this exact command, this exact bug, cost
+// PMB hours of unnoticed payment-sync downtime on 2026-09-19 (see that
+// app's own routes/console.php). A real run finishes in well under a
+// minute even with dozens of pending VAs, so 5 minutes is slack, not a
+// tight ceiling.
 Schedule::command('payments:poll-billing-va')
     ->everyTwoMinutes()
     ->name('poll-billing-va-payments')
-    ->withoutOverlapping()
+    ->withoutOverlapping(5)
     ->description('Periksa status pelunasan Virtual Account Bank Muamalat (e-SPP)');
 
