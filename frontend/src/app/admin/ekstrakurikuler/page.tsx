@@ -124,8 +124,10 @@ function RosterPanel({ ekskul, students, onChanged }: { ekskul: EkskulRow; stude
   const [studentUlid, setStudentUlid] = useState("");
   const [assigning, setAssigning] = useState(false);
 
+  // No reset-to-null before the fetch: `members === null` IS the first load,
+  // so switching ekskul keeps the old rows until the new ones land - and
+  // nothing calls setState synchronously from the effect below.
   function load() {
-    setMembers(null);
     api.get<{ members: Member[] }>(`/api/admin/extracurriculars/${ekskul.ulid}/members`)
       .then((d) => setMembers(d.members))
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat anggota."));

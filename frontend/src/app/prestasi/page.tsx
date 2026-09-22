@@ -3,11 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Award,
-  Calendar,
-  CheckCircle2,
   ChevronRight,
-  ExternalLink,
   FileDown,
   GraduationCap,
   Plus,
@@ -51,9 +47,12 @@ export default function WaliPrestasiPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadData() {
-    try {
-      const { students: rawStudents } = await api.get<{
+  // .then() chains (not async/await) so setState only ever runs in an async
+  // callback - the effect below calls this synchronously, and awaiting first
+  // still trips react-hooks/set-state-in-effect's analysis.
+  function loadData() {
+    api
+      .get<{
         students: Array<{
           ulid: string;
           nama_lengkap: string;
@@ -61,25 +60,21 @@ export default function WaliPrestasiPage() {
           unit: { code: string; label: string } | null;
           kelas: { name: string } | null;
         }>;
-      }>("/api/wali/students");
-
-      const studentsWithAch = await Promise.all(
-        rawStudents.map(async (st) => {
-          try {
-            const { achievements } = await api.get<{ achievements: Achievement[] }>(
-              `/api/wali/students/${st.ulid}/achievements`
-            );
-            return { ...st, achievements };
-          } catch {
-            return { ...st, achievements: [] };
-          }
-        })
-      );
-
-      setStudents(studentsWithAch);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar prestasi.");
-    }
+      }>("/api/wali/students")
+      .then(({ students: rawStudents }) =>
+        Promise.all(
+          rawStudents.map((st) =>
+            api
+              .get<{ achievements: Achievement[] }>(`/api/wali/students/${st.ulid}/achievements`)
+              .then(({ achievements }) => ({ ...st, achievements }))
+              .catch(() => ({ ...st, achievements: [] as Achievement[] })),
+          ),
+        ),
+      )
+      .then((studentsWithAch) => setStudents(studentsWithAch))
+      .catch((err) => {
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar prestasi.");
+      });
   }
 
   useEffect(() => {

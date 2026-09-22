@@ -5,16 +5,12 @@ import { toast } from "sonner";
 import {
   Building2,
   Calendar,
-  CheckCircle2,
   Download,
   Edit2,
   Filter,
   Layers,
   Plus,
   Power,
-  RefreshCw,
-  Search,
-  Sparkles,
   Trash2,
   UploadCloud,
   X,
@@ -175,43 +171,46 @@ export default function FeeRatesPage() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ message: string; imported: number; updated: number; errors: string[] } | null>(null);
 
-  const loadData = useCallback(async () => {
-    try {
-      const queryParams = new URLSearchParams();
-      if (filterUnit) queryParams.set("unit", filterUnit);
-      if (filterType) queryParams.set("type", filterType);
-      if (filterYear) queryParams.set("year", filterYear);
+  // .then() chains (not async/await) so setState only ever runs in an async
+  // callback - the effect below calls this synchronously, and awaiting first
+  // still trips react-hooks/set-state-in-effect's analysis.
+  const loadData = useCallback(() => {
+    const queryParams = new URLSearchParams();
+    if (filterUnit) queryParams.set("unit", filterUnit);
+    if (filterType) queryParams.set("type", filterType);
+    if (filterYear) queryParams.set("year", filterYear);
 
-      const [ftRes, rRes, uRes, yRes] = await Promise.all([
-        api.get<{ fee_types: FeeType[] }>("/api/admin/fee-types"),
-        api.get<{ rates: Rate[] }>(`/api/admin/fee-rates?${queryParams.toString()}`),
-        api.get<{ school_units: Option[] }>("/api/admin/school-units"),
-        api.get<{ academic_years: Option[] }>("/api/admin/academic-years"),
-      ]);
+    Promise.all([
+      api.get<{ fee_types: FeeType[] }>("/api/admin/fee-types"),
+      api.get<{ rates: Rate[] }>(`/api/admin/fee-rates?${queryParams.toString()}`),
+      api.get<{ school_units: Option[] }>("/api/admin/school-units"),
+      api.get<{ academic_years: Option[] }>("/api/admin/academic-years"),
+    ])
+      .then(([ftRes, rRes, uRes, yRes]) => {
+        setFeeTypes(ftRes.fee_types);
+        setRates(rRes.rates);
+        setUnits(uRes.school_units);
+        setYears(yRes.academic_years);
 
-      setFeeTypes(ftRes.fee_types);
-      setRates(rRes.rates);
-      setUnits(uRes.school_units);
-      setYears(yRes.academic_years);
-
-      if (ftRes.fee_types.length > 0 && !rateForm.fee_type_ulid) {
-        // A unit admin's only writable rate is their unit's Cambridge - the
-        // form opens pre-locked to it so a submit can never name anything
-        // the API would refuse.
-        setRateForm((f) => ({
-          ...f,
-          fee_type_ulid: isCentral
-            ? ftRes.fee_types[0].ulid
-            : ftRes.fee_types.find((t) => t.code === "cambridge")?.ulid ?? "",
-          school_unit_ulid: isCentral
-            ? uRes.school_units[0]?.ulid ?? ""
-            : user?.school_unit?.ulid ?? uRes.school_units[0]?.ulid ?? "",
-          academic_year_ulid: yRes.academic_years.find((y) => y.is_active)?.ulid ?? yRes.academic_years[0]?.ulid ?? "",
-        }));
-      }
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Gagal memuat data tarif.");
-    }
+        if (ftRes.fee_types.length > 0 && !rateForm.fee_type_ulid) {
+          // A unit admin's only writable rate is their unit's Cambridge - the
+          // form opens pre-locked to it so a submit can never name anything
+          // the API would refuse.
+          setRateForm((f) => ({
+            ...f,
+            fee_type_ulid: isCentral
+              ? ftRes.fee_types[0].ulid
+              : ftRes.fee_types.find((t) => t.code === "cambridge")?.ulid ?? "",
+            school_unit_ulid: isCentral
+              ? uRes.school_units[0]?.ulid ?? ""
+              : user?.school_unit?.ulid ?? uRes.school_units[0]?.ulid ?? "",
+            academic_year_ulid: yRes.academic_years.find((y) => y.is_active)?.ulid ?? yRes.academic_years[0]?.ulid ?? "",
+          }));
+        }
+      })
+      .catch((err) => {
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat data tarif.");
+      });
   }, [filterUnit, filterType, filterYear, rateForm.fee_type_ulid, isCentral, user?.school_unit?.ulid]);
 
   useEffect(() => {

@@ -5,14 +5,11 @@ import { toast } from "sonner";
 import {
   BadgePercent,
   CheckCircle2,
-  Filter,
   Pencil,
   Plus,
-  Search,
   Trash2,
   UserCheck,
   Users,
-  XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -133,26 +130,28 @@ export default function AdminDiscountPage() {
   });
 
   const [studentResults, setStudentResults] = useState<Array<{ ulid: string; nama_lengkap: string; nis: string | null; unit: string }>>([]);
-  const [searchingStudents, setSearchingStudents] = useState(false);
 
-  const loadData = useCallback(async () => {
-    try {
-      const [schRes, stRes, ftRes, unRes, yrRes] = await Promise.all([
-        api.get<{ schemes: DiscountScheme[] }>("/api/admin/discount-schemes"),
-        api.get<{ student_discounts: StudentDiscount[] }>("/api/admin/student-discounts"),
-        api.get<{ fee_types: FeeType[] }>("/api/admin/fee-types"),
-        api.get<{ school_units: SchoolUnit[] }>("/api/admin/school-units"),
-        api.get<{ academic_years: AcademicYear[] }>("/api/admin/academic-years"),
-      ]);
-
-      setSchemes(schRes.schemes);
-      setStudentDiscounts(stRes.student_discounts);
-      setFeeTypes(ftRes.fee_types);
-      setUnits(unRes.school_units);
-      setYears(yrRes.academic_years);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Gagal memuat data diskon.");
-    }
+  // .then() chains (not async/await) so setState only ever runs in an async
+  // callback - the effect below calls this synchronously, and awaiting first
+  // still trips react-hooks/set-state-in-effect's analysis.
+  const loadData = useCallback(() => {
+    Promise.all([
+      api.get<{ schemes: DiscountScheme[] }>("/api/admin/discount-schemes"),
+      api.get<{ student_discounts: StudentDiscount[] }>("/api/admin/student-discounts"),
+      api.get<{ fee_types: FeeType[] }>("/api/admin/fee-types"),
+      api.get<{ school_units: SchoolUnit[] }>("/api/admin/school-units"),
+      api.get<{ academic_years: AcademicYear[] }>("/api/admin/academic-years"),
+    ])
+      .then(([schRes, stRes, ftRes, unRes, yrRes]) => {
+        setSchemes(schRes.schemes);
+        setStudentDiscounts(stRes.student_discounts);
+        setFeeTypes(ftRes.fee_types);
+        setUnits(unRes.school_units);
+        setYears(yrRes.academic_years);
+      })
+      .catch((err) => {
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat data diskon.");
+      });
   }, []);
 
   useEffect(() => {
@@ -165,26 +164,24 @@ export default function AdminDiscountPage() {
   // forever empty and assignment was silently impossible.
   useEffect(() => {
     if (assignForm.student_search.length >= 2) {
-      const timer = setTimeout(async () => {
-        setSearchingStudents(true);
-        try {
-          const res = await api.get<{
+      const timer = setTimeout(() => {
+        api
+          .get<{
             students: {
               data: Array<{ ulid: string; nama_lengkap: string; nis: string | null; unit: { label: string } | null }>;
             };
-          }>(`/api/admin/students?search=${encodeURIComponent(assignForm.student_search)}&per_page=8`);
-          const list = (res.students.data || []).map((s) => ({
-            ulid: s.ulid,
-            nama_lengkap: s.nama_lengkap,
-            nis: s.nis,
-            unit: s.unit?.label ?? "-",
-          }));
-          setStudentResults(list);
-        } catch {
-          setStudentResults([]);
-        } finally {
-          setSearchingStudents(false);
-        }
+          }>(`/api/admin/students?search=${encodeURIComponent(assignForm.student_search)}&per_page=8`)
+          .then((res) => {
+            setStudentResults(
+              (res.students.data || []).map((s) => ({
+                ulid: s.ulid,
+                nama_lengkap: s.nama_lengkap,
+                nis: s.nis,
+                unit: s.unit?.label ?? "-",
+              })),
+            );
+          })
+          .catch(() => setStudentResults([]));
       }, 300);
       return () => clearTimeout(timer);
     }

@@ -9,7 +9,6 @@ import {
   KeyRound,
   Mail,
   Phone,
-  Plus,
   RefreshCw,
   Search,
   Shield,
@@ -17,10 +16,8 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
-  UserCheck,
   UserPlus,
   Users,
-  UserX,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -60,7 +57,6 @@ export default function UserManagementPage() {
   const [users, setUsers] = useState<UserItem[] | null>(null);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
 
   // "Reset Akses" - the lost-contact lane (central admin only)
@@ -94,8 +90,11 @@ export default function UserManagementPage() {
   const [formIsActive, setFormIsActive] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  // No setLoading here: `users === null` IS the first-load state, so a
+  // refetch (filter/page change) keeps the previous rows on screen instead of
+  // flashing a skeleton - and nothing calls setState synchronously in the
+  // effect below.
   function loadUsers(targetPage: number = page) {
-    setLoading(true);
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (roleFilter) params.set("role", roleFilter);
@@ -110,8 +109,7 @@ export default function UserManagementPage() {
         setUsers(d.users.data);
         setMeta(d.users.meta);
       })
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat pengguna."))
-      .finally(() => setLoading(false));
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat pengguna."));
   }
 
   useEffect(() => {
@@ -486,7 +484,7 @@ export default function UserManagementPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {loading && (
+              {users === null && (
                 <tr>
                   <td colSpan={6} className="p-5">
                     <Skeleton className="h-20 w-full rounded-xl" />
@@ -494,7 +492,7 @@ export default function UserManagementPage() {
                 </tr>
               )}
 
-              {!loading && users?.length === 0 && (
+              {users !== null && users.length === 0 && (
                 <tr>
                   <td colSpan={6} className="p-8 text-center text-muted-foreground">
                     Tidak ada data pengguna yang sesuai dengan filter pencarian.
@@ -502,7 +500,7 @@ export default function UserManagementPage() {
                 </tr>
               )}
 
-              {!loading &&
+              {users !== null &&
                 users?.map((u) => (
                   <tr key={u.ulid} className="hover:bg-accent/30 transition-colors">
                     <td className="px-5 py-4">
@@ -659,7 +657,7 @@ export default function UserManagementPage() {
                   <div className="mt-1 space-y-1.5">
                     <select
                       value={formRole}
-                      onChange={(e) => setFormRole(e.target.value as any)}
+                      onChange={(e) => setFormRole(e.target.value as UserItem["role"])}
                       className="w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
                     >
                       <option value="guru">Guru</option>
@@ -673,7 +671,7 @@ export default function UserManagementPage() {
                 ) : (
                   <select
                     value={formRole}
-                    onChange={(e) => setFormRole(e.target.value as any)}
+                    onChange={(e) => setFormRole(e.target.value as UserItem["role"])}
                     className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
                   >
                     <option value="admin">Administrator Pusat (Akses Penuh Semua Unit)</option>
@@ -777,7 +775,7 @@ export default function UserManagementPage() {
                 <Label className="text-xs">Peran / Role Pengguna</Label>
                 <select
                   value={formRole}
-                  onChange={(e) => setFormRole(e.target.value as any)}
+                  onChange={(e) => setFormRole(e.target.value as UserItem["role"])}
                   className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
                 >
                   <option value="admin">Administrator Pusat</option>

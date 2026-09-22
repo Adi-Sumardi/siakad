@@ -81,7 +81,10 @@ export default function ActivityLogPage() {
   const [page, setPage] = useState(1);
   const [logs, setLogs] = useState<Paginated<LogRow> | null>(null);
 
-  const load = useCallback(async () => {
+  // .then() chains (not async/await) so setState only ever runs in an async
+  // callback - the effect below calls this synchronously, and awaiting first
+  // still trips react-hooks/set-state-in-effect's analysis.
+  const load = useCallback(() => {
     const params = new URLSearchParams();
     if (action) params.set("action", action);
     if (userName) params.set("user", userName);
@@ -89,12 +92,12 @@ export default function ActivityLogPage() {
     if (to) params.set("to", to);
     params.set("page", String(page));
 
-    try {
-      const d = await api.get<{ logs: Paginated<LogRow> }>(`/api/admin/activity-logs?${params}`);
-      setLogs(d.logs);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Gagal memuat log aktivitas.");
-    }
+    api
+      .get<{ logs: Paginated<LogRow> }>(`/api/admin/activity-logs?${params}`)
+      .then((d) => setLogs(d.logs))
+      .catch((err) => {
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat log aktivitas.");
+      });
   }, [action, userName, from, to, page]);
 
   useEffect(() => {
@@ -139,7 +142,7 @@ export default function ActivityLogPage() {
       <div>
         <h1 className="text-xl font-bold tracking-tight">Log aktivitas</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Jejak "siapa melakukan apa, kapan" — setiap aksi uang dan poin tercatat otomatis. Hanya bisa dibaca, tidak bisa diubah.
+          Jejak &quot;siapa melakukan apa, kapan&quot; — setiap aksi uang dan poin tercatat otomatis. Hanya bisa dibaca, tidak bisa diubah.
         </p>
       </div>
 

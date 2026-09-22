@@ -4,18 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  AlertCircle,
-  Building2,
   Check,
   CheckCircle2,
   ChevronRight,
   Coins,
   CreditCard,
-  Download,
   ExternalLink,
   Receipt,
   ShoppingBag,
-  Sparkles,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -59,14 +55,19 @@ export default function BillsPage() {
   const [customAmount, setCustomAmount] = useState("");
   const [submittingCustom, setSubmittingCustom] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await api.get<{ bills: Bill[]; summary: BillSummary }>("/api/wali/bills");
-      setBills(data.bills);
-      setSummary(data.summary);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan. Muat ulang halaman.");
-    }
+  // .then() chains (not async/await) so setState only ever runs in an async
+  // callback - the effect below calls this synchronously, and awaiting first
+  // still trips react-hooks/set-state-in-effect's analysis.
+  const load = useCallback(() => {
+    api
+      .get<{ bills: Bill[]; summary: BillSummary }>("/api/wali/bills")
+      .then((data) => {
+        setBills(data.bills);
+        setSummary(data.summary);
+      })
+      .catch((err) => {
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan. Muat ulang halaman.");
+      });
   }, []);
 
   useEffect(() => {
@@ -150,7 +151,7 @@ export default function BillsPage() {
 
       toast.success("Invoice pembayaran berhasil diterbitkan.");
       setSelected(new Set());
-      await load();
+      load();
 
       if (payment.invoice_url && !payment.invoice_url.includes("/pembayaran")) {
         window.location.href = payment.invoice_url;
@@ -160,7 +161,7 @@ export default function BillsPage() {
       router.push(`/pembayaran?payment=${payment.ulid}`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Tidak dapat memproses pembayaran.");
-      await load();
+      load();
     } finally {
       setPaying(false);
     }
@@ -189,7 +190,7 @@ export default function BillsPage() {
 
       toast.success("Pembayaran kustom berhasil dibuat.");
       setCustomBill(null);
-      await load();
+      load();
 
       if (payment.invoice_url && !payment.invoice_url.includes("/pembayaran")) {
         window.location.href = payment.invoice_url;

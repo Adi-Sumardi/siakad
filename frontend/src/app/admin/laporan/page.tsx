@@ -3,20 +3,15 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
-  ArrowDownRight,
-  ArrowUpRight,
   Calendar,
   CreditCard,
-  Download,
-  FileSpreadsheet,
   Layers,
-  PieChart,
   RefreshCw,
   TrendingDown,
   TrendingUp,
   Users,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -57,28 +52,34 @@ export default function ReportsPage() {
   const [attendance, setAttendance] = useState<Attendance | null>(null);
   const [from, setFrom] = useState(firstOfMonth());
   const [to, setTo] = useState(todayJakarta());
-  const [loading, setLoading] = useState(false);
+  // Spinner state ONLY - set from the button click and cleared in the async
+  // callback. First-load skeletons derive from the data states being null,
+  // so refetching keeps the previous report on screen.
+  const [refreshing, setRefreshing] = useState(false);
 
-  async function loadData() {
-    setLoading(true);
-    try {
-      const [recData, colData, attData] = await Promise.all([
-        api.get<Receivables>("/api/admin/reports/receivables"),
-        api.get<Collections>(`/api/admin/reports/collections?from=${from}&to=${to}`),
-        api.get<Attendance>(`/api/admin/reports/attendance?from=${from}&to=${to}`),
-      ]);
-      setReceivables(recData);
-      setCollections(colData);
-      setAttendance(attData);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Gagal memuat laporan.");
-    } finally {
-      setLoading(false);
-    }
+  // .then() chains (not async/await) so setState only ever runs in an async
+  // callback - the effect below calls this synchronously, and awaiting first
+  // still trips react-hooks/set-state-in-effect's analysis.
+  function loadData() {
+    Promise.all([
+      api.get<Receivables>("/api/admin/reports/receivables"),
+      api.get<Collections>(`/api/admin/reports/collections?from=${from}&to=${to}`),
+      api.get<Attendance>(`/api/admin/reports/attendance?from=${from}&to=${to}`),
+    ])
+      .then(([recData, colData, attData]) => {
+        setReceivables(recData);
+        setCollections(colData);
+        setAttendance(attData);
+      })
+      .catch((err) => {
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat laporan.");
+      })
+      .finally(() => setRefreshing(false));
   }
 
   useEffect(() => {
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
   return (
@@ -92,8 +93,17 @@ export default function ReportsPage() {
           </p>
         </div>
 
-        <Button variant="outline" size="sm" onClick={loadData} disabled={loading} className="gap-2">
-          <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setRefreshing(true);
+            loadData();
+          }}
+          disabled={refreshing}
+          className="gap-2"
+        >
+          <RefreshCw className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
           <span>Segarkan Laporan</span>
         </Button>
       </div>

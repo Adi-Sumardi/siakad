@@ -164,12 +164,11 @@ function AdminBillsContent() {
   // Soft duplicate guard (manual → run direction): both lanes issue
   // cambridge, so warn before a second bill lands on the same student. Soft
   // on purpose - a follow-up bill (extra buku, a second program year-half)
-  // is legitimate.
+  // is legitimate. Early return instead of a sync reset - the chip render is
+  // gated on manualIsCambridge so a stale value can never show outside the
+  // cambridge context, and state is only ever written from async callbacks.
   useEffect(() => {
-    if (!manual.student_ulid || !manualIsCambridge) {
-      setExistingCambridge(false);
-      return;
-    }
+    if (!manual.student_ulid || !manualIsCambridge) return;
 
     let cancelled = false;
     const activeYear = years.find((y) => y.is_active)?.year;
@@ -697,7 +696,7 @@ function AdminBillsContent() {
                 </p>
               )}
 
-              {existingCambridge && (
+              {manualIsCambridge && existingCambridge && (
                 <p className="rounded-lg border border-warn/30 bg-warn-soft px-3 py-2 text-[11px] font-medium text-warn">
                   Siswa ini sudah punya tagihan Cambridge tahun ajaran aktif. Tetap terbitkan tagihan baru?
                   (Sah bila memang ada penambahan program/buku.)

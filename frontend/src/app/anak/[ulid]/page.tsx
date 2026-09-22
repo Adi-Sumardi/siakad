@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Award, ClipboardList, Download, FileDown, Plus, Sparkles, Trophy, UserCheck, X } from "lucide-react";
 import { toast } from "sonner";
@@ -273,14 +273,17 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
   const [downloadingRapor, setDownloadingRapor] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function loadAchievements() {
+  // useCallback so the mount effect below can list them as deps without a
+  // stale closure - the eslint exhaustive-deps warning was real: ulid is a
+  // route param this page re-renders with.
+  const loadAchievements = useCallback(() => {
     api
       .get<{ achievements: Achievement[] }>(`/api/wali/students/${ulid}/achievements`)
       .then((d) => setAchievements(d.achievements))
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
-  }
+  }, [ulid]);
 
-  function loadEkskul() {
+  const loadEkskul = useCallback(() => {
     api
       .get<{ extracurriculars: { ulid: string; name: string; pembina: string | null; school_unit: string | null }[]; available: { ulid: string; name: string; pembina: string | null; member_count: number; capacity: number | null }[] }>(`/api/wali/students/${ulid}/extracurriculars`)
       .then((d) => {
@@ -289,7 +292,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
         setEnrollPick("");
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
-  }
+  }, [ulid]);
 
   async function handleEnroll() {
     if (!enrollPick) return;
@@ -320,7 +323,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
     loadEkskul();
     loadAchievements();
-  }, [ulid, user]);
+  }, [ulid, user, loadEkskul, loadAchievements]);
 
   function loadGrades(termUlid?: string) {
     const query = termUlid ? `?term_ulid=${termUlid}` : "";

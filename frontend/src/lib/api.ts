@@ -51,7 +51,9 @@ function handleExpiredSession() {
   }
   redirectingToLogin = true;
   import("sonner").then(({ toast }) => toast.error("Sesi Anda berakhir. Silakan masuk kembali."));
-  window.location.href = "/login";
+  // replace(), not href/assign: Back must not return into an authenticated
+  // page after a session expired.
+  window.location.replace("/login");
 }
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {

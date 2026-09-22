@@ -52,20 +52,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(async () => {
-    try {
-      const { user } = await api.get<{ user: User }>("/api/auth/me");
-      setUser(user);
-    } catch (error) {
-      // A 401 on load is simply "not signed in", which is why api.ts excludes
-      // this path from its expired-session redirect.
-      if (!(error instanceof ApiError) || error.status !== 401) {
-        console.error(error);
-      }
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
+  // .then() chains (not async/await) so setState only ever runs in an async
+  // callback - the boot effect below calls this synchronously, and awaiting
+  // first still trips react-hooks/set-state-in-effect's analysis. The loading
+  // flag stays (null user means signed out, not loading) but is only ever
+  // written from async callbacks.
+  const refresh = useCallback(() => {
+    api
+      .get<{ user: User }>("/api/auth/me")
+      .then(({ user }) => setUser(user))
+      .catch((error) => {
+        // A 401 on load is simply "not signed in", which is why api.ts excludes
+        // this path from its expired-session redirect.
+        if (!(error instanceof ApiError) || error.status !== 401) {
+          console.error(error);
+        }
+        setUser(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -88,7 +92,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await api.post("/api/auth/logout");
     } finally {
       setUser(null);
-      window.location.href = "/login";
+      // replace(), not href/assign: Back must not return into an
+      // authenticated page after logout.
+      window.location.replace("/login");
     }
   }, []);
 

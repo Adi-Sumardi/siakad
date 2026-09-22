@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Award, CheckCircle2, FileDown, RefreshCw, XCircle } from "lucide-react";
+import { CheckCircle2, FileDown, RefreshCw} from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

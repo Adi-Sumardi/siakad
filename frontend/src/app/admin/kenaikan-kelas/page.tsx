@@ -40,12 +40,14 @@ export default function KenaikanKelasPage() {
     api.get<{ academic_years: AcademicYearOption[] }>("/api/admin/academic-years").then((d) => setYears(d.academic_years));
   }, []);
 
+  // No sync reset-to-null inside the effects: "empty" is derived during
+  // render from the selectors (a roster without a source class, target
+  // options without a target year, render nothing), and a switch keeps the
+  // previous rows until the new ones land - no setState ever runs
+  // synchronously from an effect.
   useEffect(() => {
-    if (!sourceClassroom) {
-      setRoster(null);
-      return;
-    }
-    setRoster(null);
+    if (!sourceClassroom) return;
+
     api.get<{ students: RosterStudent[] }>(`/api/admin/classrooms/${sourceClassroom}/promotion-roster`)
       .then((d) => {
         setRoster(d.students);
@@ -58,23 +60,28 @@ export default function KenaikanKelasPage() {
   }, [sourceClassroom]);
 
   useEffect(() => {
-    if (!sourceClassroom || !targetYear) {
-      setPromotedTargets(null);
-      setRepeatedTargets(null);
-      return;
-    }
-    api.get<{ same_unit: ClassroomOption[]; other: ClassroomOption[] }>(
-      `/api/admin/classrooms/${sourceClassroom}/promotion-targets?academic_year_ulid=${targetYear}&outcome=promoted`,
-    ).then(setPromotedTargets).catch(() => setPromotedTargets({ same_unit: [], other: [] }));
+    if (!sourceClassroom || !targetYear) return;
 
-    api.get<{ same_unit: ClassroomOption[]; other: ClassroomOption[] }>(
-      `/api/admin/classrooms/${sourceClassroom}/promotion-targets?academic_year_ulid=${targetYear}&outcome=repeated`,
-    ).then(setRepeatedTargets).catch(() => setRepeatedTargets({ same_unit: [], other: [] }));
+    const url = (outcome: Outcome) =>
+      `/api/admin/classrooms/${sourceClassroom}/promotion-targets?academic_year_ulid=${targetYear}&outcome=${outcome}`;
 
-    setBulkTarget("");
+    Promise.all([
+      api.get<{ same_unit: ClassroomOption[]; other: ClassroomOption[] }>(url("promoted")),
+      api.get<{ same_unit: ClassroomOption[]; other: ClassroomOption[] }>(url("repeated")),
+    ])
+      .then(([promoted, repeated]) => {
+        setPromotedTargets(promoted);
+        setRepeatedTargets(repeated);
+        setBulkTarget("");
+      })
+      .catch(() => {
+        setPromotedTargets({ same_unit: [], other: [] });
+        setRepeatedTargets({ same_unit: [], other: [] });
+      });
   }, [sourceClassroom, targetYear]);
 
   function targetsFor(outcome: Outcome) {
+    if (!targetYear) return [];
     const groups = outcome === "repeated" ? repeatedTargets : promotedTargets;
     return groups ? [...groups.same_unit, ...groups.other] : [];
   }
@@ -166,7 +173,7 @@ export default function KenaikanKelasPage() {
       {sourceClassroom && targetYear && (
         <Card className="flex flex-wrap items-end gap-3 p-5">
           <div className="flex flex-col gap-1.5">
-            <Label>Terapkan kelas tujuan ke semua yang "Naik kelas"</Label>
+            <Label>Terapkan kelas tujuan ke semua yang &quot;Naik kelas&quot;</Label>
             <select
               value={bulkTarget}
               onChange={(e) => setBulkTarget(e.target.value)}
@@ -187,9 +194,9 @@ export default function KenaikanKelasPage() {
         </Card>
       )}
 
-      {roster === null && sourceClassroom && <Skeleton className="h-64 w-full" />}
+      {sourceClassroom && roster === null && <Skeleton className="h-64 w-full" />}
 
-      {roster !== null && (
+      {sourceClassroom && roster !== null && (
         <div className="flex flex-col gap-2">
           {roster.length === 0 && <p className="text-sm text-muted-foreground">Tidak ada siswa aktif di kelas ini.</p>}
           {roster.map((s) => {
@@ -231,7 +238,7 @@ export default function KenaikanKelasPage() {
         </div>
       )}
 
-      {roster !== null && roster.length > 0 && (
+      {sourceClassroom && roster !== null && roster.length > 0 && (
         <div className="fixed inset-x-0 bottom-0 border-t bg-card/95 px-6 py-4 backdrop-blur-sm">
           <div className="mx-auto flex max-w-5xl items-center justify-between">
             <p className="text-sm text-muted-foreground">

@@ -140,8 +140,11 @@ export default function KelasPage() {
     api.get<{ users: { data: TeacherOption[] } }>("/api/admin/users?role=guru&per_page=200").then((d) => setTeachers(d.users.data));
   }, []);
 
+  // No reset-to-null before the fetch: `classrooms === null` IS the first
+  // load, so changing the year filter keeps the previous rows on screen
+  // instead of flashing a skeleton - and nothing ever calls setState
+  // synchronously in the effect below.
   function loadClassrooms(yearUlid: string) {
-    setClassrooms(null);
     const query = yearUlid ? `?academic_year_ulid=${yearUlid}` : "";
     api.get<{ classrooms: ClassroomRow[] }>(`/api/admin/classrooms${query}`)
       .then((d) => setClassrooms(d.classrooms))

@@ -19,6 +19,16 @@ type RosterResponse = {
 
 const CATEGORIES: GradeCategory[] = ["tugas", "uts", "uas"];
 
+/** The editable inputs for one category: each student's stored score, "" when unset. */
+function scoresFromRoster(roster: RosterResponse, category: GradeCategory): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const s of roster.students) {
+    const value = s[category];
+    next[s.ulid] = value === null ? "" : String(value);
+  }
+  return next;
+}
+
 export default function GuruGradeEntryPage({
   params,
 }: {
@@ -32,10 +42,17 @@ export default function GuruGradeEntryPage({
   const [submitting, setSubmitting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // scores is rebuilt in the load callback and in the category buttons'
+  // click handler - never by an effect - so nothing ever calls setState
+  // synchronously during render/effect. Typed edits in the current category
+  // survive until an explicit switch or reload, exactly as before.
   function load() {
     api
       .get<RosterResponse>(`/api/guru/classrooms/${classroomUlid}/subjects/${subjectUlid}/grades`)
-      .then((d) => setRoster(d))
+      .then((d) => {
+        setRoster(d);
+        setScores(scoresFromRoster(d, category));
+      })
       .catch((err) => setLoadError(err instanceof ApiError ? err.message : "Gagal memuat data nilai."));
   }
 
@@ -43,16 +60,6 @@ export default function GuruGradeEntryPage({
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classroomUlid, subjectUlid]);
-
-  useEffect(() => {
-    if (!roster) return;
-    const next: Record<string, string> = {};
-    for (const s of roster.students) {
-      const value = s[category];
-      next[s.ulid] = value === null ? "" : String(value);
-    }
-    setScores(next);
-  }, [roster, category]);
 
   async function submit() {
     if (!roster) return;
@@ -110,7 +117,10 @@ export default function GuruGradeEntryPage({
         {CATEGORIES.map((c) => (
           <button
             key={c}
-            onClick={() => setCategory(c)}
+            onClick={() => {
+              setCategory(c);
+              if (roster) setScores(scoresFromRoster(roster, c));
+            }}
             className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
               category === c ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground hover:bg-muted"
             }`}
