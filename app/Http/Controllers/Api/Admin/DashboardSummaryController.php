@@ -5,17 +5,8 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\DashboardSummaryRequest;
 use App\Models\AcademicYear;
-use App\Models\Achievement;
-use App\Models\Bill;
-use App\Models\Classroom;
-use App\Models\Enrollment;
-use App\Models\Extracurricular;
-use App\Models\ExtracurricularMember;
-use App\Models\Grade;
 use App\Models\SchoolUnit;
-use App\Models\Student;
 use App\Models\Term;
-use App\Models\User;
 use App\Services\Academic\WatchlistService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
@@ -28,9 +19,16 @@ use Illuminate\Support\Facades\DB;
  * Scope is enforced the same way the rest of the admin area enforces it: the
  * unit list is narrowed to the caller's own unit when they are unit-scoped,
  * and every aggregation is built from that (already narrowed) unit list plus
- * visibleTo()-scoped rows, so one response shape cannot accidentally leak
+ * identically-scoped rows, so one response shape cannot accidentally leak
  * another unit's numbers to a per-unit admin. The frontend decides how much
  * to render from role + the `scope.is_central` flag.
+ *
+ * The money/count aggregates are GROUPED SQL, never hydrated models - at two
+ * thousand students this payload used to materialise every bill, grade and
+ * achievement as an Eloquent object just to count them. What still walks row
+ * by row (students, enrollments, grades, points - the per-student inputs
+ * WatchlistService needs) comes back as bare stdClass rows: the watchlist's
+ * rounding semantics stay in PHP, byte-identical on every driver.
  */
 class DashboardSummaryController extends Controller
 {
@@ -47,9 +45,6 @@ class DashboardSummaryController extends Controller
             : 'Semua periode';
         // One definition of "the running semester" for the whole app: the
         // active term, exactly what the grade/point write lanes file under.
-        // The old derivation here (active TA -> its active term -> else its
-        // latest term) could disagree with Term::current() right after a
-        // year rollover, showing numbers from a semester nobody writes to.
         $term = Term::current();
         $prevTerm = $watchlist->previousTerm($term);
 
@@ -57,43 +52,85 @@ class DashboardSummaryController extends Controller
             ->when($user?->isUnitScoped(), fn ($q) => $q->where('id', $user->school_unit_id))
             ->get(['id', 'code', 'label', 'jenjang_group', 'sort_order']);
 
-        // ---- Students -------------------------------------------------------
-        $students = Student::query()
-            ->visibleTo($user)
-            ->get(['id', 'school_unit_id', 'status', 'entry_year_id']);
+        // The row scoping Student::visibleTo() draws, spelled out for the raw
+        // queries below: central sees everyone (soft-deleted included in
+        // neither lane), a unit-scoped admin only their own unit.
+        $isUnitScoped = (bool) $user?->isUnitScoped();
+        $ownUnitId = $user?->school_unit_id;
+        $studentScope = fn ($q) => $isUnitScoped
+            ? ($ownUnitId ? $q->where('students.school_unit_id', $ownUnitId) : $q->whereRaw('1 = 0'))
+            : $q;
+
+        // "Lewat jatuh tempo" in SQL: a due date at midnight is past the
+        // moment its day starts, so date <= today == due_date < tomorrow.
+        // This mirrors Bill::isOverdue() (isPast(), i.e. vs now), which is a
+        // hair different from the status writer's "before start of today" -
+        // each keeps its own semantics on purpose.
+        $overdueEdge = Carbon::tomorrow('Asia/Jakarta')->toDateString();
+
+        // ---- Students (light rows: the watchlist needs them per student) ---
+        $students = new Collection(DB::table('students')
+            ->whereNull('students.deleted_at')
+            ->when($isUnitScoped, $studentScope)
+            ->get(['students.id', 'students.school_unit_id', 'students.status', 'students.entry_year_id']));
         $studentById = $students->keyBy('id');
 
         // Current-year active placements + rollups (alpa etc. live on the enrollment).
         $enrollments = $year
-            ? Enrollment::where('academic_year_id', $year->id)
+            ? new Collection(DB::table('enrollments')
+                ->where('academic_year_id', $year->id)
                 ->where('status', 'active')
-                ->whereIn('student_id', $studentById->keys())
-                ->get(['id', 'student_id', 'absent_count', 'sick_count', 'permit_count'])
+                ->whereIn('student_id', $studentById->keys()->all())
+                ->get(['student_id', 'absent_count']))
             : collect();
 
-        $classrooms = $year
-            ? Classroom::query()->visibleTo($user)
+        $classroomCounts = $year
+            ? DB::table('classrooms')
                 ->where('academic_year_id', $year->id)
                 ->where('is_active', true)
-                ->get(['id', 'school_unit_id'])
+                ->when($isUnitScoped, fn ($q) => $q->where('school_unit_id', $ownUnitId))
+                ->selectRaw('school_unit_id, count(*) as total')
+                ->groupBy('school_unit_id')
+                ->pluck('total', 'school_unit_id')
             : collect();
 
-        $teachers = User::where('role', 'guru')
+        $teacherCounts = DB::table('users')
+            ->where('role', 'guru')
             ->where('is_active', true)
             ->whereNotNull('school_unit_id')
-            ->when($user?->isUnitScoped(), fn ($q) => $q->where('school_unit_id', $user->school_unit_id))
-            ->get(['id', 'school_unit_id']);
+            ->when($isUnitScoped, fn ($q) => $q->where('school_unit_id', $ownUnitId))
+            ->selectRaw('school_unit_id, count(*) as total')
+            ->groupBy('school_unit_id')
+            ->pluck('total', 'school_unit_id');
 
-        // ---- Billing --------------------------------------------------------
+        // ---- Billing (one grouped query, money never walks row by row) -----
         // Scoped like the rest of the payload (T23): the year view only sums
-        // bills issued for the running academic year, so a leftover open
-        // receivable from a previous year cannot colour this year's numbers.
-        $bills = Bill::query()
-            ->visibleTo($user)
-            ->whereNotIn('status', ['cancelled'])
-            ->when($billingPeriod === 'year' && $year, fn ($q) => $q->where('academic_year_id', $year->id))
-            ->with('student:id,school_unit_id')
-            ->get(['id', 'student_id', 'total_amount', 'paid_amount', 'remaining_amount', 'status', 'due_date']);
+        // bills issued for the running academic year. Grouped by the
+        // STUDENT'S unit, which is what Bill::visibleTo() resolves to; a
+        // central admin's buckets can therefore include inactive units -
+        // those feed the alerts but not the per-unit/gand totals, exactly as
+        // the hydrated version behaved.
+        $billBuckets = new Collection(DB::table('bills')
+            ->join('students', 'students.id', '=', 'bills.student_id')
+            ->whereNull('students.deleted_at')
+            ->whereNotIn('bills.status', ['cancelled'])
+            ->when($billingPeriod === 'year' && $year, fn ($q) => $q->where('bills.academic_year_id', $year->id))
+            ->when($isUnitScoped, fn ($q) => $q->where('students.school_unit_id', $ownUnitId))
+            ->selectRaw(
+                'students.school_unit_id as unit_id, count(*) as bill_count,'
+                .' coalesce(sum(bills.total_amount), 0) as billed,'
+                .' coalesce(sum(bills.paid_amount), 0) as paid,'
+                .' coalesce(sum(bills.remaining_amount), 0) as outstanding,'
+                ." sum(case when bills.status in ('unpaid','partial','overdue') and bills.due_date < ? then 1 else 0 end) as overdue_bills,"
+                ." sum(case when bills.status in ('unpaid','partial','overdue') and bills.due_date < ? then bills.remaining_amount else 0 end) as overdue_amount,"
+                ." sum(case when bills.status = 'unpaid' then 1 else 0 end) as unpaid_count,"
+                ." sum(case when bills.status = 'partial' then 1 else 0 end) as partial_count,"
+                ." count(distinct case when bills.status in ('unpaid','partial','overdue') then bills.student_id end) as debtor_students",
+                [$overdueEdge, $overdueEdge],
+            )
+            ->groupBy('students.school_unit_id')
+            ->get());
+        $billByUnit = $billBuckets->keyBy('unit_id');
 
         // ---- Attendance (term-to-date, aggregated in SQL) -------------------
         // The daily layer is the official source (T14 §8): these counts are
@@ -130,22 +167,49 @@ class DashboardSummaryController extends Controller
             ->get()));
 
         // ---- Grades (current + previous term, for KKM & decline alerts) -----
+        // stdClass rows into the UNTOUCHED WatchlistService: its rounding
+        // (per-subject round-2 over complete subjects only, then per-student
+        // round-2) stays in PHP so SQLite tests and Postgres production read
+        // identically. Also feeds /admin/perhatian through the same service.
         $gradeTermIds = array_values(array_filter([$term?->id, $prevTerm?->id]));
         $grades = ! empty($gradeTermIds)
-            ? Grade::query()->visibleTo($user)->whereIn('term_id', $gradeTermIds)
+            ? new Collection(DB::table('grades')
                 ->join('students', 'students.id', '=', 'grades.student_id')
+                ->whereNull('students.deleted_at')
+                ->when($isUnitScoped, fn ($q) => $q->where('students.school_unit_id', $ownUnitId))
+                ->whereIn('grades.term_id', $gradeTermIds)
                 ->get([
                     'grades.student_id', 'grades.subject_id', 'grades.term_id', 'grades.category',
                     'grades.score', 'students.school_unit_id',
-                ])
+                ]))
             : collect();
 
-        // ---- Achievements ---------------------------------------------------
-        $achievements = Achievement::query()->visibleTo($user)
-            ->with(['student:id,school_unit_id', 'teacher:id,school_unit_id'])
-            ->get(['id', 'achiever_type', 'student_id', 'teacher_user_id', 'school_unit_id', 'status', 'tingkat']);
+        // ---- Achievements (grouped, unit attributed like visibleTo) --------
+        // Attribution: explicit unit, else the student's, else the teacher's
+        // - the same COALESCE over joins, with soft-deleted students joined
+        // out because that is what the Eloquent relation did. A unit-scoped
+        // admin's three-way OR mirrors Achievement::visibleTo().
+        $achievementBuckets = new Collection(DB::table('achievements as a')
+            ->leftJoin('students as s', fn ($j) => $j->on('s.id', '=', 'a.student_id')->whereNull('s.deleted_at'))
+            ->leftJoin('users as t', 't.id', '=', 'a.teacher_user_id')
+            ->when($isUnitScoped, fn ($q) => $q->where(function ($w) use ($ownUnitId) {
+                $w->where('a.school_unit_id', $ownUnitId)
+                    ->orWhere('s.school_unit_id', $ownUnitId)
+                    ->orWhere('t.school_unit_id', $ownUnitId);
+            }))
+            ->selectRaw('COALESCE(a.school_unit_id, s.school_unit_id, t.school_unit_id) as unit_id, a.status, a.achiever_type, count(*) as total')
+            ->groupBy('unit_id', 'a.status', 'a.achiever_type')
+            ->get());
 
-        // ---- Points (term-to-date) ------------------------------------------
+        $achCount = function (Collection $buckets, ?int $unitId, string $status, ?string $type = null) use ($units): int {
+            return (int) $buckets
+                ->filter(fn ($r) => ($unitId === null ? $units->contains('id', (int) $r->unit_id) : (int) $r->unit_id === $unitId)
+                    && $r->status === $status
+                    && ($type === null || $r->achiever_type === $type || ($type === 'siswa' && blank($r->achiever_type))))
+                ->sum('total');
+        };
+
+        // ---- Points (term-to-date; light rows, the watchlist reads each) ---
         $points = $term
             ? (new Collection(DB::table('point_records')
                 ->join('students', 'students.id', '=', 'point_records.student_id')
@@ -156,18 +220,16 @@ class DashboardSummaryController extends Controller
                 ->get()))
             : collect();
 
-        // ---- Extracurriculars ------------------------------------------------
-        $extracurriculars = $year
-            ? Extracurricular::query()->visibleTo($user)
-                ->where('academic_year_id', $year->id)
-                ->where('is_active', true)
-                ->get(['id', 'school_unit_id'])
-            : collect();
-        $ekskulIds = $extracurriculars->pluck('id');
-        $ekskulMembers = $ekskulIds->isNotEmpty()
-            ? ExtracurricularMember::whereIn('extracurricular_id', $ekskulIds)
-                ->where('status', 'active')
-                ->get(['extracurricular_id', 'student_id'])
+        // ---- Extracurriculars (one grouped left join) -----------------------
+        $ekskulBuckets = $year
+            ? new Collection(DB::table('extracurriculars as e')
+                ->leftJoin('extracurricular_members as m', fn ($j) => $j->on('m.extracurricular_id', '=', 'e.id')->where('m.status', 'active'))
+                ->where('e.academic_year_id', $year->id)
+                ->where('e.is_active', true)
+                ->when($isUnitScoped, fn ($q) => $q->where('e.school_unit_id', $ownUnitId))
+                ->selectRaw('e.school_unit_id as unit_id, count(distinct e.id) as activities, count(m.id) as members')
+                ->groupBy('e.school_unit_id')
+                ->get()->keyBy('unit_id'))
             : collect();
 
         // ---- Watchlist (shared with the /admin/perhatian drill-down) ---------
@@ -177,36 +239,21 @@ class DashboardSummaryController extends Controller
 
         // ---- Per-unit + grand aggregates -------------------------------------
         $unitsData = [];
-        $alerts = [];
         $grand = $this->emptyGrandTotals();
 
         foreach ($units as $unit) {
             $unitStudents = $students->where('school_unit_id', $unit->id);
             $unitEnrollments = $enrollments->filter(
-                fn (Enrollment $e) => $studentById->get($e->student_id)?->school_unit_id === $unit->id,
+                fn ($e) => $studentById->get($e->student_id)?->school_unit_id === $unit->id,
             );
-            $unitBills = $bills->filter(fn (Bill $b) => $b->student && $b->student->school_unit_id === $unit->id);
-            $unitAtt = $attendanceRows->where('school_unit_id', $unit->id);
-            $unitAchievements = $achievements->filter(fn (Achievement $a) => $this->achievementUnitId($a) === $unit->id);
-            $unitPoints = $points->where('school_unit_id', $unit->id);
-            $unitEkskuls = $extracurriculars->where('school_unit_id', $unit->id);
-            $unitEkskulIds = $unitEkskuls->pluck('id');
-
-            $billed = (float) $unitBills->sum('total_amount');
-            $paid = (float) $unitBills->sum('paid_amount');
-            $outstanding = (float) $unitBills->sum('remaining_amount');
-            $overdueBills = $unitBills->filter(fn (Bill $b) => $b->isOverdue());
-
-            $att = $this->attendanceTallies($unitAtt);
+            $b = $billByUnit->get($unit->id);
+            $att = $this->attendanceTallies($attendanceRows->where('school_unit_id', $unit->id));
             $attTotal = array_sum($att);
             $attRate = $attTotal > 0 ? round(($att['hadir'] / $attTotal) * 100, 1) : null;
 
             $attToday = $this->attendanceTallies($attendanceToday->where('school_unit_id', $unit->id));
             $attTodayTotal = array_sum($attToday);
             $attTodayRate = $attTodayTotal > 0 ? round(($attToday['hadir'] / $attTodayTotal) * 100, 1) : null;
-
-            $verified = $unitAchievements->where('status', 'verified');
-            $pending = $unitAchievements->where('status', 'pending');
 
             // Watchlist counts per unit - the unit-scoped academic attention
             // strip, grouped from the same WatchlistService rows the
@@ -222,7 +269,12 @@ class DashboardSummaryController extends Controller
             $declinedIds = $withReason('grade_decline');
             $attentionIds = $unitWatch->keys();
 
-            $ekskulMemberCount = $ekskulMembers->filter(fn ($m) => $unitEkskulIds->contains($m->extracurricular_id))->count();
+            $unitPoints = $points->where('school_unit_id', $unit->id);
+            $ekskul = $ekskulBuckets->get($unit->id);
+
+            $billed = (float) ($b->billed ?? 0);
+            $paid = (float) ($b->paid ?? 0);
+            $outstanding = (float) ($b->outstanding ?? 0);
 
             $unitsData[] = [
                 'unit_id' => $unit->id,
@@ -232,26 +284,26 @@ class DashboardSummaryController extends Controller
                 'students_active' => $unitStudents->where('status', 'active')->count(),
                 'students_new' => $unitStudents->where('status', 'active')->where('entry_year_id', $year?->id)->count(),
                 'enrolled_students' => $unitEnrollments->pluck('student_id')->unique()->count(),
-                'classrooms' => $classrooms->where('school_unit_id', $unit->id)->count(),
-                'teachers' => $teachers->where('school_unit_id', $unit->id)->count(),
+                'classrooms' => (int) ($classroomCounts[$unit->id] ?? 0),
+                'teachers' => (int) ($teacherCounts[$unit->id] ?? 0),
                 'billed' => $billed,
                 'paid' => $paid,
                 'outstanding' => $outstanding,
                 'collection_rate' => $billed > 0 ? round(($paid / $billed) * 100, 1) : 0,
-                'overdue_bills' => $overdueBills->count(),
+                'overdue_bills' => (int) ($b->overdue_bills ?? 0),
                 'attendance_rate' => $attRate,
                 'attendance_today' => $attToday,
                 'attendance_today_rate' => $attTodayRate,
-                'achievements' => $verified->count(),
-                'achievements_pending' => $pending->count(),
+                'achievements' => $achCount($achievementBuckets, $unit->id, 'verified'),
+                'achievements_pending' => $achCount($achievementBuckets, $unit->id, 'pending'),
                 'grades_below_kkm' => $belowKkm,
                 'grades_graded' => $unitCurScores->count(),
                 'grades_average' => $unitCurScores->isEmpty() ? null : round($unitCurScores->avg(), 1),
                 'students_high_absenteeism' => $highAlpaIds->count(),
                 'students_declined' => $declinedIds->count(),
                 'students_needing_attention' => $attentionIds->count(),
-                'extracurriculars' => $unitEkskuls->count(),
-                'extracurricular_members' => $ekskulMemberCount,
+                'extracurriculars' => (int) ($ekskul->activities ?? 0),
+                'extracurricular_members' => (int) ($ekskul->members ?? 0),
                 'violation_students' => $violationStudents->count(),
                 'points_merit_records' => $unitPoints->filter(fn ($p) => (int) $p->points > 0)->count(),
                 'points_violation_records' => $unitPoints->filter(fn ($p) => (int) $p->points < 0)->count(),
@@ -261,30 +313,30 @@ class DashboardSummaryController extends Controller
             $grand['students_active'] += $unitStudents->where('status', 'active')->count();
             $grand['students_new'] += $unitStudents->where('status', 'active')->where('entry_year_id', $year?->id)->count();
             $grand['enrolled_students'] += $unitEnrollments->pluck('student_id')->unique()->count();
-            $grand['classrooms'] += $classrooms->where('school_unit_id', $unit->id)->count();
-            $grand['teachers'] += $teachers->where('school_unit_id', $unit->id)->count();
+            $grand['classrooms'] += (int) ($classroomCounts[$unit->id] ?? 0);
+            $grand['teachers'] += (int) ($teacherCounts[$unit->id] ?? 0);
             $grand['billing']['total_billed'] += $billed;
             $grand['billing']['total_paid'] += $paid;
             $grand['billing']['total_outstanding'] += $outstanding;
-            $grand['billing']['bill_count'] += $unitBills->count();
-            $grand['billing']['overdue_bills'] += $overdueBills->count();
-            $grand['billing']['overdue_amount'] += (float) $overdueBills->sum('remaining_amount');
-            $grand['billing']['unpaid_count'] += $unitBills->where('status', 'unpaid')->count();
-            $grand['billing']['partial_count'] += $unitBills->where('status', 'partial')->count();
+            $grand['billing']['bill_count'] += (int) ($b->bill_count ?? 0);
+            $grand['billing']['overdue_bills'] += (int) ($b->overdue_bills ?? 0);
+            $grand['billing']['overdue_amount'] += (float) ($b->overdue_amount ?? 0);
+            $grand['billing']['unpaid_count'] += (int) ($b->unpaid_count ?? 0);
+            $grand['billing']['partial_count'] += (int) ($b->partial_count ?? 0);
             foreach (['hadir', 'sakit', 'izin', 'alpa'] as $status) {
                 $grand['attendance'][$status] += $att[$status];
                 $grand['attendance_today'][$status] += $attToday[$status];
             }
-            $grand['achievements']['verified'] += $verified->count();
-            $grand['achievements']['pending'] += $pending->count();
-            $grand['achievements']['siswa'] += $verified->filter(fn ($a) => $a->achiever_type === 'siswa' || empty($a->achiever_type))->count();
-            $grand['achievements']['guru'] += $verified->where('achiever_type', 'guru')->count();
+            $grand['achievements']['verified'] += $achCount($achievementBuckets, $unit->id, 'verified');
+            $grand['achievements']['pending'] += $achCount($achievementBuckets, $unit->id, 'pending');
+            $grand['achievements']['siswa'] += $achCount($achievementBuckets, $unit->id, 'verified', 'siswa');
+            $grand['achievements']['guru'] += $achCount($achievementBuckets, $unit->id, 'verified', 'guru');
             $grand['grades']['below_kkm'] += $belowKkm;
             $grand['points']['violation_students'] += $violationStudents->count();
             $grand['points']['violation_records'] += $unitPoints->filter(fn ($p) => (int) $p->points < 0)->count();
             $grand['points']['merit_records'] += $unitPoints->filter(fn ($p) => (int) $p->points > 0)->count();
-            $grand['extracurriculars']['activities'] += $unitEkskuls->count();
-            $grand['extracurriculars']['members'] += $ekskulMemberCount;
+            $grand['extracurriculars']['activities'] += (int) ($ekskul->activities ?? 0);
+            $grand['extracurriculars']['members'] += (int) ($ekskul->members ?? 0);
         }
 
         // ---- Grade-wide average (of per-student final averages, current term)
@@ -322,7 +374,7 @@ class DashboardSummaryController extends Controller
             ? '/admin/tagihan?year='.rawurlencode($year->year)
             : '/admin/tagihan';
         $alerts = $this->buildAlerts(
-            $bills, $enrollments, $studentById, $units, $term, $achievements, $watch,
+            $billBuckets, $enrollments, $studentById, $units, $term, $achievementBuckets, $watch,
             $billingLabel, $tagihanHref,
         );
 
@@ -408,30 +460,26 @@ class DashboardSummaryController extends Controller
         ];
     }
 
-    /** The unit an achievement belongs to: its explicit unit, else via the student, else via the teacher. */
-    private function achievementUnitId(Achievement $achievement): ?int
-    {
-        if ($achievement->school_unit_id) {
-            return $achievement->school_unit_id;
-        }
-
-        return $achievement->student?->school_unit_id ?? $achievement->teacher?->school_unit_id ?? null;
-    }
-
     /**
      * The watchlist the dashboard shows: conditions worth a staff glance,
      * each with a severity and - for the central admin - how it splits per unit.
      *
+     * Money alerts read the bill buckets over EVERY unit (a central admin's
+     * scope includes inactive units, and an alert must name them), while the
+     * per-unit rows and grand totals above only ever walk the active unit
+     * list - the same split the hydrated version kept.
+     *
+     * @param  Collection  $billBuckets  stdClass rows keyed by nothing: unit_id, overdue_bills, debtor_students
      * @param  Collection  $watch  WatchlistService rows keyed by student id
      * @return array<int, array{id:string,label:string,detail:string,count:int,severity:string,href:?string,units:array<int,array{code:string,label:string,count:int}>}>
      */
     private function buildAlerts(
-        Collection $bills,
+        Collection $billBuckets,
         Collection $enrollments,
         Collection $studentById,
         Collection $units,
         ?Term $term,
-        Collection $achievements,
+        Collection $achievementBuckets,
         Collection $watch,
         string $billingLabel,
         string $tagihanHref,
@@ -454,29 +502,29 @@ class DashboardSummaryController extends Controller
         $alerts = [];
 
         // 1. Overdue bills
-        $overdueBills = $bills->filter(fn (Bill $b) => $b->isOverdue());
+        $overdueByUnit = $billBuckets->pluck('overdue_bills', 'unit_id');
         $alerts[] = $this->alert(
             id: 'overdue',
             label: 'Tagihan lewat jatuh tempo',
             detail: "Masih tersisa dan belum dilunasi setelah jatuh tempo - cakupan {$billingLabel}",
-            count: $overdueBills->count(),
+            count: (int) $overdueByUnit->sum(),
             severity: 'bad',
             href: $tagihanHref,
-            grouped: $overdueBills->countBy(fn (Bill $b) => $b->student?->school_unit_id),
+            grouped: $overdueByUnit,
             perUnit: $perUnit,
             units: $units,
         );
 
         // 2. Students with outstanding receivables
-        $debtorStudentIds = $bills->filter(fn (Bill $b) => $b->isOpen())->pluck('student_id')->unique();
+        $debtorsByUnit = $billBuckets->pluck('debtor_students', 'unit_id');
         $alerts[] = $this->alert(
             id: 'outstanding',
             label: 'Siswa dengan sisa piutang',
             detail: "Memiliki tagihan terbuka yang belum lunas - cakupan {$billingLabel}",
-            count: $debtorStudentIds->count(),
+            count: (int) $debtorsByUnit->sum(),
             severity: 'warn',
             href: $tagihanHref,
-            grouped: $debtorStudentIds->map(fn ($id) => $unitOf($id))->countBy(fn ($unitId) => $unitId),
+            grouped: $debtorsByUnit,
             perUnit: $perUnit,
             units: $units,
         );
@@ -511,16 +559,22 @@ class DashboardSummaryController extends Controller
             );
         }
 
-        // 5. Pending achievement verifications
-        $pending = $achievements->where('status', 'pending');
+        // 5. Pending achievement verifications - over every bucket, including
+        // achievements no unit can be attributed to.
+        $pendingTotal = (int) $achievementBuckets->where('status', 'pending')->sum('total');
+        $pendingByUnit = new Collection;
+        $achievementBuckets->where('status', 'pending')->each(function ($row) use ($pendingByUnit) {
+            $unitId = $row->unit_id !== null ? (int) $row->unit_id : null;
+            $pendingByUnit->put($unitId, ($pendingByUnit->get($unitId, 0)) + (int) $row->total);
+        });
         $alerts[] = $this->alert(
             id: 'achievements',
             label: 'Prestasi menunggu verifikasi',
             detail: 'Diajukan namun belum diverifikasi staf',
-            count: $pending->count(),
+            count: $pendingTotal,
             severity: 'warn',
             href: '/admin/prestasi',
-            grouped: $pending->map(fn (Achievement $a) => $this->achievementUnitId($a))->countBy(fn ($unitId) => $unitId),
+            grouped: $pendingByUnit,
             perUnit: $perUnit,
             units: $units,
         );
@@ -542,7 +596,7 @@ class DashboardSummaryController extends Controller
         // 7. Active students with no active rombel this year
         $enrolledIds = $enrollments->pluck('student_id');
         $unplaced = $studentById
-            ->filter(fn (Student $s) => $s->status === 'active' && ! $enrolledIds->contains($s->id));
+            ->filter(fn ($s) => $s->status === 'active' && ! $enrolledIds->contains($s->id));
         $alerts[] = $this->alert(
             id: 'unplaced',
             label: 'Siswa aktif belum ditempatkan di kelas',
@@ -550,7 +604,7 @@ class DashboardSummaryController extends Controller
             count: $unplaced->count(),
             severity: 'warn',
             href: '/admin/siswa?placement=none',
-            grouped: $unplaced->map(fn (Student $s) => $s->school_unit_id),
+            grouped: $unplaced->map(fn ($s) => $s->school_unit_id)->countBy(fn ($unitId) => $unitId),
             perUnit: $perUnit,
             units: $units,
         );

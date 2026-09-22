@@ -4,9 +4,15 @@ namespace Tests\Feature;
 
 use App\Models\AcademicYear;
 use App\Models\Bill;
+use App\Models\Classroom;
+use App\Models\Enrollment;
 use App\Models\FeeType;
+use App\Models\Grade;
+use App\Models\PointRecord;
 use App\Models\SchoolUnit;
 use App\Models\Student;
+use App\Models\Subject;
+use App\Models\Term;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -194,5 +200,129 @@ class DashboardSummaryTest extends TestCase
             ->getJson('/api/admin/dashboard/summary?billing_period=semester')
             ->assertStatus(422)
             ->assertInvalid('billing_period');
+    }
+
+    /**
+     * The SQL-aggregation rewrite's parity contract: watchlist-grade data +
+     * mixed bills (partial / overdue / cancelled) must produce the exact
+     * numbers the hydrated version produced - grades still rounded through
+     * WatchlistService in PHP, money summed in SQL.
+     */
+    public function test_sql_aggregation_matches_the_watchlist_and_billing_semantics(): void
+    {
+        $year = $this->year();
+        $sd = $this->unit('SD-13', 'SD Islam Al Azhar 13', 'sd');
+        $admin = User::create(['name' => 'Pusat', 'email' => 'pusat@yapinet.id', 'role' => 'admin', 'is_active' => true, 'activated_at' => now()]);
+
+        $term = Term::create(['academic_year_id' => $year->id, 'name' => 'ganjil', 'starts_on' => '2026-07-01', 'ends_on' => '2026-12-31', 'is_active' => true]);
+        $kelas = Classroom::create(['school_unit_id' => $sd->id, 'academic_year_id' => $year->id, 'tingkat' => 5, 'name' => '5A']);
+        $mapel = Subject::create(['school_unit_id' => $sd->id, 'code' => 'MTK', 'name' => 'Matematika']);
+
+        $enroll = fn (Student $s, int $alpa = 0) => Enrollment::create([
+            'student_id' => $s->id, 'classroom_id' => $kelas->id, 'academic_year_id' => $year->id,
+            'status' => 'active', 'joined_on' => '2026-07-01', 'absent_count' => $alpa,
+        ]);
+        $grade = fn (Student $s, Term $t, string $cat, float $score) => Grade::create([
+            'student_id' => $s->id, 'subject_id' => $mapel->id, 'classroom_id' => $kelas->id,
+            'term_id' => $t->id, 'category' => $cat, 'score' => $score, 'recorded_by' => $admin->id,
+        ]);
+
+        $student = fn (string $nama) => Student::create([
+            'nama_lengkap' => $nama, 'jenis_kelamin' => 'L',
+            'school_unit_id' => $sd->id, 'entry_year_id' => $year->id, 'status' => 'active',
+        ]);
+
+        // Budi 60 (di bawah KKM), Cici 85 semester lalu -> 80 kini (turun 5),
+        // Eka 90 bersih. Averages: 60, 80, 90 -> rata-rata 76.7.
+        $budi = $student('Budi');
+        $enroll($budi);
+        foreach (['tugas' => 60, 'uts' => 60, 'uas' => 60] as $cat => $score) {
+            $grade($budi, $term, $cat, $score);
+        }
+
+        $cici = $student('Cici');
+        $enroll($cici, 6);
+        $prevYear = AcademicYear::create(['year' => '2025/2026', 'starts_on' => '2025-07-01', 'ends_on' => '2026-06-30']);
+        $prevTerm = Term::create(['academic_year_id' => $prevYear->id, 'name' => 'genap', 'starts_on' => '2026-01-01', 'ends_on' => '2026-06-30']);
+        foreach (['tugas' => 85, 'uts' => 85, 'uas' => 85] as $cat => $score) {
+            $grade($cici, $prevTerm, $cat, $score);
+        }
+        foreach (['tugas' => 80, 'uts' => 80, 'uas' => 80] as $cat => $score) {
+            $grade($cici, $term, $cat, $score);
+        }
+
+        $eka = $student('Eka');
+        $enroll($eka);
+        foreach (['tugas' => 90, 'uts' => 90, 'uas' => 90] as $cat => $score) {
+            $grade($eka, $term, $cat, $score);
+        }
+
+        $dedi = $student('Dedi');
+        $enroll($dedi);
+        PointRecord::create([
+            'student_id' => $dedi->id, 'term_id' => $term->id, 'type' => 'violation', 'points' => -10,
+            'occurred_on' => '2026-09-01', 'description' => 'Terlambat', 'recorded_by' => $admin->id, 'status' => 'recorded',
+        ]);
+
+        // Mixed money: partial 650k (paid 200k), overdue unpaid 450k, a
+        // cancelled bill that must not exist anywhere in the numbers.
+        $spp = FeeType::create(['code' => 'spp', 'name' => 'SPP', 'recurrence' => 'monthly']);
+        Bill::create([
+            'bill_number' => 'B/1', 'dedup_key' => 'b1', 'description' => 'SPP Budi',
+            'student_id' => $budi->id, 'academic_year_id' => $year->id, 'fee_type_id' => $spp->id,
+            'subtotal' => 650000, 'total_amount' => 650000, 'paid_amount' => 200000, 'remaining_amount' => 450000,
+            'status' => 'partial', 'due_date' => now()->addDays(7)->toDateString(), 'issued_at' => now(),
+        ]);
+        Bill::create([
+            'bill_number' => 'B/2', 'dedup_key' => 'b2', 'description' => 'SPP Dedi',
+            'student_id' => $dedi->id, 'academic_year_id' => $year->id, 'fee_type_id' => $spp->id,
+            'subtotal' => 450000, 'total_amount' => 450000, 'remaining_amount' => 450000,
+            'status' => 'unpaid', 'due_date' => now()->subDays(2)->toDateString(), 'issued_at' => now(),
+        ]);
+        Bill::create([
+            'bill_number' => 'B/3', 'dedup_key' => 'b3', 'description' => 'Salah terbit',
+            'student_id' => $eka->id, 'academic_year_id' => $year->id, 'fee_type_id' => $spp->id,
+            'subtotal' => 100000, 'total_amount' => 100000, 'remaining_amount' => 100000,
+            'status' => 'cancelled', 'due_date' => now()->subDays(2)->toDateString(), 'issued_at' => now(),
+        ]);
+
+        $res = $this->actingAs($admin)->getJson('/api/admin/dashboard/summary')->assertOk();
+
+        // Grades came through WatchlistService untouched: rounded averages,
+        // KKM/decline from the same service the drill-down uses.
+        $this->assertSame(3, $res->json('kpi.grades.students_graded'));
+        $this->assertEquals(76.7, $res->json('kpi.grades.average'));
+        $this->assertSame(1, $res->json('kpi.grades.below_kkm'));
+        $this->assertSame(1, $res->json('kpi.grades.declined'));
+
+        // Money summed in SQL: partial + overdue counted, cancelled absent.
+        $this->assertSame(2, $res->json('kpi.billing.bill_count'));
+        $this->assertEquals(1100000.0, $res->json('kpi.billing.total_billed'));
+        $this->assertEquals(200000.0, $res->json('kpi.billing.total_paid'));
+        $this->assertEquals(900000.0, $res->json('kpi.billing.total_outstanding'));
+        $this->assertSame(1, $res->json('kpi.billing.unpaid_count'));
+        $this->assertSame(1, $res->json('kpi.billing.partial_count'));
+        $this->assertSame(1, $res->json('kpi.billing.overdue_bills'));
+        $this->assertEquals(450000.0, $res->json('kpi.billing.overdue_amount'));
+
+        // Watchlist alerts: Budi below KKM, Cici absenteeism (alpa 6) AND
+        // declined, Dedi violation + overdue debtor; Eka nowhere.
+        $alerts = collect($res->json('alerts'))->keyBy('id');
+        $this->assertSame(1, $alerts['absenteeism']['count']);
+        $this->assertSame(1, $alerts['grades']['count']);
+        $this->assertSame(1, $alerts['points']['count']);
+        $this->assertSame(1, $alerts['overdue']['count']);
+        $this->assertSame(2, $alerts['outstanding']['count']);
+        $this->assertSame(0, $alerts['unplaced']['count']);
+
+        // The unit row carries the same splits.
+        $unit = $res->json('units.0');
+        $this->assertSame('SD-13', $unit['unit_code']);
+        $this->assertEquals(900000.0, $unit['outstanding']);
+        $this->assertSame(1, $unit['overdue_bills']);
+        $this->assertSame(1, $unit['students_high_absenteeism']);
+        $this->assertSame(1, $unit['students_declined']);
+        $this->assertSame(3, $unit['students_needing_attention']);
+        $this->assertSame(1, $unit['violation_students']);
     }
 }
