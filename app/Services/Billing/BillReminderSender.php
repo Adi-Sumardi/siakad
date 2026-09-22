@@ -2,6 +2,7 @@
 
 namespace App\Services\Billing;
 
+use App\Jobs\SendQontakTemplateMessage;
 use App\Jobs\SendWhatsAppMessage;
 use App\Models\Bill;
 use App\Models\BillReminder;
@@ -9,6 +10,8 @@ use App\Models\Guardian;
 use App\Models\NotificationLog;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
+use App\Services\Notification\PhoneNumberFormatter;
+use App\Services\Payment\BillingApiGateway;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -28,6 +31,7 @@ class BillReminderSender
 
     public function __construct(
         private MailGateway $mail,
+        private BillingApiGateway $billingApi,
     ) {}
 
     public function kindFor(Bill $bill): ?string
@@ -83,14 +87,22 @@ class BillReminderSender
             'kind' => $kind,
         ];
 
-        // WhatsApp is queued rather than sent inline (App\Jobs\
-        // SendWhatsAppMessage) and logs itself - SPP due dates cluster on
-        // the same day of the month for most families, so this daily sweep
-        // is exactly the kind of burst Sendago's unofficial gateway cannot
-        // absorb all at once.
+        // WhatsApp is queued rather than sent inline and logs itself - due
+        // dates cluster on the same day of the month for most families, so
+        // this daily sweep is exactly the kind of burst an unthrottled send
+        // cannot absorb all at once.
         if ($channel === 'email') {
             $result = $this->mail->send($to, 'bill_reminder', $data);
             $this->log($bill, $channel, $to, $data, $result);
+        } elseif ($bill->feeType?->code === 'spp') {
+            // SPP only, for now (App\Jobs\SendQontakTemplateMessage, the
+            // approved 'reminder_spp' template) - an official WhatsApp
+            // Business line can only ever send an approved template to a
+            // cold number, and this reminder is exactly that kind of cold
+            // send. Every other fee type (uang_pangkal, jamiyyah, ekskul,
+            // pendaftaran) stays on the free-text Sendago path below until
+            // each gets its own approved template.
+            $result = $this->queueSppReminderTemplate($bill, $guardian, $to);
         } else {
             $result = $this->queueWhatsApp($bill, $to, $data);
         }
@@ -151,6 +163,85 @@ class BillReminderSender
         ]);
 
         SendWhatsAppMessage::dispatch($phone, $this->whatsappMessage($data), $log->ulid);
+
+        return NotificationResult::ok(['mode' => 'queued']);
+    }
+
+    /**
+     * Registers both banks' VA for this bill (idempotent - see
+     * BillingApiGateway::ensureReminderVaPair()) and queues the approved
+     * 'reminder_spp' template with both numbers, so the family can pay via
+     * whichever bank they prefer without a second message. Body variables,
+     * in order: nama anak, bulan tagihan, jumlah, VA Muamalat, kode bayar
+     * BSI (the VA minus its fixed "3656" institution-code prefix - same
+     * split the /pembayaran page's own BSI instructions use).
+     */
+    private function queueSppReminderTemplate(Bill $bill, Guardian $guardian, string $phone): NotificationResult
+    {
+        $templateId = config('services.qontak.spp_reminder_template_id');
+
+        if (empty($templateId)) {
+            Log::warning('[BillReminderSender] spp_reminder_template_id not configured, cannot send SPP reminder.');
+
+            return NotificationResult::fail('Template reminder SPP Qontak belum dikonfigurasi.');
+        }
+
+        try {
+            $va = $this->billingApi->ensureReminderVaPair($bill, $guardian);
+        } catch (\Throwable $e) {
+            Log::warning('[BillReminderSender] Failed to register VA pair for SPP reminder', [
+                'bill' => $bill->bill_number,
+                'error' => $e->getMessage(),
+            ]);
+
+            return NotificationResult::fail('Gagal mendaftarkan Virtual Account: '.$e->getMessage());
+        }
+
+        $muamalatVa = $va['muamalat']['va_number'] ?? '';
+        $bsiVa = $va['bsi']['va_number'] ?? '';
+        // Strips the fixed 4-digit institution code (3656) that prefixes
+        // every BSI VA this school issues, leaving only the "kode bayar"
+        // portion the template shows separately - see the config's own
+        // institution_code comment for where that 4-digit value comes from.
+        $bsiPaymentCode = mb_strlen($bsiVa) > 4 ? mb_substr($bsiVa, 4) : $bsiVa;
+
+        $qontakPhone = '62'.substr($phone, 1);
+
+        // Not updated to 'sent'/'failed' the way queueWhatsApp()'s log row
+        // is - SendQontakTemplateMessage takes no notificationLogUlid (it is
+        // shared across several notice types with no single owning log
+        // convention, unlike SendOtpWhatsAppMessage). The send's real
+        // success/failure lives in this job's own log line and queue retry
+        // state instead; this row exists for a consistent per-bill send
+        // history, same as every other channel logs here.
+        NotificationLog::create([
+            'channel' => 'whatsapp',
+            'template' => 'reminder_spp',
+            'recipient' => $phone,
+            'payload' => [
+                'student_name' => $bill->student->nama_lengkap,
+                'period' => $bill->issued_at?->translatedFormat('F Y') ?? $bill->due_date->translatedFormat('F Y'),
+                'amount' => number_format((float) $bill->remaining_amount, 0, ',', '.'),
+                'va_muamalat' => $muamalatVa,
+                'va_bsi_payment_code' => $bsiPaymentCode,
+            ],
+            'status' => 'queued',
+            'notifiable_type' => Bill::class,
+            'notifiable_id' => $bill->id,
+        ]);
+
+        SendQontakTemplateMessage::dispatch(
+            phone: $qontakPhone,
+            toName: $guardian->nama ?: 'Orang Tua/Wali',
+            templateId: $templateId,
+            bodyValues: [
+                $bill->student->nama_lengkap,
+                $bill->issued_at?->translatedFormat('F Y') ?? $bill->due_date->translatedFormat('F Y'),
+                number_format((float) $bill->remaining_amount, 0, ',', '.'),
+                $muamalatVa,
+                $bsiPaymentCode,
+            ],
+        );
 
         return NotificationResult::ok(['mode' => 'queued']);
     }

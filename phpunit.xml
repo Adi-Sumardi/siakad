@@ -28,6 +28,13 @@
         <env name="DB_URL" value=""/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
+        <!-- Only needs to be non-empty - BillReminderSender::
+             queueSppReminderTemplate() checks this before dispatching, so an
+             unset value would silently fall back to "not configured" instead
+             of exercising the real send path. QontakWhatsAppGateway itself
+             is faked in tests that need it, never actually called with this
+             id. -->
+        <env name="QONTAK_SPP_REMINDER_TEMPLATE_ID" value="test-spp-reminder-template"/>
         <!-- The webhook refuses unsigned requests, so the suite needs a secret
              to sign with; it must never be a value any environment reuses. -->
         <env name="PMB_HANDOFF_SECRET" value="test-handoff-secret"/>

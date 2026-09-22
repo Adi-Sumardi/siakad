@@ -5,8 +5,10 @@ namespace App\Services\Payment;
 use App\Models\Bill;
 use App\Models\Guardian;
 use App\Models\Payment;
+use App\Models\PaymentAllocation;
 use App\Services\Billing\BillingApiClient;
 use App\Services\Billing\BillingApiException;
+use App\Services\Billing\PaymentAllocator;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -19,6 +21,7 @@ class BillingApiGateway implements PaymentGateway
 {
     public function __construct(
         private BillingApiClient $client,
+        private PaymentAllocator $allocator,
     ) {}
 
     public function createInvoice(Payment $payment, Collection $bills, Guardian $payer): Payment
@@ -174,6 +177,109 @@ class BillingApiGateway implements PaymentGateway
 
             throw new RuntimeException('Gagal membuat tagihan Virtual Account: '.$e->getMessage());
         }
+    }
+
+    /**
+     * Registers BOTH banks' VA for one bill simultaneously - deliberately
+     * NOT through CheckoutService::start(), whose own supersede logic
+     * (supersedePendingPaymentsFor()/supersedeOtherVaPaymentsForSameGroup())
+     * would kill one the instant the other is created, enforcing this app's
+     * normal "one live VA per bill" rule. Exists only for the SPP reminder
+     * flow (BillReminderSender), which needs to show a family both payment
+     * options at once, same as the school's old (pre-Billing-API) WhatsApp
+     * reminder used to.
+     *
+     * Idempotent per bank: reuses an already-live (pending/processing) VA
+     * payment for that bank+bill instead of creating a new one on every
+     * reminder beat (h7/h1/overdue), so a bill's reminder history doesn't
+     * accumulate a fresh Payment row every few days.
+     *
+     * SAFETY: two simultaneously live VAs for one bill is a real change to
+     * this app's payment model - if the family pays BOTH by mistake, both
+     * would independently reach `completed` status without anything here
+     * stopping the second one. The other half of the safety net is
+     * PollBillingVaPayments::handle(), which supersedes the sibling VA the
+     * moment either one settles - this method alone is not sufficient on
+     * its own, the two must ship together.
+     *
+     * @return array{muamalat: array{va_number: string, bank_name: string}, bsi: array{va_number: string, bank_name: string}}
+     */
+    public function ensureReminderVaPair(Bill $bill, Guardian $payer): array
+    {
+        $result = [];
+
+        foreach (['muamalat', 'bsi'] as $bank) {
+            $payment = $this->liveVaPaymentFor($bill, $bank);
+
+            if (! $payment) {
+                $payment = Payment::create([
+                    'payment_number' => Payment::generateNumber(),
+                    'payer_guardian_id' => $payer->id,
+                    'amount' => round((float) $bill->remaining_amount, 2),
+                    'method' => 'virtual_account',
+                    'status' => 'pending',
+                    'metadata' => [
+                        'bill_ulids' => [$bill->ulid],
+                        'bank_channel' => $bank,
+                        // Marks this row as reminder-created, not a normal
+                        // checkout - not load-bearing for any logic today,
+                        // but distinguishes the two if a future admin screen
+                        // or report ever needs to tell them apart.
+                        'source' => 'spp_reminder',
+                    ],
+                ]);
+
+                $this->allocator->allocate($payment, [$bill->id => round((float) $bill->remaining_amount, 2)]);
+
+                $payment = $this->createInvoice($payment, collect([$bill]), $payer);
+            }
+
+            $result[$bank] = [
+                'va_number' => (string) ($payment->gateway_response['va_number'] ?? ''),
+                'bank_name' => (string) ($payment->gateway_response['bank_name'] ?? ''),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * The other bank's live VA for the same bill, if this settled payment
+     * was one half of an ensureReminderVaPair() pair - null for an ordinary
+     * single-VA checkout payment, which never has a sibling to begin with.
+     */
+    public function siblingReminderVaFor(Payment $settled): ?Payment
+    {
+        if (($settled->metadata['source'] ?? null) !== 'spp_reminder') {
+            return null;
+        }
+
+        $billIds = $settled->allocations()->pluck('bill_id');
+
+        if ($billIds->isEmpty()) {
+            return null;
+        }
+
+        $siblingPaymentIds = PaymentAllocation::whereIn('bill_id', $billIds)
+            ->pluck('payment_id')
+            ->unique()
+            ->reject(fn ($id) => $id === $settled->id);
+
+        return Payment::whereIn('id', $siblingPaymentIds)
+            ->whereIn('status', ['pending', 'processing'])
+            ->whereIn('gateway_response->provider', ['bank_muamalat', 'bank_bsi'])
+            ->first();
+    }
+
+    /** An already-registered, still-payable VA for this bank+bill, or null. */
+    private function liveVaPaymentFor(Bill $bill, string $bank): ?Payment
+    {
+        $paymentIds = PaymentAllocation::where('bill_id', $bill->id)->pluck('payment_id');
+
+        return Payment::whereIn('id', $paymentIds)
+            ->whereIn('status', ['pending', 'processing'])
+            ->where('gateway_response->provider', 'bank_'.$bank)
+            ->first();
     }
 
     /**

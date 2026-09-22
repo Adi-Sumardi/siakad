@@ -13,7 +13,9 @@ use App\Models\Student;
 use App\Services\Billing\BillReminderSender;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
+use App\Services\Notification\QontakWhatsAppGateway;
 use App\Services\Notification\WhatsAppGateway;
+use App\Services\Payment\BillingApiGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -32,6 +34,9 @@ class BillReminderTest extends TestCase
 
     /** @var list<array{phone: string, message: string}> */
     private array $sentWhatsApp = [];
+
+    /** @var list<array{phone: string, toName: string, templateId: string, bodyValues: array}> */
+    private array $sentQontakTemplates = [];
 
     private SchoolUnit $unit;
 
@@ -64,6 +69,38 @@ class BillReminderTest extends TestCase
                 $this->sent[] = compact('phone', 'message');
 
                 return NotificationResult::ok();
+            }
+        });
+
+        // SPP reminders go through Qontak's approved template instead of
+        // free-text Sendago (see BillReminderSender::queueSppReminderTemplate()) -
+        // faked the same way OtpLoginTest/SelectionAnnouncementTest fake the
+        // concrete gateway/job, capturing the call rather than hitting Qontak.
+        $this->app->bind(QontakWhatsAppGateway::class, fn () => new class($this->sentQontakTemplates) extends QontakWhatsAppGateway
+        {
+            public function __construct(private array &$sent) {}
+
+            public function sendTemplate(string $phone, string $toName, string $templateId, array $bodyValues, array $buttonValues = []): NotificationResult
+            {
+                $this->sent[] = compact('phone', 'toName', 'templateId', 'bodyValues');
+
+                return NotificationResult::ok();
+            }
+        });
+
+        // ensureReminderVaPair() otherwise calls the real e-SPP Billing API -
+        // faked to return fixed, obviously-fake VA numbers rather than
+        // mocking BillingApiClient's HTTP layer directly.
+        $this->app->bind(BillingApiGateway::class, fn () => new class extends BillingApiGateway
+        {
+            public function __construct() {}
+
+            public function ensureReminderVaPair(\App\Models\Bill $bill, \App\Models\Guardian $payer): array
+            {
+                return [
+                    'muamalat' => ['va_number' => '8020012627000001', 'bank_name' => 'Bank Muamalat'],
+                    'bsi' => ['va_number' => '3656012627000001', 'bank_name' => 'Bank Syariah Indonesia (BSI)'],
+                ];
             }
         });
 
@@ -203,15 +240,25 @@ class BillReminderTest extends TestCase
 
         $this->assertTrue($sent);
         $this->assertEmpty($this->sentMail);
-        $this->assertCount(1, $this->sentWhatsApp);
+        $this->assertEmpty($this->sentWhatsApp);
         $this->assertDatabaseHas('bill_reminders', ['bill_id' => $bill->id, 'channel' => 'whatsapp']);
 
-        // Queued rather than sent inline (App\Jobs\SendWhatsAppMessage) - under
-        // QUEUE_CONNECTION=sync it still runs within this call, so the log row
-        // it owns should already read 'sent', not stuck on 'queued'.
-        $log = \App\Models\NotificationLog::where('channel', 'whatsapp')->where('template', 'bill_reminder')->first();
+        // SPP goes through Qontak's approved 'reminder_spp' template
+        // (QontakWhatsAppGateway::sendTemplate()), not the free-text Sendago
+        // path - international 62xxx phone form, both banks' VA numbers as
+        // separate body values.
+        $this->assertCount(1, $this->sentQontakTemplates);
+        $sent0 = $this->sentQontakTemplates[0];
+        $this->assertSame('6281234567890', $sent0['phone']);
+        $this->assertSame('Aisyah Nur Ramadhani', $sent0['bodyValues'][0]);
+        $this->assertSame('8020012627000001', $sent0['bodyValues'][3]);
+        // BSI's fixed 4-digit institution code (3656) is stripped before
+        // this value - the template shows it separately as static text.
+        $this->assertSame('012627000001', $sent0['bodyValues'][4]);
+
+        $log = \App\Models\NotificationLog::where('channel', 'whatsapp')->where('template', 'reminder_spp')->first();
         $this->assertNotNull($log);
-        $this->assertSame('sent', $log->status);
+        $this->assertSame('queued', $log->status);
     }
 
     public function test_a_bill_with_no_reachable_guardian_is_skipped_not_failed(): void
