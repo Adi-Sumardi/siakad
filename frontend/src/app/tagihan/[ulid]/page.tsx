@@ -298,7 +298,7 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
               {payments.map((payment) => (
                 <div key={payment.ulid} className="py-3 first:pt-0 last:pb-0 flex items-center justify-between text-sm">
                   <div>
-                    <p className="font-bold text-foreground font-mono">{payment.payment_number}</p>
+                    <p className="font-bold text-foreground font-mono">{payment.reference_number}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       Metode: <strong className="uppercase">{payment.method}</strong> · {tanggal(payment.paid_at ?? payment.created_at)}
                     </p>

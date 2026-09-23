@@ -96,7 +96,7 @@ class PaymentReceiptSender
                 'amount' => number_format($amount, 0, ',', '.'),
                 'paid_at' => $paidAt,
                 'method' => $method,
-                'reference' => $payment->payment_number,
+                'reference' => $payment->referenceNumber(),
                 'bill_ids' => $bills->pluck('id')->all(),
             ],
             'status' => 'queued',
@@ -114,7 +114,8 @@ class PaymentReceiptSender
                 number_format($amount, 0, ',', '.'),
                 $paidAt,
                 $method,
-                $payment->payment_number,
+                // {{6}} "No. Referensi" - the VA, same as e-SPP's list shows.
+                $payment->referenceNumber(),
             ],
         );
     }

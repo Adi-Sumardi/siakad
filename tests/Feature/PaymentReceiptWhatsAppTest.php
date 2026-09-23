@@ -138,7 +138,8 @@ class PaymentReceiptWhatsAppTest extends TestCase
         $this->assertSame($bill->fresh()->issued_at->translatedFormat('F Y'), $sent['bodyValues'][1]);
         $this->assertSame('650.000', $sent['bodyValues'][2]);
         $this->assertSame('VA Bank Muamalat', $sent['bodyValues'][4]);
-        $this->assertSame('PAY/20260821/ABCDEF', $sent['bodyValues'][5]);
+        // No. Referensi is the VA - the number e-SPP's list and the bank show.
+        $this->assertSame('8020011234567890', $sent['bodyValues'][5]);
 
         $log = NotificationLog::where('channel', 'whatsapp')->where('template', 'receipt_spp_school')->first();
         $this->assertNotNull($log);

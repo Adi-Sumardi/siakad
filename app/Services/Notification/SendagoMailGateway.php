@@ -161,7 +161,7 @@ class SendagoMailGateway implements MailGateway
                 "Pembayaran diterima - {$data['student_name']}",
                 "Yth. {$data['guardian_name']},\n\n"
                     ."Alhamdulillah, pembayaran untuk {$data['student_name']} telah kami terima.\n\n"
-                    ."No. referensi : {$data['payment_number']}\n"
+                    ."No. referensi : ".($data['reference'] ?? $data['payment_number'])."\n"
                     ."Jumlah        : Rp {$data['amount']}\n"
                     ."Waktu bayar   : {$data['paid_at']} WIB\n"
                     .(filled($data['bank_name'] ?? null) ? "Metode        : VA {$data['bank_name']}\n" : '')

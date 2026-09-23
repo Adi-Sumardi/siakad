@@ -68,6 +68,8 @@ export type GatewayResponseInfo = {
 export type Payment = {
   ulid: string;
   payment_number: string;
+  /** The VA number when there is one - what e-SPP and the bank show. */
+  reference_number: string;
   amount: number;
   method: string | null;
   channel: string | null;

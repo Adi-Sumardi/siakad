@@ -201,7 +201,7 @@
         <div class="muted" style="margin-top: 6px; font-size: 8.5pt;">
             Diverifikasi lunas pada {{ $bill->paid_at?->translatedFormat('d F Y H:i') }} WIB
             @if ($payments->isNotEmpty())
-                · Ref: {{ $payments->pluck('payment_number')->join(', ') }}
+                · No. Referensi (VA): {{ $payments->map(fn ($p) => $p->referenceNumber())->unique()->join(', ') }}
             @endif
         </div>
     </div>

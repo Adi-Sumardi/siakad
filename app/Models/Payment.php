@@ -77,6 +77,18 @@ class Payment extends Model
         return $query->whereRaw('1 = 0');
     }
 
+    /**
+     * The number a family and an admin see as "No. Referensi": the Virtual
+     * Account itself, since that is the column e-SPP's own billing list shows
+     * and what the bank prints on the transfer proof - so a receipt can be
+     * matched against e-SPP by eye. The internal payment_number is only the
+     * fallback for a payment that never got a VA.
+     */
+    public function referenceNumber(): string
+    {
+        return (string) ($this->gateway_response['va_number'] ?? $this->payment_number);
+    }
+
     public static function generateNumber(): string
     {
         return 'PAY/'.now()->format('Ymd').'/'.mb_strtoupper(Str::random(6));

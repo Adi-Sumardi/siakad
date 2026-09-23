@@ -160,6 +160,7 @@ class PaymentReceiptNotifier
             'guardian_name' => $guardian->nama,
             'student_name' => $bills->first()?->student?->nama_lengkap ?? 'ananda',
             'payment_number' => $payment->payment_number,
+            'reference' => $payment->referenceNumber(),
             'amount' => number_format((float) $payment->amount, 0, ',', '.'),
             'paid_at' => ($payment->paid_at ?? now())->translatedFormat('d F Y, H:i'),
             'bank_name' => (string) ($gateway['bank_name'] ?? ''),

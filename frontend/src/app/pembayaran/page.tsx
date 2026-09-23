@@ -233,7 +233,7 @@ function PaymentsContent() {
                     </div>
 
                     <p className="text-xs text-muted-foreground">
-                      No. Pembayaran: <span className="font-mono font-bold text-foreground">{payment.payment_number}</span> · Dibuat: {tanggal(payment.created_at)}
+                      No. Referensi: <span className="font-mono font-bold text-foreground">{payment.reference_number}</span> · Dibuat: {tanggal(payment.created_at)}
                     </p>
 
                     <p className="text-xs text-muted-foreground">
@@ -325,7 +325,7 @@ function PaymentsContent() {
               <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4 space-y-2">
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-muted-foreground">Nomor Referensi:</span>
-                  <span className="font-mono font-bold text-foreground">{selectedPayment.payment_number}</span>
+                  <span className="font-mono font-bold text-foreground">{selectedPayment.reference_number}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Status Pembayaran:</span>

@@ -25,6 +25,7 @@ class PaymentResource extends JsonResource
         return [
             'ulid' => $this->ulid,
             'payment_number' => $this->payment_number,
+            'reference_number' => $this->resource->referenceNumber(),
             'amount' => (float) $this->amount,
             'method' => $this->method,
             'channel' => $this->channel,
