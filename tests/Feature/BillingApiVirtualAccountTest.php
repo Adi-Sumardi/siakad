@@ -1189,7 +1189,9 @@ class BillingApiVirtualAccountTest extends TestCase
     public function test_va_prefix_resolution_is_explicit_not_a_fallback_to_spp(): void
     {
         $this->assertSame('802001', BillingApiClient::resolvePrefix('spp'));
-        $this->assertSame('802002', BillingApiClient::resolvePrefix('uang_pangkal'));
+        // PMB's ranges on the shared e-SPP account - never minted here.
+        $this->assertNull(BillingApiClient::resolvePrefix('uang_pangkal'));
+        $this->assertNull(BillingApiClient::resolvePrefix('pendaftaran', null, 'bsi'));
         $this->assertSame('802003', BillingApiClient::resolvePrefix('jamiyyah'));
         $this->assertSame('802005', BillingApiClient::resolvePrefix('ekskul', $this->tkUnit));
 

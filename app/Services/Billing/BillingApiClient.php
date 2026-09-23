@@ -79,10 +79,21 @@ class BillingApiClient
      * config key (va_prefixes.{fee_code}) is the escape hatch once e-SPP
      * confirms a real prefix.
      */
+    /** Fee types whose e-SPP VA ranges PMB issues; Siakad never mints them. */
+    public const PMB_OWNED_FEE_TYPES = ['uang_pangkal', 'pendaftaran', 'registration_fee'];
+
     public static function resolvePrefix(string $feeTypeCode, ?SchoolUnit $unit = null, string $bank = 'muamalat'): ?string
     {
         $normalizedFee = strtolower($feeTypeCode);
         $bankKey = strtolower($bank) === 'bsi' ? 'bsi' : 'muamalat';
+
+        // These VA ranges are PMB's: the same e-SPP account serves both apps,
+        // and a VA is prefix + year + the app's own student id - two id
+        // spaces. A Siakad bill under PMB's prefix could mint the very number
+        // a different PMB child is paying uang pangkal / formulir into.
+        if (in_array($normalizedFee, self::PMB_OWNED_FEE_TYPES, true)) {
+            return null;
+        }
 
         $explicit = (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.{$normalizedFee}", '');
         if ($explicit !== '') {
@@ -374,9 +385,9 @@ class BillingApiClient
      * Used to shrink a superseded VA's date_end to today when a guardian
      * switches bank or re-checks out - see BillingApiGateway::expireVa().
      *
-     * @param array<string, mixed> $mainForm any of createBilling()'s main_form fields; only what is passed is changed. bank_id falls back to config('services.billing_api.bank_id') when omitted.
-     * @param array<string, mixed> $bmi
-     * @param array<string, mixed> $bsm
+     * @param  array<string, mixed>  $mainForm  any of createBilling()'s main_form fields; only what is passed is changed. bank_id falls back to config('services.billing_api.bank_id') when omitted.
+     * @param  array<string, mixed>  $bmi
+     * @param  array<string, mixed>  $bsm
      */
     public function updateBilling(string $uuid, array $mainForm, array $bmi = [], array $bsm = []): array
     {
