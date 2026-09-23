@@ -74,11 +74,17 @@ return [
         // names either app). Body has exactly one variable (the code
         // itself); the template's own copy-code button repeats it.
         'otp_template_id' => env('QONTAK_OTP_TEMPLATE_ID'),
-        // UUID of the approved 'reminder_spp' Utility template - SPP only
-        // for now (see BillReminderSender::queueSppReminderTemplate()). 5
-        // positional variables: nama anak, bulan tagihan, jumlah, VA
-        // Muamalat, kode bayar BSI (VA BSI minus its fixed "3656" prefix).
+        // UUID of the approved 'reminder_spp_school' Utility template (asks
+        // for money) - SPP only for now (see
+        // BillReminderSender::queueSppReminderTemplate()). 5 positional
+        // variables: nama anak, bulan tagihan, jumlah, VA Muamalat, kode
+        // bayar BSI (VA BSI minus its fixed "3656" prefix).
         'spp_reminder_template_id' => env('QONTAK_SPP_REMINDER_TEMPLATE_ID'),
+        // UUID of the approved 'receipt_spp_school' Utility template
+        // (confirms money arrived) - see PaymentReceiptSender. 6 positional
+        // variables: nama anak, bulan tagihan, jumlah dibayar, tanggal+jam
+        // bayar, metode/bank, nomor referensi pembayaran.
+        'spp_receipt_template_id' => env('QONTAK_SPP_RECEIPT_TEMPLATE_ID'),
     ],
 
     // Email gateway. Auth is memberId+secret in the request body, not a header.

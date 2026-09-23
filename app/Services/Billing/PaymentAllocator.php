@@ -6,7 +6,9 @@ use App\Models\Bill;
 use App\Models\Payment;
 use App\Models\PaymentAllocation;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Throwable;
 
 /**
  * The only writer of a bill's paid_amount, remaining_amount and status.
@@ -23,6 +25,8 @@ use RuntimeException;
  */
 class PaymentAllocator
 {
+    public function __construct(private PaymentReceiptSender $receiptSender) {}
+
     /**
      * Records what a payment is meant to settle.
      *
@@ -81,6 +85,20 @@ class PaymentAllocator
         });
 
         $this->recomputeFor($payment->allocations()->pluck('bill_id')->all());
+
+        try {
+            // A receipt that fails to queue must never undo money already
+            // recorded above - see PaymentReceiptSender's own docblock for
+            // why every per-bill failure inside it is caught, not thrown;
+            // this catches whatever could still escape that (e.g. the
+            // allocations lookup itself).
+            $this->receiptSender->send($payment->fresh());
+        } catch (Throwable $e) {
+            Log::warning('[PaymentAllocator] Failed to send payment receipt', [
+                'payment' => $payment->payment_number,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /** A failed or expired checkout releases the bills it was holding. */
