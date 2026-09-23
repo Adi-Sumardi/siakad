@@ -11,10 +11,11 @@ import type { NextRequest } from "next/server";
  * certainly not signed in. Real enforcement is every API call: a 401 makes the
  * client clear the user and route to /login.
  */
-// /presensi is the student self-check-in page - reached by scanning a QR or
-// tapping a card, with zero cookies of any kind (students have no account
-// in this app at all), so it must never be gated behind "has a session".
-const PUBLIC_PATHS = ["/login", "/aktivasi", "/presensi"];
+// /presensi and /absen are the student self-check-in pages - reached by
+// scanning a QR or tapping a link in a WA group description, with zero
+// cookies of any kind (students have no account in this app at all), so
+// they must never be gated behind "has a session".
+const PUBLIC_PATHS = ["/login", "/aktivasi", "/presensi", "/absen"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -33,5 +34,9 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|webp)$).*)"],
+  // `sanctum` sits alongside `api`: it is the endpoint pair that HANDS OUT the
+  // XSRF-TOKEN cookie in the first place, so gating it on "has XSRF-TOKEN"
+  // is a chicken-and-egg loop - a first-time visitor would be redirected to
+  // /login before ever receiving the cookie the gate checks for.
+  matcher: ["/((?!api|sanctum|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|webp)$).*)"],
 };

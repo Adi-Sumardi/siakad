@@ -41,8 +41,9 @@ function jenjangLabel(value: string) {
  * (see database/migrations/2026_09_02_000001_dedupe_school_units.php).
  */
 export default function AdminSchoolUnitsPage() {
+  // No separate loading flag: `units === null` IS the first-load state, so a
+  // refetch keeps the previous rows on screen instead of flashing a skeleton.
   const [units, setUnits] = useState<UnitItem[] | null>(null);
-  const [loading, setLoading] = useState(true);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingUnit, setEditingUnit] = useState<UnitItem | null>(null);
@@ -57,12 +58,10 @@ export default function AdminSchoolUnitsPage() {
   const [submitting, setSubmitting] = useState(false);
 
   function loadUnits() {
-    setLoading(true);
     api
       .get<{ school_units: UnitItem[] }>("/api/admin/school-units/manage")
       .then((d) => setUnits(d.school_units))
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data unit."))
-      .finally(() => setLoading(false));
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data unit."));
   }
 
   useEffect(() => {
@@ -188,7 +187,7 @@ export default function AdminSchoolUnitsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {loading && (
+              {units === null && (
                 <tr>
                   <td colSpan={6} className="p-5">
                     <Skeleton className="h-20 w-full rounded-xl" />
@@ -196,7 +195,7 @@ export default function AdminSchoolUnitsPage() {
                 </tr>
               )}
 
-              {!loading && units?.length === 0 && (
+              {units !== null && units.length === 0 && (
                 <tr>
                   <td colSpan={6} className="p-8 text-center text-muted-foreground">
                     Belum ada unit sekolah.
@@ -204,7 +203,7 @@ export default function AdminSchoolUnitsPage() {
                 </tr>
               )}
 
-              {!loading &&
+              {units !== null &&
                 units?.map((u) => (
                   <tr key={u.ulid} className="hover:bg-accent/30 transition-colors">
                     <td className="px-5 py-4">

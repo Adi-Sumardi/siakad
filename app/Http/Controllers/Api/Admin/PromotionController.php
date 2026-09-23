@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\PromotionTargetsRequest;
+use App\Http\Requests\Admin\StorePromotionRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Classroom;
@@ -40,12 +42,9 @@ class PromotionController extends Controller
         ]);
     }
 
-    public function targets(Request $request, string $classroomUlid, PromotionService $service): JsonResponse
+    public function targets(PromotionTargetsRequest $request, string $classroomUlid, PromotionService $service): JsonResponse
     {
-        $validated = $request->validate([
-            'academic_year_ulid' => 'required|string',
-            'outcome' => 'required|in:promoted,repeated',
-        ]);
+        $validated = $request->validated();
 
         $classroom = Classroom::visibleTo($request->user())->where('ulid', $classroomUlid)->firstOrFail();
         $newYear = AcademicYear::where('ulid', $validated['academic_year_ulid'])->firstOrFail();
@@ -63,15 +62,9 @@ class PromotionController extends Controller
         ]);
     }
 
-    public function store(Request $request, string $classroomUlid, PromotionService $service): JsonResponse
+    public function store(StorePromotionRequest $request, string $classroomUlid, PromotionService $service): JsonResponse
     {
-        $validated = $request->validate([
-            'academic_year_ulid' => 'required|string',
-            'entries' => 'required|array|min:1|max:200',
-            'entries.*.student_ulid' => 'required|string',
-            'entries.*.outcome' => 'required|in:promoted,repeated,graduated,left',
-            'entries.*.target_classroom_ulid' => 'nullable|string',
-        ]);
+        $validated = $request->validated();
 
         $classroom = Classroom::visibleTo($request->user())->where('ulid', $classroomUlid)->firstOrFail();
         $newYear = AcademicYear::where('ulid', $validated['academic_year_ulid'])->firstOrFail();

@@ -149,4 +149,72 @@ class GradeService
             ];
         });
     }
+
+    /**
+     * The whole-class mirror of summaryForRapor(): every subject scheduled
+     * for the classroom x every actively-enrolled student, with one grades
+     * query for the entire matrix. A null final is information, not an
+     * error - it means some teacher still owes a category. Subjects are
+     * read from class_schedules, so a subject whose schedule was deleted
+     * after grades were entered simply stops appearing (same semantics as
+     * the rapor).
+     *
+     * @return array{subjects: list<array{ulid: string, name: string}>, students: list<array{ulid: string, nama_lengkap: string, nis: ?string, scores: array<string, array{tugas: ?float, uts: ?float, uas: ?float, final: ?float}>}>}
+     */
+    public function classRecap(Classroom $classroom, Term $term): array
+    {
+        $subjects = ClassSchedule::where('classroom_id', $classroom->id)
+            ->with('subject')
+            ->get()
+            ->pluck('subject')
+            ->unique('id')
+            ->sortBy('name')
+            ->values();
+
+        $students = $classroom->enrollments()
+            ->where('status', 'active')
+            ->with('student')
+            ->get()
+            ->pluck('student')
+            ->filter()
+            ->sortBy('nama_lengkap')
+            ->values();
+
+        $grades = Grade::where('classroom_id', $classroom->id)
+            ->where('term_id', $term->id)
+            ->get()
+            ->groupBy('student_id');
+
+        return [
+            'subjects' => $subjects
+                ->map(fn (Subject $subject) => ['ulid' => $subject->ulid, 'name' => $subject->name])
+                ->all(),
+            'students' => $students
+                ->map(function (Student $student) use ($subjects, $grades) {
+                    $bySubject = ($grades->get($student->id) ?? collect())->groupBy('subject_id');
+
+                    return [
+                        'ulid' => $student->ulid,
+                        'nama_lengkap' => $student->nama_lengkap,
+                        'nis' => $student->nis,
+                        // Keyed by subject ULID so the UI can index the matrix
+                        // directly - subject_id never leaves the API.
+                        'scores' => $subjects
+                            ->mapWithKeys(function (Subject $subject) use ($bySubject) {
+                                $scores = ($bySubject->get($subject->id) ?? collect())
+                                    ->pluck('score', 'category');
+
+                                return [$subject->ulid => [
+                                    'tugas' => isset($scores['tugas']) ? (float) $scores['tugas'] : null,
+                                    'uts' => isset($scores['uts']) ? (float) $scores['uts'] : null,
+                                    'uas' => isset($scores['uas']) ? (float) $scores['uas'] : null,
+                                    'final' => $this->weightedFinal($scores),
+                                ]];
+                            })
+                            ->all(),
+                    ];
+                })
+                ->all(),
+        ];
+    }
 }

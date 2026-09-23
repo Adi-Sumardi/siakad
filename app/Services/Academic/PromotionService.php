@@ -5,6 +5,7 @@ namespace App\Services\Academic;
 use App\Models\AcademicYear;
 use App\Models\Classroom;
 use App\Models\Enrollment;
+use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\User;
 use Illuminate\Support\Collection;
@@ -23,33 +24,54 @@ class PromotionService
 {
     /**
      * Candidate destination classrooms for one outcome, in the new academic
-     * year. `promoted` steps the grade level up by exactly one AND must be
-     * either the source's own unit or one of its next-jenjang units
-     * (SchoolUnit::nextUnits()) - a matching tingkat number alone isn't
-     * enough, since this school runs multiple independent tingkat-numbering
-     * conventions across parallel units (two SMP campuses, two SMA
-     * campuses). `repeated` never crosses a unit boundary at all - you can
-     * only repeat where you already were.
+     * year. `promoted` must be either the source's own unit or one of its
+     * next-jenjang units (SchoolUnit::nextUnits()) - a matching unit alone
+     * isn't enough, since this school runs multiple independent
+     * tingkat-numbering conventions across parallel units (two SMP campuses,
+     * two SMA campuses). Expected grade is "one up" within the same jenjang
+     * but the destination's ENTRY rung when crossing one (RA's next step is
+     * TK's 0, TK-B's is SD's 1). `repeated` never crosses a unit boundary at
+     * all - you can only repeat where you already were.
      *
      * @return array{same_unit: Collection<int, Classroom>, other: Collection<int, Classroom>}
      */
     public function eligibleTargetClassrooms(Classroom $source, AcademicYear $newYear, string $outcome): array
     {
-        $targetTingkat = $outcome === 'repeated' ? $source->tingkat : $source->tingkat + 1;
         $validUnitIds = $this->validTargetUnitIds($source, $outcome);
 
         $candidates = Classroom::where('academic_year_id', $newYear->id)
-            ->where('tingkat', $targetTingkat)
             ->where('is_active', true)
             ->whereIn('school_unit_id', $validUnitIds)
             ->with('schoolUnit')
             ->orderBy('name')
-            ->get();
+            ->get()
+            ->filter(fn (Classroom $c) => (int) $c->tingkat === $this->expectedTingkatFor($source, $outcome, $c->schoolUnit));
 
         return [
             'same_unit' => $candidates->where('school_unit_id', $source->school_unit_id)->values(),
             'other' => $candidates->where('school_unit_id', '!=', $source->school_unit_id)->values(),
         ];
+    }
+
+    /**
+     * The grade rung a student should land on in $targetUnit: their current
+     * rung for `repeated`, rung+1 within the same jenjang, or the
+     * destination jenjang's entry rung when crossing (SchoolUnit::
+     * ENTRY_TINGKAT - null falls back to +1 so an unmapped group keeps the
+     * historical behaviour rather than blocking everything).
+     */
+    private function expectedTingkatFor(Classroom $source, string $outcome, SchoolUnit $targetUnit): int
+    {
+        if ($outcome === 'repeated') {
+            return (int) $source->tingkat;
+        }
+
+        if ($targetUnit->jenjang_group !== $source->schoolUnit->jenjang_group) {
+            return SchoolUnit::entryTingkatFor((string) $targetUnit->jenjang_group)
+                ?? (int) $source->tingkat + 1;
+        }
+
+        return (int) $source->tingkat + 1;
     }
 
     /** @return Collection<int, int> */
@@ -104,7 +126,12 @@ class PromotionService
                 if (! in_array($outcome, ['promoted', 'repeated'], true)) {
                     // graduated / left: the student's journey through this
                     // app's academic records ends here, on purpose - no new
-                    // row.
+                    // row. The student row itself must say so too - otherwise
+                    // every "active students" count, the unplaced-classroom
+                    // alert, and the point-threshold sweep keep treating
+                    // alumni as current students.
+                    $student->forceFill(['status' => $outcome === 'graduated' ? 'graduated' : 'transferred'])->save();
+
                     return $current;
                 }
 
@@ -140,7 +167,21 @@ class PromotionService
             throw new RuntimeException("Kelas tujuan untuk {$student->nama_lengkap} bukan kelas di tahun ajaran yang dituju.");
         }
 
-        $expectedTingkat = $outcome === 'repeated' ? $source->tingkat : $source->tingkat + 1;
+        $sourceYear = $source->academicYear;
+
+        // Promotion is a forward move: a target year that starts on/before
+        // the source year is a data mistake (or a picker fed the wrong
+        // list), never a promotion.
+        $sourceStart = (int) ($sourceYear->starts_on?->year ?? substr((string) $sourceYear->year, 0, 4));
+        $targetStart = (int) ($newYear->starts_on?->year ?? substr((string) $newYear->year, 0, 4));
+
+        if ((int) $newYear->getKey() !== (int) $sourceYear->getKey() && $targetStart <= $sourceStart) {
+            throw new RuntimeException(
+                "Tahun ajaran tujuan untuk {$student->nama_lengkap} harus SETELAH tahun ajaran sumber ({$sourceYear->year})."
+            );
+        }
+
+        $expectedTingkat = $this->expectedTingkatFor($source, $outcome, $target->schoolUnit);
 
         if ((int) $target->tingkat !== $expectedTingkat) {
             throw new RuntimeException("Kelas tujuan untuk {$student->nama_lengkap} bertingkat {$target->tingkat}, seharusnya {$expectedTingkat}.");

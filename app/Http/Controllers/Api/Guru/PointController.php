@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api\Guru;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Guru\RevokeReasonRequest;
+use App\Http\Requests\Guru\StoreBulkPointRecordsRequest;
+use App\Http\Requests\Guru\StorePointRecordRequest;
 use App\Http\Resources\PointRecordResource;
 use App\Models\ActivityLog;
 use App\Models\PointRecord;
@@ -68,9 +71,9 @@ class PointController extends Controller
         ]);
     }
 
-    public function store(Request $request, PointLedger $ledger): JsonResponse
+    public function store(StorePointRecordRequest $request, PointLedger $ledger): JsonResponse
     {
-        $validated = $this->validateSingle($request);
+        $validated = $request->validated();
 
         [$student, $rule, $term] = $this->resolve($request, $validated);
 
@@ -96,20 +99,9 @@ class PointController extends Controller
      * One rule, many students - a whole line late to assembly recorded in one
      * click instead of thirty identical ones.
      */
-    public function storeBulk(Request $request, PointLedger $ledger): JsonResponse
+    public function storeBulk(StoreBulkPointRecordsRequest $request, PointLedger $ledger): JsonResponse
     {
-        $validated = $request->validate([
-            'student_ulids' => 'required|array|min:1|max:200',
-            'student_ulids.*' => 'required|string',
-            'point_rule_ulid' => 'required|string',
-            // Laravel's bare 'today' keyword resolves against
-            // config('app.timezone'), which is UTC (see ClassroomController's
-            // note on the same root cause) - an explicit Jakarta date avoids
-            // rejecting a same-day entry as "in the future" during the seven
-            // hours every morning UTC's calendar date still lags Jakarta's.
-            'occurred_on' => ['required', 'date', 'before_or_equal:'.Carbon::today('Asia/Jakarta')->toDateString()],
-            'description' => 'required|string|max:1000',
-        ]);
+        $validated = $request->validated();
 
         $rule = PointRule::where('ulid', $validated['point_rule_ulid'])
             ->forUnit($request->user()->school_unit_id)->active()->firstOrFail();
@@ -141,9 +133,9 @@ class PointController extends Controller
     }
 
     /** Excludes the record from every balance from now on; the row and its reasoning stay on file. */
-    public function revoke(Request $request, string $ulid, PointLedger $ledger): JsonResponse
+    public function revoke(RevokeReasonRequest $request, string $ulid, PointLedger $ledger): JsonResponse
     {
-        $validated = $request->validate(['reason' => 'required|string|max:500']);
+        $validated = $request->validated();
 
         $record = PointRecord::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
@@ -156,22 +148,6 @@ class PointController extends Controller
         ActivityLog::record($request->user(), 'point.revoked', $record, ['reason' => $validated['reason']]);
 
         return response()->json(['record' => new PointRecordResource($record->fresh())]);
-    }
-
-    private function validateSingle(Request $request): array
-    {
-        return $request->validate([
-            'student_ulid' => 'required|string',
-            'point_rule_ulid' => 'required|string',
-            // Laravel's bare 'today' keyword resolves against
-            // config('app.timezone'), which is UTC (see ClassroomController's
-            // note on the same root cause) - an explicit Jakarta date avoids
-            // rejecting a same-day entry as "in the future" during the seven
-            // hours every morning UTC's calendar date still lags Jakarta's.
-            'occurred_on' => ['required', 'date', 'before_or_equal:'.Carbon::today('Asia/Jakarta')->toDateString()],
-            'description' => 'required|string|max:1000',
-            'evidence' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
-        ]);
     }
 
     /** @return array{0: Student, 1: PointRule, 2: Term} */

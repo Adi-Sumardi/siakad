@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Guru;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Guru\StoreGradesRequest;
 use App\Models\ActivityLog;
 use App\Models\ClassSchedule;
 use App\Models\Classroom;
@@ -11,9 +12,11 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Term;
 use App\Services\Academic\GradeService;
+use App\Services\Academic\RaporPdfService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\Response;
 
 class GradeController extends Controller
 {
@@ -78,7 +81,7 @@ class GradeController extends Controller
         ]);
     }
 
-    public function store(Request $request, string $classroomUlid, string $subjectUlid, GradeService $service): JsonResponse
+    public function store(StoreGradesRequest $request, string $classroomUlid, string $subjectUlid, GradeService $service): JsonResponse
     {
         $classroom = Classroom::visibleTo($request->user())->where('ulid', $classroomUlid)->firstOrFail();
         $subject = Subject::where('ulid', $subjectUlid)->firstOrFail();
@@ -88,13 +91,7 @@ class GradeController extends Controller
         $term = Term::current();
         abort_if(! $term, 422, 'Belum ada semester aktif.');
 
-        $validated = $request->validate([
-            'category' => 'required|in:tugas,uts,uas',
-            'entries' => 'required|array|min:1|max:200',
-            'entries.*.student_ulid' => 'required|string',
-            'entries.*.score' => 'required|numeric|min:0|max:100',
-            'entries.*.description' => 'nullable|string|max:500',
-        ]);
+        $validated = $request->validated();
 
         $ulids = collect($validated['entries'])->pluck('student_ulid');
 
@@ -130,5 +127,45 @@ class GradeController extends Controller
         ]);
 
         return response()->json(['recorded' => $grades->count()], 201);
+    }
+
+    /**
+     * The whole-class grade matrix for the running term: every scheduled
+     * subject x every roster student, all three categories side by side
+     * with the weighted final. Read-only, so unlike roster()/store() there
+     * is no canGrade() gate - any teacher of the unit can look at a room
+     * they can already open (the same line attendanceRecap() draws);
+     * entering grades stays scheduled-teachers-only.
+     */
+    public function classRecap(Request $request, string $classroomUlid, GradeService $service): JsonResponse
+    {
+        $classroom = Classroom::visibleTo($request->user())->where('ulid', $classroomUlid)->firstOrFail();
+
+        $term = Term::current();
+        abort_if(! $term, 422, 'Belum ada semester aktif.');
+
+        return response()->json([
+            'classroom' => ['ulid' => $classroom->ulid, 'name' => $classroom->name],
+            ...$service->classRecap($classroom, $term),
+        ]);
+    }
+
+    /**
+     * The same report card the guardian will eventually download, so the
+     * teacher can check it before it reaches them - the B.2 audit gap. Same
+     * read line as classRecap(): any teacher of the unit, not only the
+     * scheduled one, since reading never edits. Rendered on demand, nothing
+     * stored (D9/R9).
+     */
+    public function rapor(Request $request, string $studentUlid, RaporPdfService $pdf, GradeService $service): Response
+    {
+        $student = Student::visibleTo($request->user())->where('ulid', $studentUlid)->firstOrFail();
+
+        $termUlid = $request->string('term_ulid')->value();
+        $term = $termUlid ? Term::where('ulid', $termUlid)->first() : Term::current();
+
+        abort_if(! $term, 422, 'Belum ada semester yang bisa dipilih.');
+
+        return $pdf->render($student, $term, $service)->stream($pdf->filename($student, $term));
     }
 }

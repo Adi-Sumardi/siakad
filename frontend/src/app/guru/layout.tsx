@@ -2,13 +2,14 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Award, ClipboardList, School, Trophy } from "lucide-react";
+import { Award, CalendarCheck2, ClipboardList, School, Trophy } from "lucide-react";
 import { StaffShell, type StaffNavItem } from "@/components/layout/staff-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { homePathFor, useAuth } from "@/lib/auth/auth-context";
 
 const NAV: StaffNavItem[] = [
   { href: "/guru", label: "Kelas saya", icon: School },
+  { href: "/guru/presensi-harian", label: "Presensi Harian", icon: CalendarCheck2 },
   { href: "/guru/nilai", label: "Nilai", icon: ClipboardList },
   { href: "/guru/prestasi", label: "Catat prestasi", icon: Award },
   { href: "/guru/ekskul", label: "Ekskul Saya", icon: Trophy },

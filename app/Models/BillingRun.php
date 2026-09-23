@@ -32,6 +32,17 @@ class BillingRun extends Model
         return $this->belongsTo(FeeType::class);
     }
 
+    public function schoolUnit(): BelongsTo
+    {
+        return $this->belongsTo(SchoolUnit::class);
+    }
+
+    /** The staff account that pressed the button - null for scheduled runs. */
+    public function runBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'run_by');
+    }
+
     public function bills(): HasMany
     {
         return $this->hasMany(Bill::class);

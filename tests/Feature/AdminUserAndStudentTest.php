@@ -92,7 +92,14 @@ class AdminUserAndStudentTest extends TestCase
         ]);
     }
 
-    public function test_a_unit_admin_only_sees_their_own_units_staff_and_parents(): void
+    /**
+     * Narrowed 2026-09-09: a per-unit admin's account power is onboarding
+     * their own unit's teachers and parents, so the list shows exactly those
+     * - own-unit gurus, plus this unit's parents (imported with the unit
+     * stamped on, or PMB-created and linked through their children). Other
+     * staff and any other unit's accounts must not reach this response.
+     */
+    public function test_a_unit_admin_sees_their_own_units_gurus_and_parents(): void
     {
         $otherUnit = SchoolUnit::create(['code' => 'smp', 'label' => 'SMP Islam Al Azhar 12', 'jenjang_group' => 'smp']);
 
@@ -121,9 +128,69 @@ class AdminUserAndStudentTest extends TestCase
         $emails = collect($response->json('users.data'))->pluck('email');
 
         $this->assertTrue($emails->contains('guru.sd@yapinet.id'));
+        // A parent of this unit's own student IS their business now.
         $this->assertTrue($emails->contains('wali.sd@example.com'));
         $this->assertFalse($emails->contains('guru.smp@yapinet.id'));
         $this->assertFalse($emails->contains('wali.smp@example.com'));
+    }
+
+    /**
+     * Scope of the students list itself: a per-unit admin shares the screen
+     * with the central admin, so the endpoint must answer with one unit's
+     * rows even though the role gate let them in - "hanya unit saya", not
+     * "seluruh jenjang SMP".
+     */
+    public function test_a_unit_admins_student_list_stays_inside_their_unit(): void
+    {
+        $otherUnit = SchoolUnit::create(['code' => 'smp', 'label' => 'SMP Islam Al Azhar 12', 'jenjang_group' => 'smp']);
+
+        $unitAdmin = User::create([
+            'name' => 'Admin SD', 'email' => 'admin.sd@yapinet.id',
+            'role' => 'admin_unit', 'school_unit_id' => $this->unit->id, 'is_active' => true,
+        ]);
+
+        Student::create(['nama_lengkap' => 'Anak SD', 'jenis_kelamin' => 'L', 'school_unit_id' => $this->unit->id, 'status' => 'active']);
+        Student::create(['nama_lengkap' => 'Anak SMP Unit Lain', 'jenis_kelamin' => 'L', 'school_unit_id' => $otherUnit->id, 'status' => 'active']);
+
+        $this->actingAs($unitAdmin)
+            ->getJson('/api/admin/students')
+            ->assertOk()
+            ->assertJsonCount(1, 'students.data')
+            ->assertJsonPath('students.data.0.nama_lengkap', 'Anak SD');
+    }
+
+    /**
+     * placement=none is where the dashboard's "belum ditempatkan di kelas"
+     * alert lands: active students without an active rombel in the selected
+     * year - the same definition the alert counts, so the number and the
+     * list it opens agree.
+     */
+    public function test_placement_none_lists_students_without_an_active_rombel(): void
+    {
+        $classroom = Classroom::create([
+            'school_unit_id' => $this->unit->id, 'academic_year_id' => $this->year->id,
+            'tingkat' => 1, 'name' => '1A',
+        ]);
+
+        $placed = Student::create(['nama_lengkap' => 'Sudah Ditempatkan', 'jenis_kelamin' => 'L', 'school_unit_id' => $this->unit->id, 'status' => 'active']);
+        Enrollment::create([
+            'student_id' => $placed->id, 'classroom_id' => $classroom->id,
+            'academic_year_id' => $this->year->id, 'status' => 'active', 'joined_on' => '2026-07-01',
+        ]);
+        Student::create(['nama_lengkap' => 'Belum Ditempatkan', 'jenis_kelamin' => 'P', 'school_unit_id' => $this->unit->id, 'status' => 'active']);
+
+        // Default list shows both.
+        $this->actingAs($this->admin)
+            ->getJson('/api/admin/students')
+            ->assertOk()
+            ->assertJsonCount(2, 'students.data');
+
+        $this->actingAs($this->admin)
+            ->getJson('/api/admin/students?placement=none')
+            ->assertOk()
+            ->assertJsonCount(1, 'students.data')
+            ->assertJsonPath('students.data.0.nama_lengkap', 'Belum Ditempatkan')
+            ->assertJsonPath('students.data.0.classroom', null);
     }
 
     public function test_the_student_list_shows_the_guardians_actual_name_and_phone(): void

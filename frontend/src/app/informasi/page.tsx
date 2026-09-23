@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { FileDown, Megaphone, Pin, RefreshCw } from "lucide-react";
+import { FileDown, Pin, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { WaliShell } from "@/components/layout/wali-shell";
 import { Badge } from "@/components/ui/badge";

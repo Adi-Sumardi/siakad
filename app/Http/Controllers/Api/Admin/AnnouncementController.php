@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreAnnouncementRequest;
+use App\Http\Requests\Admin\UpdateAnnouncementRequest;
 use App\Http\Resources\AnnouncementResource;
 use App\Models\ActivityLog;
 use App\Models\Announcement;
@@ -25,17 +27,9 @@ class AnnouncementController extends Controller
         return response()->json(['announcements' => AnnouncementResource::collection($announcements)]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreAnnouncementRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'title' => 'required|string|max:200',
-            'body' => 'required|string|max:5000',
-            'school_unit_code' => 'nullable|exists:school_units,code',
-            'classroom_ulid' => 'nullable|string',
-            'is_pinned' => 'boolean',
-            'published_at' => 'nullable|date',
-            'file' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
-        ]);
+        $validated = $request->validated();
 
         [$unit, $classroom] = $this->resolveScope($request, $validated);
 
@@ -61,16 +55,11 @@ class AnnouncementController extends Controller
         return response()->json(['announcement' => new AnnouncementResource($announcement)], 201);
     }
 
-    public function update(Request $request, string $ulid): JsonResponse
+    public function update(UpdateAnnouncementRequest $request, string $ulid): JsonResponse
     {
         $announcement = Announcement::manageableBy($request->user())->where('ulid', $ulid)->firstOrFail();
 
-        $validated = $request->validate([
-            'title' => 'sometimes|string|max:200',
-            'body' => 'sometimes|string|max:5000',
-            'is_pinned' => 'boolean',
-            'published_at' => 'nullable|date',
-        ]);
+        $validated = $request->validated();
 
         $announcement->update($validated);
 

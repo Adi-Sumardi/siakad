@@ -16,12 +16,13 @@ type Member = { ulid: string; student: StudentOption; joined_on: string | null }
 function RosterPanel({ ekskul, onChanged }: { ekskul: EkskulRow; onChanged: () => void }) {
   const [members, setMembers] = useState<Member[] | null>(null);
   const [studentUlid, setStudentUlid] = useState("");
-  const [classrooms, setClassrooms] = useState<{ ulid: string; students: StudentOption[] }[]>([]);
   const [allStudents, setAllStudents] = useState<StudentOption[]>([]);
   const [assigning, setAssigning] = useState(false);
 
+  // No reset-to-null before the fetch: `members === null` IS the first load,
+  // so switching ekskul keeps the old rows until the new ones land - and
+  // nothing calls setState synchronously from the effect below.
   function load() {
-    setMembers(null);
     api.get<{ members: Member[] }>(`/api/guru/extracurriculars/${ekskul.ulid}/members`)
       .then((d) => setMembers(d.members))
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat anggota."));

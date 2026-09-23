@@ -20,34 +20,74 @@ class BillingApiClient
 {
     // Default Virtual Account 6-digit Prefixes for Bank Muamalat (BMI - Kode Bank 147)
     public const PREFIX_SPP = '802001';
+
     public const PREFIX_UANG_PANGKAL = '802002';
+
     public const PREFIX_JAMIYYAH = '802003';
+
     public const PREFIX_PENDAFTARAN = '802004';
+
     public const PREFIX_EKSKUL_TK = '802005';
+
     public const PREFIX_EKSKUL_SD = '802006';
+
     public const PREFIX_EKSKUL_SMP12 = '802007';
+
     public const PREFIX_EKSKUL_SMP55 = '802008';
+
+    public const PREFIX_CAMBRIDGE_SD = '802009';
+
+    public const PREFIX_CAMBRIDGE_SMP12 = '802010';
+
+    public const PREFIX_CAMBRIDGE_SMP55 = '802011';
 
     // Default Virtual Account 6-digit Prefixes for Bank Syariah Indonesia (BSI - Kode Bank 451)
     public const PREFIX_BSI_SPP = '365601';
+
     public const PREFIX_BSI_UANG_PANGKAL = '365602';
+
     public const PREFIX_BSI_JAMIYYAH = '365603';
+
     public const PREFIX_BSI_PENDAFTARAN = '365604';
+
     public const PREFIX_BSI_EKSKUL_TK = '365605';
+
     public const PREFIX_BSI_EKSKUL_SD = '365606';
+
     public const PREFIX_BSI_EKSKUL_SMP12 = '365607';
+
     public const PREFIX_BSI_EKSKUL_SMP55 = '365608';
 
+    public const PREFIX_BSI_CAMBRIDGE_SD = '365609';
+
+    public const PREFIX_BSI_CAMBRIDGE_SMP12 = '365610';
+
+    public const PREFIX_BSI_CAMBRIDGE_SMP55 = '365611';
+
     private const TOKEN_CACHE_KEY = 'billing_api:access_token';
+
     private const TOKEN_EXPIRY_BUFFER_SECONDS = 300;
 
     /**
-     * Resolves the 6-digit VA prefix based on fee type code, school unit, and bank.
+     * Resolves the 6-digit VA prefix based on fee type code, school unit, and
+     * bank - or null when e-SPP has no prefix registered for that fee type.
+     *
+     * Null is the honest answer: the old fallback silently reused the SPP
+     * prefix for unmapped fee types (seragam, buku), minting a VA
+     * identical to the student's SPP VA for the same year - one payment
+     * could then settle the other's bill at the bank. An explicit
+     * config key (va_prefixes.{fee_code}) is the escape hatch once e-SPP
+     * confirms a real prefix.
      */
-    public static function resolvePrefix(string $feeTypeCode, ?SchoolUnit $unit = null, string $bank = 'muamalat'): string
+    public static function resolvePrefix(string $feeTypeCode, ?SchoolUnit $unit = null, string $bank = 'muamalat'): ?string
     {
         $normalizedFee = strtolower($feeTypeCode);
         $bankKey = strtolower($bank) === 'bsi' ? 'bsi' : 'muamalat';
+
+        $explicit = (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.{$normalizedFee}", '');
+        if ($explicit !== '') {
+            return $explicit;
+        }
 
         if (str_contains($normalizedFee, 'ekskul')) {
             $unitCode = strtoupper((string) ($unit?->code ?? ''));
@@ -58,6 +98,26 @@ class BillingApiClient
                 str_contains($unitCode, 'SMP-12') || str_contains($unitCode, 'SMP12') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_smp12", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP12 : self::PREFIX_EKSKUL_SMP12),
                 str_contains($unitCode, 'SMP-55') || str_contains($unitCode, 'SMP55') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_smp55", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP55 : self::PREFIX_EKSKUL_SMP55),
                 default => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD),
+            };
+        }
+
+        // Cambridge bills only SD and the two SMP units (school decision
+        // 2026-09-22), so - unlike ekskul - an unmatched unit keeps null:
+        // TK/RA/PG/SMA must never mint a Cambridge VA. A missing unit falls
+        // back to the SD prefix so catalogue listings can show the type as
+        // VA-capable.
+        if (str_contains($normalizedFee, 'cambridge')) {
+            $unitCode = strtoupper((string) ($unit?->code ?? ''));
+
+            if ($unitCode === '') {
+                return (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.cambridge_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_CAMBRIDGE_SD : self::PREFIX_CAMBRIDGE_SD);
+            }
+
+            return match (true) {
+                str_contains($unitCode, 'SMP-12') || str_contains($unitCode, 'SMP12') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.cambridge_smp12", $bankKey === 'bsi' ? self::PREFIX_BSI_CAMBRIDGE_SMP12 : self::PREFIX_CAMBRIDGE_SMP12),
+                str_contains($unitCode, 'SMP-55') || str_contains($unitCode, 'SMP55') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.cambridge_smp55", $bankKey === 'bsi' ? self::PREFIX_BSI_CAMBRIDGE_SMP55 : self::PREFIX_CAMBRIDGE_SMP55),
+                str_contains($unitCode, 'SD') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.cambridge_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_CAMBRIDGE_SD : self::PREFIX_CAMBRIDGE_SD),
+                default => null,
             };
         }
 
@@ -73,7 +133,7 @@ class BillingApiClient
             return (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.pendaftaran", $bankKey === 'bsi' ? self::PREFIX_BSI_PENDAFTARAN : self::PREFIX_PENDAFTARAN);
         }
 
-        return (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.spp", $bankKey === 'bsi' ? self::PREFIX_BSI_SPP : self::PREFIX_SPP);
+        return null;
     }
 
     /**
@@ -95,10 +155,17 @@ class BillingApiClient
         }
 
         $prefix = self::resolvePrefix($feeTypeCode, $student->schoolUnit, $bank);
+
+        if ($prefix === null) {
+            throw new BillingApiException(
+                "Jenis biaya '{$feeTypeCode}' belum punya prefix Virtual Account terdaftar di bank - nomor VA tidak boleh dibuat untuk jenis ini."
+            );
+        }
+
         $academicYearCode = self::formatAcademicYearCode($academicYear ?: $student->entryYear?->year);
         $studentSeq = self::formatStudentCode($student);
 
-        return $prefix . $academicYearCode . $studentSeq;
+        return $prefix.$academicYearCode.$studentSeq;
     }
 
     /**
@@ -107,11 +174,11 @@ class BillingApiClient
     public static function formatAcademicYearCode(?string $academicYear): string
     {
         if ($academicYear && preg_match('/(\d{4})\/(\d{4})/', $academicYear, $m)) {
-            return substr($m[1], 2, 2) . substr($m[2], 2, 2);
+            return substr($m[1], 2, 2).substr($m[2], 2, 2);
         }
 
         if ($academicYear && preg_match('/(\d{2})\/(\d{2})/', $academicYear, $m)) {
-            return $m[1] . $m[2];
+            return $m[1].$m[2];
         }
 
         if ($academicYear && preg_match('/^\d{4}$/', $academicYear)) {
@@ -121,7 +188,7 @@ class BillingApiClient
         try {
             $activeYear = AcademicYear::where('is_active', true)->value('year');
             if ($activeYear && preg_match('/(\d{4})\/(\d{4})/', $activeYear, $m)) {
-                return substr($m[1], 2, 2) . substr($m[2], 2, 2);
+                return substr($m[1], 2, 2).substr($m[2], 2, 2);
             }
         } catch (\Throwable) {
             // Ignore if DB not queryable
@@ -229,7 +296,7 @@ class BillingApiClient
             ]);
 
             throw new BillingApiException(
-                'Failed to authenticate with e-SPP Billing API: ' . $response->body(),
+                'Failed to authenticate with e-SPP Billing API: '.$response->body(),
                 $response->status()
             );
         }
@@ -265,9 +332,9 @@ class BillingApiClient
      * the flattened /api/billing/create a prior rewrite introduced without
      * confirming against e-SPP's docs.
      *
-     * @param array<string, mixed> $mainForm customer_name, va_desc, va_desc1, jumlah_tagihan, date_start, date_end, priority, pay_type, sekolah, kelas. bank_id falls back to config('services.billing_api.bank_id') when omitted.
-     * @param array<string, mixed> $bmi va_number, ref_number
-     * @param array<string, mixed> $bsm nomor_pembayaran, id_tagihan
+     * @param  array<string, mixed>  $mainForm  customer_name, va_desc, va_desc1, jumlah_tagihan, date_start, date_end, priority, pay_type, sekolah, kelas. bank_id falls back to config('services.billing_api.bank_id') when omitted.
+     * @param  array<string, mixed>  $bmi  va_number, ref_number
+     * @param  array<string, mixed>  $bsm  nomor_pembayaran, id_tagihan
      */
     public function createBilling(array $mainForm, array $bmi, array $bsm): array
     {
@@ -294,7 +361,7 @@ class BillingApiClient
             ]);
 
             throw new BillingApiException(
-                'e-SPP createBilling failed: ' . $response->body(),
+                'e-SPP createBilling failed: '.$response->body(),
                 $response->status()
             );
         }
@@ -359,7 +426,7 @@ class BillingApiClient
 
         if ($response->failed()) {
             throw new BillingApiException(
-                "e-SPP getByVaNumber failed for VA {$vaNumber}: " . $response->body(),
+                "e-SPP getByVaNumber failed for VA {$vaNumber}: ".$response->body(),
                 $response->status()
             );
         }

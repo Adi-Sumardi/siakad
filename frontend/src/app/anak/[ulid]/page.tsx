@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Award, ClipboardList, Download, FileDown, Plus, Sparkles, Trophy, UserCheck, X } from "lucide-react";
 import { toast } from "sonner";
@@ -78,8 +78,18 @@ function AttendanceHistory({ attendance }: { attendance: AttendanceOverview }) {
       {attendance.records.map((record) => (
         <div key={record.ulid} className="flex items-start justify-between gap-4 px-5 py-3.5">
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-foreground">{tanggal(record.occurred_on)}</p>
-            {record.description && <p className="text-xs text-muted-foreground mt-0.5">{record.description}</p>}
+            <p className="text-sm font-semibold text-foreground">
+              {tanggal(record.date)}
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {record.type === "pulang" ? "Pulang" : "Masuk"}
+              </span>
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {record.is_late && "Terlambat"}
+              {record.is_late && record.checked_in_at && " · "}
+              {record.checked_in_at && `pukul ${record.checked_in_at} WIB`}
+              {!record.checked_in_at && !record.is_late && record.description}
+            </p>
           </div>
           <Badge
             variant={
@@ -257,14 +267,47 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
   const [grades, setGrades] = useState<{ term: string | null; term_ulid?: string; terms?: { ulid: string; label: string; is_active: boolean }[]; subjects: SubjectGradeSummary[] } | null>(null);
   const [selectedTermUlid, setSelectedTermUlid] = useState<string>("");
   const [extracurriculars, setExtracurriculars] = useState<{ ulid: string; name: string; pembina: string | null; school_unit: string | null }[] | null>(null);
+  const [availableEkskul, setAvailableEkskul] = useState<{ ulid: string; name: string; pembina: string | null; member_count: number; capacity: number | null }[] | null>(null);
+  const [enrollPick, setEnrollPick] = useState("");
+  const [enrolling, setEnrolling] = useState(false);
   const [downloadingRapor, setDownloadingRapor] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function loadAchievements() {
+  // useCallback so the mount effect below can list them as deps without a
+  // stale closure - the eslint exhaustive-deps warning was real: ulid is a
+  // route param this page re-renders with.
+  const loadAchievements = useCallback(() => {
     api
       .get<{ achievements: Achievement[] }>(`/api/wali/students/${ulid}/achievements`)
       .then((d) => setAchievements(d.achievements))
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+  }, [ulid]);
+
+  const loadEkskul = useCallback(() => {
+    api
+      .get<{ extracurriculars: { ulid: string; name: string; pembina: string | null; school_unit: string | null }[]; available: { ulid: string; name: string; pembina: string | null; member_count: number; capacity: number | null }[] }>(`/api/wali/students/${ulid}/extracurriculars`)
+      .then((d) => {
+        setExtracurriculars(d.extracurriculars);
+        setAvailableEkskul(d.available ?? []);
+        setEnrollPick("");
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+  }, [ulid]);
+
+  async function handleEnroll() {
+    if (!enrollPick) return;
+    setEnrolling(true);
+    try {
+      const res = await api.post<{ message: string }>(`/api/wali/students/${ulid}/extracurriculars`, {
+        extracurricular_ulid: enrollPick,
+      });
+      toast.success(res.message);
+      loadEkskul();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mendaftarkan ekstrakurikuler.");
+    } finally {
+      setEnrolling(false);
+    }
   }
 
   useEffect(() => {
@@ -278,12 +321,9 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
       .get<AttendanceOverview>(`/api/wali/students/${ulid}/attendance`)
       .then(setAttendance)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
-    api
-      .get<{ extracurriculars: { ulid: string; name: string; pembina: string | null; school_unit: string | null }[] }>(`/api/wali/students/${ulid}/extracurriculars`)
-      .then((d) => setExtracurriculars(d.extracurriculars))
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+    loadEkskul();
     loadAchievements();
-  }, [ulid, user]);
+  }, [ulid, user, loadEkskul, loadAchievements]);
 
   function loadGrades(termUlid?: string) {
     const query = termUlid ? `?term_ulid=${termUlid}` : "";
@@ -522,6 +562,31 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
                   {e.name}{e.pembina ? ` · ${e.pembina}` : ""}
                 </Badge>
               ))}
+            </div>
+          )}
+
+          {/* Pendaftaran mandiri (keputusan 2026-09-09): wali memilih dari
+              kegiatan yang masih tersedia di unit anaknya tahun ajaran ini. */}
+          {availableEkskul !== null && availableEkskul.length > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <select
+                value={enrollPick}
+                onChange={(e) => setEnrollPick(e.target.value)}
+                className="w-full sm:max-w-xs rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
+              >
+                <option value="">Pilih ekstrakurikuler…</option>
+                {availableEkskul.map((e) => (
+                  <option key={e.ulid} value={e.ulid}>
+                    {e.name}
+                    {e.pembina ? ` — ${e.pembina}` : ""}
+                    {e.capacity !== null ? ` (${e.member_count}/${e.capacity})` : ""}
+                  </option>
+                ))}
+              </select>
+              <Button size="sm" variant="outline" className="gap-1.5 font-semibold text-xs h-9" disabled={!enrollPick || enrolling} onClick={handleEnroll}>
+                <Plus className="size-3.5 text-primary" />
+                <span>{enrolling ? "Mendaftarkan…" : "Daftarkan Ananda"}</span>
+              </Button>
             </div>
           )}
         </section>

@@ -108,6 +108,22 @@ class SendagoMailGateway implements MailGateway
                     .'Terima kasih.',
             ],
             /**
+             * The lost-access lane: this address is NEW (the old contact is
+             * dead), so the message must explain what opening the link does -
+             * it replaces the account's only way in.
+             */
+            'school_account_reset' => [
+                'Pembaruan kontak akun Siakad YAPI',
+                "Yth. {$data['guardian_name']},\n\n"
+                    ."Kami menerima permintaan memperbarui kontak akun aplikasi sekolah Anda.\n\n"
+                    ."Buka tautan berikut untuk mengaktifkan alamat ini sebagai kontak akun Anda:\n\n"
+                    ."{$data['activation_url']}\n\n"
+                    ."Setelah tautan dibuka, alamat ini ({$data['login_identifier']}) menjadi "
+                    ."satu-satunya tempat kode masuk dikirim.\n\n"
+                    ."Tautan berlaku sampai {$data['expires_at']}. Bila Anda tidak meminta "
+                    .'perubahan ini, abaikan email ini.',
+            ],
+            /**
              * The sign-in code. Short, and it says the one thing that matters
              * for this kind of message: nobody legitimate will ever ask for it.
              */
@@ -141,22 +157,30 @@ class SendagoMailGateway implements MailGateway
                     ."Pembayaran dapat dilakukan melalui aplikasi sekolah.\n\n"
                     .'Abaikan email ini bila pembayaran sudah dilakukan.',
             ],
-            /**
-             * The threshold-crossing notice. Sent once per band per term - see
-             * PointThresholdNotifier - so this is never routine noise, it is
-             * always the first time a family is told their child's balance
-             * moved into this territory.
-             */
-            'point_threshold' => [
-                "Poin {$data['student_name']}: {$data['label']}",
+            'payment_receipt' => [
+                "Pembayaran diterima - {$data['student_name']}",
                 "Yth. {$data['guardian_name']},\n\n"
-                    ."Poin {$data['student_name']} saat ini {$data['balance']} ({$data['label']}).\n\n"
-                    .($data['action'] !== '' ? "{$data['action']}\n\n" : '')
-                    ."Rincian lengkap dapat dilihat di aplikasi sekolah.",
+                    ."Alhamdulillah, pembayaran untuk {$data['student_name']} telah kami terima.\n\n"
+                    ."No. referensi : {$data['payment_number']}\n"
+                    ."Jumlah        : Rp {$data['amount']}\n"
+                    ."Waktu bayar   : {$data['paid_at']} WIB\n"
+                    .(filled($data['bank_name'] ?? null) ? "Metode        : VA {$data['bank_name']}\n" : '')
+                    .(! empty($data['bills']) ? "Untuk tagihan :\n- ".implode("\n- ", (array) $data['bills'])."\n" : '')
+                    ."\nRincian pembayaran juga dapat dilihat di menu Riwayat Bayar pada aplikasi sekolah.\n\n"
+                    .'Jazakumullahu khairan katsiran.',
             ],
+            // Anything unrecognised still goes out rather than being swallowed,
+            // but a new notification should get a real template above. Array
+            // values are flattened: a bare "{$v}" on one crashed the whole send
+            // with "Array to string conversion" (how payment_receipt, which
+            // carries a list of bills, failed before it had its own case).
             default => [
                 'Notifikasi Siakad YAPI',
-                implode("\n", array_map(fn ($k, $v) => "{$k}: {$v}", array_keys($data), $data)),
+                implode("\n", array_map(
+                    fn ($k, $v) => $k.': '.(is_array($v) ? implode(', ', $v) : (string) $v),
+                    array_keys($data),
+                    $data,
+                )),
             ],
         };
     }

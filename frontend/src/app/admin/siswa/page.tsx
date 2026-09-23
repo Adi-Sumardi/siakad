@@ -1,26 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   BadgePercent,
   Calendar,
-  ChevronRight,
   Download,
   Edit2,
   FileSpreadsheet,
-  Filter,
   GraduationCap,
   Percent,
   Phone,
-  Plus,
   RefreshCw,
   Search,
   Sparkles,
   Trash2,
   UploadCloud,
-  User,
-  Users,
   Wallet,
   X,
 } from "lucide-react";
@@ -31,10 +27,10 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Pagination } from "@/components/pagination";
 import { useAuth } from "@/lib/auth/auth-context";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, API_BASE } from "@/lib/api";
 import { rupiah } from "@/lib/format";
+import { Pagination, type PageMeta } from "@/components/ui/pagination";
 
 type StudentItem = {
   ulid: string;
@@ -78,23 +74,33 @@ type StudentItem = {
 type SchoolUnit = { ulid: string; code: string; label: string; jenjang_group: string };
 type AcademicYear = { ulid: string; year: string; is_active: boolean };
 
-export default function AdminStudentsPage() {
+// The KPI aggregates come from the backend (whole filtered cohort) instead of
+// the 20 rows on screen, so they keep their meaning across pages.
+type StudentListMeta = PageMeta & {
+  totals: { base_spp: number; discount: number; net_spp: number };
+  selected_academic_year: string;
+};
+
+function AdminStudentsContent() {
   const { user } = useAuth();
   const isAdministrator = user?.role === "admin";
+  const searchParams = useSearchParams();
 
   const [students, setStudents] = useState<StudentItem[] | null>(null);
-  const [meta, setMeta] = useState<{ current_page: number; last_page: number } | null>(null);
-  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState<StudentListMeta | null>(null);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [selectedYear, setSelectedYear] = useState<string>("");
-  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
 
   // Filters
   const [search, setSearch] = useState("");
-  const [unitFilter, setUnitFilter] = useState("");
+  const [unitFilter, setUnitFilter] = useState(searchParams.get("unit") ?? "");
   const [jenjangFilter, setJenjangFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
+  // The dashboard's "belum ditempatkan di kelas" alert lands here with
+  // placement=none - kept as a toggle so the filter survives further edits.
+  const [placementNone, setPlacementNone] = useState(searchParams.get("placement") === "none");
 
   // Import Modal
   const [showImportModal, setShowImportModal] = useState(false);
@@ -116,29 +122,30 @@ export default function AdminStudentsPage() {
   const [formStatus, setFormStatus] = useState("active");
   const [submitting, setSubmitting] = useState(false);
 
-  function loadStudents() {
-    setLoading(true);
+  // No separate loading flag: `students === null` IS the first-load state, so a
+  // refetch (filter/search change) keeps the previous rows on screen instead of
+  // flashing a skeleton - and nothing ever calls setState synchronously in the
+  // effect below.
+  function loadStudents(targetPage: number = page) {
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (unitFilter) params.set("unit", unitFilter);
     if (jenjangFilter) params.set("jenjang", jenjangFilter);
     if (statusFilter) params.set("status", statusFilter);
+    if (placementNone) params.set("placement", "none");
     if (selectedYear) params.set("academic_year", selectedYear);
-    if (page > 1) params.set("page", String(page));
+    params.set("page", String(targetPage));
+    params.set("per_page", "20");
 
     api
-      .get<{
-        students: {
-          data: StudentItem[];
-          meta: { selected_academic_year: string; current_page: number; last_page: number };
-        };
-      }>(`/api/admin/students?${params.toString()}`)
+      .get<{ students: { data: StudentItem[]; meta: StudentListMeta } }>(
+        `/api/admin/students?${params.toString()}`,
+      )
       .then((d) => {
         setStudents(d.students.data);
         setMeta(d.students.meta);
       })
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data siswa."))
-      .finally(() => setLoading(false));
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data siswa."));
   }
 
   useEffect(() => {
@@ -164,12 +171,43 @@ export default function AdminStudentsPage() {
     if (selectedYear) {
       loadStudents();
     }
-  }, [selectedYear, unitFilter, jenjangFilter, statusFilter, page]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedYear, unitFilter, jenjangFilter, statusFilter, placementNone, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setPage(1);
-    loadStudents();
+    // A new search can shrink the result set - always land on page 1. When
+    // we're already there the effect above won't re-fire, so fetch by hand.
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      loadStudents(1);
+    }
+  }
+
+  // Download endpoints live on the API origin, so a plain <a href="/api/...">
+  // would hit Next.js itself and 404 in development. Fetch with the Sanctum
+  // session cookie and hand the browser a blob instead - same pattern as the
+  // bill PDF downloads.
+  async function downloadApiFile(path: string, filename: string) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+
+      if (!res.ok) {
+        throw new Error("Gagal mengunduh file. Pastikan sesi Anda masih aktif.");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh file.");
+    }
   }
 
   async function handleImportSubmit(e: React.FormEvent) {
@@ -251,7 +289,13 @@ export default function AdminStudentsPage() {
       await api.delete(`/api/admin/students/${deletingStudent.ulid}`);
       toast.success("Data siswa berhasil dihapus.");
       setDeletingStudent(null);
-      loadStudents();
+      // Deleting the last row of a page would strand the user on an empty
+      // page - step back instead of refetching the now-empty one.
+      if (students && students.length === 1 && page > 1) {
+        setPage(page - 1);
+      } else {
+        loadStudents();
+      }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menghapus data siswa.");
     } finally {
@@ -259,11 +303,12 @@ export default function AdminStudentsPage() {
     }
   }
 
-  // Summary Metrics
-  const totalStudents = students?.length ?? 0;
-  const totalBaseSPP = students?.reduce((acc, s) => acc + (s.pricing?.base_spp ?? 0), 0) ?? 0;
-  const totalDiscount = students?.reduce((acc, s) => acc + (s.pricing?.discount_amount ?? 0), 0) ?? 0;
-  const totalNetSPP = students?.reduce((acc, s) => acc + (s.pricing?.net_spp ?? 0), 0) ?? 0;
+  // Summary Metrics - aggregated by the backend over the whole filtered set
+  // (meta.totals), not the 20 rows on screen.
+  const totalStudents = meta?.total ?? 0;
+  const totalBaseSPP = meta?.totals.base_spp ?? 0;
+  const totalDiscount = meta?.totals.discount ?? 0;
+  const totalNetSPP = meta?.totals.net_spp ?? 0;
 
   return (
     <div className="space-y-6">
@@ -283,7 +328,10 @@ export default function AdminStudentsPage() {
             <span className="text-xs font-semibold text-muted-foreground">Tahun:</span>
             <select
               value={selectedYear}
-              onChange={(e) => { setSelectedYear(e.target.value); setPage(1); }}
+              onChange={(e) => {
+                setSelectedYear(e.target.value);
+                setPage(1);
+              }}
               className="bg-transparent text-xs font-bold text-foreground focus:outline-hidden"
             >
               {years.map((y) => (
@@ -308,12 +356,16 @@ export default function AdminStudentsPage() {
             <span>Import Siswa (CSV/Excel)</span>
           </Button>
 
-          <a href="/api/admin/students/dapodik-export" download title="Unduh CSV Formulir Peserta Didik (Dapodik) - untuk mempercepat entry manual, bukan impor otomatis ke Dapodik.">
-            <Button variant="outline" size="sm" className="gap-1.5 font-semibold text-xs h-9">
-              <FileSpreadsheet className="size-4 text-primary" />
-              <span>Ekspor Dapodik</span>
-            </Button>
-          </a>
+          <Button
+            onClick={() => downloadApiFile("/api/admin/students/dapodik-export", "formulir_peserta_didik_dapodik.csv")}
+            variant="outline"
+            size="sm"
+            className="gap-1.5 font-semibold text-xs h-9"
+            title="Unduh CSV Formulir Peserta Didik (Dapodik) - untuk mempercepat entry manual, bukan impor otomatis ke Dapodik."
+          >
+            <FileSpreadsheet className="size-4 text-primary" />
+            <span>Ekspor Dapodik</span>
+          </Button>
 
           <Link href="/admin/diskon">
             <Button variant="outline" size="sm" className="gap-1.5 font-semibold text-xs h-9">
@@ -389,43 +441,60 @@ export default function AdminStudentsPage() {
             </div>
           </div>
 
-          <div>
-            <Label className="text-xs">Jenjang Sekolah</Label>
-            <select
-              value={jenjangFilter}
-              onChange={(e) => { setJenjangFilter(e.target.value); setPage(1); }}
-              className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
-            >
-              <option value="">Semua Jenjang</option>
-              <option value="tk">TK / PAUD / RA</option>
-              <option value="sd">SD</option>
-              <option value="smp">SMP</option>
-              <option value="sma">SMA</option>
-            </select>
-          </div>
+          {/* Jenjang & unit filters are central-admin only: a per-unit
+              admin's scope already narrows every query to their own unit,
+              so these dropdowns would only offer choices that render an
+              empty table. */}
+          {isAdministrator && (
+            <div>
+              <Label className="text-xs">Jenjang Sekolah</Label>
+              <select
+                value={jenjangFilter}
+                onChange={(e) => {
+                  setJenjangFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
+              >
+                <option value="">Semua Jenjang</option>
+                <option value="tk">TK / PAUD / RA</option>
+                <option value="sd">SD</option>
+                <option value="smp">SMP</option>
+                <option value="sma">SMA</option>
+              </select>
+            </div>
+          )}
 
-          <div>
-            <Label className="text-xs">Unit Sekolah</Label>
-            <select
-              value={unitFilter}
-              onChange={(e) => { setUnitFilter(e.target.value); setPage(1); }}
-              className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
-            >
-              <option value="">Semua Unit</option>
-              {units.map((u) => (
-                <option key={u.ulid} value={u.code}>
-                  {u.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {isAdministrator && (
+            <div>
+              <Label className="text-xs">Unit Sekolah</Label>
+              <select
+                value={unitFilter}
+                onChange={(e) => {
+                  setUnitFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
+              >
+                <option value="">Semua Unit</option>
+                {units.map((u) => (
+                  <option key={u.ulid} value={u.code}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="flex items-end gap-2">
             <div className="flex-1">
               <Label className="text-xs">Status Siswa</Label>
               <select
                 value={statusFilter}
-                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setPage(1);
+                }}
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
               >
                 <option value="">Semua Status</option>
@@ -437,6 +506,28 @@ export default function AdminStudentsPage() {
             <Button type="submit" size="sm" variant="outline" className="h-9 px-3 text-xs">
               <RefreshCw className="size-3.5" />
             </Button>
+          </div>
+
+          {/* Tujuan link "belum ditempatkan di kelas" dari dashboard (T22) -
+              toggle terpisah dari status karena berlaku untuk tahun ajaran
+              terpilih, bukan status siswa. */}
+          <div className="sm:col-span-2 lg:col-span-5">
+            <button
+              type="button"
+              onClick={() => {
+                setPlacementNone(!placementNone);
+                setPage(1);
+              }}
+              aria-pressed={placementNone}
+              className={`h-9 w-full sm:w-auto rounded-md border px-3.5 text-xs font-bold shadow-2xs transition-colors ${
+                placementNone
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-input bg-card text-muted-foreground hover:bg-muted"
+              }`}
+              title="Hanya siswa tanpa rombel aktif pada tahun ajaran terpilih"
+            >
+              {placementNone ? "✓ Hanya yang belum punya rombel" : "Filter: belum punya rombel"}
+            </button>
           </div>
         </form>
       </Card>
@@ -454,11 +545,11 @@ export default function AdminStudentsPage() {
                 <th className="px-5 py-3.5 text-right">Tarif Pokok</th>
                 <th className="px-5 py-3.5">Diskon / Beasiswa</th>
                 <th className="px-5 py-3.5 text-right">SPP Net / Bulan</th>
-                {isAdministrator && <th className="px-5 py-3.5 text-right">Aksi</th>}
+                {isAdministrator && <th className="px-5 py-3.5 text-center">Aksi</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {loading && (
+              {students === null && (
                 <tr>
                   <td colSpan={isAdministrator ? 8 : 7} className="p-5">
                     <Skeleton className="h-24 w-full rounded-xl" />
@@ -466,7 +557,7 @@ export default function AdminStudentsPage() {
                 </tr>
               )}
 
-              {!loading && students?.length === 0 && (
+              {students?.length === 0 && (
                 <tr>
                   <td colSpan={isAdministrator ? 8 : 7} className="p-8 text-center text-muted-foreground">
                     Tidak ada data siswa yang ditemukan untuk kriteria filter ini.
@@ -474,9 +565,8 @@ export default function AdminStudentsPage() {
                 </tr>
               )}
 
-              {!loading &&
-                students?.map((s) => {
-                  const hasDiscounts = (s.pricing?.discounts?.length ?? 0) > 0;
+              {students?.map((s) => {
+                const hasDiscounts = (s.pricing?.discounts?.length ?? 0) > 0;
 
                   return (
                     <tr key={s.ulid} className="hover:bg-accent/30 transition-colors">
@@ -578,7 +668,7 @@ export default function AdminStudentsPage() {
                               className="h-8 px-2.5 text-xs font-semibold gap-1"
                             >
                               <Edit2 className="size-3.5" />
-                              <span>Edit</span>
+                              
                             </Button>
                             <Button
                               size="sm"
@@ -598,13 +688,14 @@ export default function AdminStudentsPage() {
           </table>
         </div>
 
-        <div className="px-4 pb-4">
+        {meta && (
           <Pagination
-            currentPage={meta?.current_page ?? 1}
-            lastPage={meta?.last_page ?? 1}
-            onChange={setPage}
+            meta={meta}
+            onPage={setPage}
+            label="siswa"
+            className="border-t border-border/60 px-5 py-3.5"
           />
-        </div>
+        )}
       </Card>
 
       {/* MODAL: IMPORT SISWA */}
@@ -624,16 +715,36 @@ export default function AdminStudentsPage() {
             <div className="bg-primary/5 border border-primary/20 rounded-xl p-3.5 text-xs text-muted-foreground space-y-2">
               <p className="font-semibold text-foreground">Format File yang Didukung:</p>
               <p>
-                File spreadsheet (.CSV). Pastikan berisi kolom: <code>nama_lengkap</code>, <code>nis</code>, <code>nisn</code>, <code>jenis_kelamin</code> (L/P), <code>unit_code</code> (contoh: <code>sd</code>, <code>smp</code>, <code>sma</code>), <code>kelas</code>, <code>wali_nama</code>, <code>wali_phone</code>, <code>wali_email</code>.
+                File spreadsheet (.CSV). Pastikan berisi kolom: <code>nama_lengkap</code>, <code>nis</code>, <code>nisn</code>, <code>jenis_kelamin</code> (L/P), {isAdministrator && (<> <code>unit_code</code>,</> )} <code>kelas</code>, <code>wali_nama</code>, <code>wali_phone</code>, <code>wali_email</code>.
               </p>
-              <a
-                href="/api/admin/import/students/template"
-                download
+              {isAdministrator ? (
+                <p>
+                  <span className="font-semibold text-foreground">unit_code</span> wajib berisi kode satu unit spesifik (bukan jenjang — satu jenjang bisa terdiri dari beberapa kampus, mis. dua SMP). Kode yang valid:{" "}
+                  {units.length > 0 ? (
+                    units.map((u, i) => (
+                      <span key={u.ulid}>
+                        {i > 0 && ", "}
+                        <code>{u.code}</code>
+                      </span>
+                    ))
+                  ) : (
+                    <span className="italic">memuat daftar unit…</span>
+                  )}
+                  .
+                </p>
+              ) : (
+                <p>
+                  Semua baris otomatis ditempatkan di <span className="font-semibold text-foreground">unit sekolah Anda</span> — kolom unit tidak diperlukan (template untuk admin unit memang tanpa kolom unit).
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => downloadApiFile("/api/admin/import/students/template", "template_import_siswa_siakad.csv")}
                 className="inline-flex items-center gap-1.5 font-bold text-primary hover:underline pt-1"
               >
                 <Download className="size-3.5" />
                 <span>Unduh Format Template CSV Siswa</span>
-              </a>
+              </button>
             </div>
 
             <form onSubmit={handleImportSubmit} className="space-y-4 text-xs">
@@ -832,5 +943,27 @@ export default function AdminStudentsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AdminStudentsPage() {
+  // useSearchParams reads the ?unit= filter the dashboard appends, and needs a
+  // Suspense boundary or the route bails out of prerendering.
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-4">
+          <Skeleton className="h-10 w-64 rounded-xl" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Skeleton className="h-24 rounded-2xl" />
+            <Skeleton className="h-24 rounded-2xl" />
+            <Skeleton className="h-24 rounded-2xl" />
+          </div>
+          <Skeleton className="h-96 w-full rounded-2xl" />
+        </div>
+      }
+    >
+      <AdminStudentsContent />
+    </Suspense>
   );
 }

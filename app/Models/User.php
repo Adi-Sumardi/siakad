@@ -69,6 +69,12 @@ class User extends Authenticatable
         return $this->hasOne(Guardian::class);
     }
 
+    /** The staff record (NIP, jabatan, contact phone) for the staff roles. */
+    public function staffProfile(): HasOne
+    {
+        return $this->hasOne(StaffProfile::class);
+    }
+
     public function invitations(): HasMany
     {
         return $this->hasMany(AccountInvitation::class);

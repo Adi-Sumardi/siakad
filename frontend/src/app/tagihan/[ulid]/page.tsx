@@ -4,19 +4,11 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
-  Banknote,
   Building2,
-  Calendar,
   CheckCircle2,
-  Clock,
   Download,
-  FileText,
-  GraduationCap,
-  HelpCircle,
-  QrCode,
   Receipt,
   ShieldCheck,
-  User,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -323,35 +315,37 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
           </Card>
         )}
 
-        {/* Official Bank Account and Payment Instructions Box */}
+        {/* Official Payment Instructions Box - e-SPP Virtual Account only */}
         <Card className="p-6 border-emerald-500/30 bg-emerald-500/5 shadow-xs space-y-4">
           <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-300 font-bold text-sm">
             <ShieldCheck className="size-5 text-emerald-600" />
-            <span>Petunjuk & Rekening Resmi Pembayaran YAPI Jakarta</span>
+            <span>Petunjuk Pembayaran Virtual Account YAPI Jakarta (e-SPP)</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div className="p-3 bg-card rounded-xl border border-border shadow-2xs space-y-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="p-3 bg-card rounded-xl border border-border shadow-2xs space-y-1.5">
+              <p className="font-bold text-foreground">Bank Muamalat</p>
+              <p className="text-[11px] text-muted-foreground">
+                Kode Bank <strong className="text-primary">147</strong> · Kode Institusi e-SPP <strong className="text-primary">8020</strong>
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Bayar via aplikasi <strong>Muamalat DIN</strong>, ATM Muamalat, atau transfer antar bank ke nomor Virtual Account yang terbit.
+              </p>
+            </div>
+
+            <div className="p-3 bg-card rounded-xl border border-border shadow-2xs space-y-1.5">
               <p className="font-bold text-foreground">Bank Syariah Indonesia (BSI)</p>
-              <p className="font-mono text-sm font-black text-primary">7001234567</p>
-              <p className="text-[11px] text-muted-foreground">a.n. Yayasan Asrama Pelajar Islam</p>
-            </div>
-
-            <div className="p-3 bg-card rounded-xl border border-border shadow-2xs space-y-1">
-              <p className="font-bold text-foreground">Bank Mandiri</p>
-              <p className="font-mono text-sm font-black text-primary">1230009876543</p>
-              <p className="text-[11px] text-muted-foreground">a.n. Yayasan Asrama Pelajar Islam</p>
-            </div>
-
-            <div className="p-3 bg-card rounded-xl border border-border shadow-2xs space-y-1">
-              <p className="font-bold text-foreground">Bank Central Asia (BCA)</p>
-              <p className="font-mono text-sm font-black text-primary">0089123456</p>
-              <p className="text-[11px] text-muted-foreground">a.n. Yayasan Asrama Pelajar Islam</p>
+              <p className="text-[11px] text-muted-foreground">
+                Kode Bank <strong className="text-primary">451</strong> · Kode Institusi e-SPP <strong className="text-primary">3656</strong>
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Bayar via <strong>Byond by BSI</strong> (Akademik, kode biller 3656), ATM BSI, atau transfer antar bank ke nomor Virtual Account yang terbit.
+              </p>
             </div>
           </div>
 
           <p className="text-xs text-emerald-800 dark:text-emerald-400">
-            💡 Untuk pembayaran instan otomatis tanpa perlu konfirmasi manual, silakan klik tombol <strong>Bayar Sekarang</strong> untuk membayar via <strong>QRIS Dinamis / SendagoPay</strong>.
+            💡 Klik tombol <strong>Bayar Sekarang</strong> — nomor <strong>Virtual Account</strong> terbit otomatis khas untuk ananda (per jenis biaya &amp; tahun ajaran), lalu bayar sesuai nominal. Status lunas terverifikasi <strong>otomatis</strong> tanpa perlu konfirmasi manual.
           </p>
         </Card>
       </div>

@@ -4,28 +4,27 @@ namespace App\Services\Attendance;
 
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
+use App\Models\DailyRecord;
 use App\Models\Student;
 use App\Models\Term;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
- * The only writer of attendance_records.
- *
- * Every row also feeds a stored rollup on the student's active enrollment
- * (absent_count/sick_count/permit_count) - kept there for a named
- * performance reason (a homeroom teacher opens that list daily and it must
- * not scan a year of attendance rows). This service recomputes those three
- * counters from the ledger rather than incrementing them, and only at
- * session-close time (see AttendanceSessionService::close() callers), not
- * per check-in - a classroom of students checking in within the same minute
- * must not each trigger their own recompute query.
+ * The only writer of attendance_records - the per-lesson layer that lives on
+ * for SMP/SMA as attendance DETAIL (DESAIN-PRESENSI-HARIAN.md §8). The
+ * official rollups moved to the daily layer: the H/S/I/A-in-days summary and
+ * the enrollment counters the watchlist reads are recomputed by
+ * DailyAttendanceService, never from these rows.
  */
 class AttendanceLedger
 {
+    public function __construct(private RotatingQrService $qr) {}
+
     /** Whether this student already has a live mark in this session - the "once per session" rule, enforced here so both lookup() and checkIn() controllers can ask the same question. */
     public function hasCheckedIn(AttendanceSession $session, Student $student): bool
     {
@@ -36,41 +35,93 @@ class AttendanceLedger
     }
 
     /**
-     * Self-service check-in. Locks the session row for the duration of the
+     * Self-service check-in. The rotating code from the teacher's screen is
+     * mandatory - without it the session's static token URL alone would be a
+     * shareable credential - and the device-once rule (one phone, one NIS per
+     * session, the same partial-index contract daily_records enforces) closes
+     * the buddy-punching lane. Locks the session row for the duration of the
      * check-then-insert so two near-simultaneous scans for the same student
      * (a flaky retry, a double-tap) can't both pass hasCheckedIn() before
      * either has written - the second waits for the lock and then sees the
      * first's row. Throws if there's no active term rather than writing a
      * term_id the schema does not allow to be null.
      */
-    public function checkIn(AttendanceSession $session, Student $student): AttendanceRecord
+    public function checkIn(AttendanceSession $session, Student $student, ?string $deviceId = null, ?string $qrCode = null): AttendanceRecord
     {
-        return DB::transaction(function () use ($session, $student) {
-            AttendanceSession::whereKey($session->id)->lockForUpdate()->first();
+        if (empty($qrCode)) {
+            throw new RuntimeException('Kode QR wajib - scan QR yang tampil di layar guru.');
+        }
 
-            if ($this->hasCheckedIn($session, $student)) {
-                throw new RuntimeException('Sudah tercatat hadir sebelumnya.');
-            }
+        if (! $this->qr->verify(RotatingQrService::lessonScope($session->ulid), (string) $qrCode)) {
+            throw new RuntimeException('Kode QR tidak dikenali atau sudah kedaluwarsa - scan ulang.');
+        }
 
-            $schedule = $session->classSchedule;
-            $term = Term::current();
+        $deviceHash = ! empty($deviceId) ? hash('sha256', (string) $deviceId) : null;
 
-            if (! $term) {
-                throw new RuntimeException('Tidak ada semester aktif - presensi tidak bisa dicatat saat ini.');
-            }
+        try {
+            return DB::transaction(function () use ($session, $student, $deviceHash) {
+                AttendanceSession::whereKey($session->id)->lockForUpdate()->first();
 
-            return AttendanceRecord::create([
-                'student_id' => $student->id,
-                'attendance_session_id' => $session->id,
-                'classroom_id' => $schedule->classroom_id,
-                'term_id' => $term->id,
-                'attendance_status' => 'hadir',
-                'occurred_on' => $session->occurred_on,
-                'source' => 'self',
-                'recorded_by' => null,
-                'record_status' => 'recorded',
-            ]);
-        });
+                if ($this->hasCheckedIn($session, $student)) {
+                    throw new RuntimeException('Sudah tercatat hadir sebelumnya.');
+                }
+
+                // One phone, one NIS per day: a device that already checked a
+                // DIFFERENT student in today (any lesson period) is done for
+                // the day - the owner may keep checking in themselves for
+                // every remaining period, but a friend's NIS is closed. The
+                // old per-session scoping let one phone rotate a fresh friend
+                // through every period; the student check above (same NIS) is
+                // deliberately exempt so legitimate repeat use is unlimited.
+                if ($deviceHash && AttendanceRecord::query()
+                    ->where('device_hash', $deviceHash)
+                    ->active()
+                    ->whereDate('occurred_on', $session->occurred_on)
+                    ->where('student_id', '!=', $student->id)
+                    ->exists()) {
+                    throw new RuntimeException('Perangkat ini sudah dipakai presensi siswa lain hari ini.');
+                }
+
+                if ($deviceHash && DailyRecord::query()
+                    ->where('device_hash', $deviceHash)
+                    ->active()
+                    ->whereDate('date', $session->occurred_on)
+                    ->where('student_id', '!=', $student->id)
+                    ->exists()) {
+                    // Cross-layer: the daily (gate) and lesson tables each
+                    // kept their own device ledger, so one phone could serve
+                    // student A at the morning gate and student B in first
+                    // period. One device, one student, one day - wherever
+                    // the scan happens.
+                    throw new RuntimeException('Perangkat ini sudah dipakai absen siswa lain hari ini.');
+                }
+
+                $schedule = $session->classSchedule;
+                $term = Term::current();
+
+                if (! $term) {
+                    throw new RuntimeException('Tidak ada semester aktif - presensi tidak bisa dicatat saat ini.');
+                }
+
+                return AttendanceRecord::create([
+                    'student_id' => $student->id,
+                    'attendance_session_id' => $session->id,
+                    'classroom_id' => $schedule->classroom_id,
+                    'term_id' => $term->id,
+                    'attendance_status' => 'hadir',
+                    'occurred_on' => $session->occurred_on,
+                    'source' => 'self',
+                    'device_hash' => $deviceHash,
+                    'recorded_by' => null,
+                    'record_status' => 'recorded',
+                ]);
+            });
+        } catch (QueryException) {
+            // The device partial unique won a race the pre-check missed -
+            // the student pre-check cannot race itself (same student, same
+            // lock), so the collision is the device index by elimination.
+            throw new RuntimeException('Perangkat ini sudah dipakai presensi siswa lain hari ini.');
+        }
     }
 
     /**
@@ -104,7 +155,7 @@ class AttendanceLedger
                     ->first();
 
                 if ($existing) {
-                    $this->revoke($existing, $recordedBy, 'Diperbarui melalui penyelesaian presensi oleh guru.', false);
+                    $this->revoke($existing, $recordedBy, 'Diperbarui melalui penyelesaian presensi oleh guru.');
                 }
 
                 return AttendanceRecord::create([
@@ -124,7 +175,7 @@ class AttendanceLedger
     }
 
     /** Excludes the row from every rollup/report from now on; the row itself stays on file. */
-    public function revoke(AttendanceRecord $record, User $revokedBy, string $reason, bool $syncRollup = true): void
+    public function revoke(AttendanceRecord $record, User $revokedBy, string $reason): void
     {
         if (! $record->isActive()) {
             throw new RuntimeException('Catatan presensi ini sudah dibatalkan sebelumnya.');
@@ -135,55 +186,6 @@ class AttendanceLedger
             'revoked_by' => $revokedBy->id,
             'revoked_at' => now(),
             'revoke_reason' => $reason,
-        ])->save();
-
-        if ($syncRollup) {
-            $this->syncEnrollmentRollup($record->student);
-        }
-    }
-
-    /** H/S/I/A counts for one student within one term - computed on read. */
-    public function summary(Student $student, Term $term): array
-    {
-        $counts = AttendanceRecord::where('student_id', $student->id)
-            ->where('term_id', $term->id)
-            ->active()
-            ->selectRaw('attendance_status, count(*) as total')
-            ->groupBy('attendance_status')
-            ->pluck('total', 'attendance_status');
-
-        return [
-            'hadir' => (int) ($counts['hadir'] ?? 0),
-            'sakit' => (int) ($counts['sakit'] ?? 0),
-            'izin' => (int) ($counts['izin'] ?? 0),
-            'alpa' => (int) ($counts['alpa'] ?? 0),
-        ];
-    }
-
-    /**
-     * Recomputes enrollments.sick_count/permit_count/absent_count for the
-     * student's current enrollment, scoped to that enrollment's academic
-     * year (an enrollment is one row per student per year; a new year means
-     * a new enrollment row with counters starting fresh).
-     */
-    public function syncEnrollmentRollup(Student $student): void
-    {
-        $enrollment = $student->currentEnrollment();
-        if (! $enrollment) {
-            return;
-        }
-
-        $counts = AttendanceRecord::where('student_id', $student->id)
-            ->whereHas('term', fn ($q) => $q->where('academic_year_id', $enrollment->academic_year_id))
-            ->active()
-            ->selectRaw('attendance_status, count(*) as total')
-            ->groupBy('attendance_status')
-            ->pluck('total', 'attendance_status');
-
-        $enrollment->forceFill([
-            'sick_count' => (int) ($counts['sakit'] ?? 0),
-            'permit_count' => (int) ($counts['izin'] ?? 0),
-            'absent_count' => (int) ($counts['alpa'] ?? 0),
         ])->save();
     }
 }

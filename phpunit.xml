@@ -19,6 +19,9 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <!-- The suite runs the production timezone so the flip is what the
+             tests exercise, not a UTC fallback the real app never uses. -->
+        <env name="APP_TIMEZONE" value="Asia/Jakarta"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
@@ -35,6 +38,25 @@
              is faked in tests that need it, never actually called with this
              id. -->
         <env name="QONTAK_SPP_REMINDER_TEMPLATE_ID" value="test-spp-reminder-template"/>
+        <!-- Same idea for the login OTP: with a template id but no Qontak
+             credentials, QontakWhatsAppGateway takes its log-only lane, so a
+             test that logs in over WhatsApp without faking the gateway (e.g.
+             UserResetAccessTest) still completes instead of 500ing. -->
+        <env name="QONTAK_OTP_TEMPLATE_ID" value="test-otp-template"/>
+        <!-- A developer .env holding real gateway credentials must never
+             reach the suite: any test that doesn't fake a gateway would send
+             a real email/WhatsApp (found 2026-09-23, when a missing mail
+             template only surfaced on a laptop whose .env had Sendago keys).
+             Empty = every gateway takes its log-only lane. -->
+        <env name="SENDAGOMAIL_BASE_URL" value="" force="true"/>
+        <env name="SENDAGOMAIL_MEMBER_ID" value="" force="true"/>
+        <env name="SENDAGOMAIL_SECRET" value="" force="true"/>
+        <env name="SENDAGO_BASE_URL" value="" force="true"/>
+        <env name="SENDAGO_API_KEY" value="" force="true"/>
+        <env name="QONTAK_CLIENT_ID" value="" force="true"/>
+        <env name="QONTAK_CLIENT_SECRET" value="" force="true"/>
+        <env name="QONTAK_CHANNEL_INTEGRATION_ID" value="" force="true"/>
+        <env name="BILLING_API_BASE_URL" value="http://127.0.0.1:9" force="true"/>
         <!-- The webhook refuses unsigned requests, so the suite needs a secret
              to sign with; it must never be a value any environment reuses. -->
         <env name="PMB_HANDOFF_SECRET" value="test-handoff-secret"/>

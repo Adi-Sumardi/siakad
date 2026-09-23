@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\FeeType;
 use App\Models\Payment;
 use App\Models\Student;
 use App\Services\Billing\BillingApiClient;
@@ -36,6 +37,7 @@ class DiagnoseVaCollisions extends Command
     {
         $this->checkNisTruncationCollisions();
         $this->checkMultiStudentPayments();
+        $this->checkFeeTypePrefixCollisions();
 
         return self::SUCCESS;
     }
@@ -90,6 +92,47 @@ class DiagnoseVaCollisions extends Command
             $vaNumber = $payment->gateway_response['va_number'] ?? '(none)';
             $students = $payment->allocations->pluck('bill.student.nama_lengkap')->unique()->join(', ');
             $this->line("  {$payment->payment_number} - VA {$vaNumber} - status {$payment->status} - students: {$students}");
+        }
+    }
+
+    /**
+     * Same-VA-prefix across different fee types, and fee types with no
+     * prefix at all (they cannot be paid by VA until e-SPP registers one).
+     */
+    private function checkFeeTypePrefixCollisions(): void
+    {
+        $this->newLine();
+        $this->info('Checking fee types that share a VA prefix, or have none registered...');
+
+        $types = FeeType::query()->orderBy('code')->get(['id', 'code', 'name', 'is_active']);
+
+        $unmapped = $types->filter(fn (FeeType $t) => BillingApiClient::resolvePrefix($t->code) === null);
+
+        if ($unmapped->isNotEmpty()) {
+            $this->warn('Fee types WITHOUT a VA prefix (checkout by VA refuses them; pay cash until e-SPP confirms a prefix):');
+
+            foreach ($unmapped as $t) {
+                $this->line("  - {$t->code} ({$t->name})".($t->is_active ? '' : ' [nonaktif]'));
+            }
+        }
+
+        $groups = $types
+            ->map(fn (FeeType $t) => ['code' => $t->code, 'prefix' => BillingApiClient::resolvePrefix($t->code)])
+            ->filter(fn ($t) => $t['prefix'] !== null)
+            ->groupBy('prefix')
+            ->filter(fn ($group) => $group->count() > 1);
+
+        if ($groups->isEmpty()) {
+            $this->info('None found - every mapped fee type has its own VA prefix.');
+
+            return;
+        }
+
+        $this->error('Different fee types share one VA prefix - their VA numbers are identical per (student, year):');
+
+        foreach ($groups as $prefix => $group) {
+            $codes = $group->pluck('code')->implode(', ');
+            $this->line("  Prefix {$prefix}: {$codes}");
         }
     }
 }

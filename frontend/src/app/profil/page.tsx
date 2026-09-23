@@ -3,14 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Building2,
-  CheckCircle2,
   GraduationCap,
-  Info,
   LogOut,
   Mail,
-  Phone,
-  Receipt,
   ShieldCheck,
   Smartphone,
   User,

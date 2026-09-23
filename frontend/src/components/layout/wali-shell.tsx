@@ -11,11 +11,11 @@ import {
   Menu,
   Receipt,
   User,
-  Users,
   X,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { UserMenu } from "@/components/layout/user-menu";
+import { WaliBillAlert } from "@/components/layout/wali-bill-alert";
 import { useAuth } from "@/lib/auth/auth-context";
 import { cn } from "@/lib/utils";
 
@@ -171,12 +171,19 @@ export function WaliShell({
             <Menu className="size-5" />
           </button>
           <BrandMark />
-          <UserMenu subtitle="Wali Murid YAPI" />
+          <div className="flex items-center gap-1.5">
+            <WaliBillAlert />
+            <UserMenu subtitle="Wali Murid YAPI" />
+          </div>
         </header>
 
-        {/* Desktop Navbar - Profil/Keluar live here, same as PMB's AppTopbar. */}
+        {/* Desktop Navbar - Profil/Keluar live here, same as PMB's AppTopbar,
+            with the SPP alert bell at its left. */}
         <header className="hidden md:flex sticky top-0 z-30 items-center justify-end border-b border-border bg-card/95 backdrop-blur px-6 py-3">
-          <UserMenu subtitle="Wali Murid YAPI" />
+          <div className="flex items-center gap-2">
+            <WaliBillAlert />
+            <UserMenu subtitle="Wali Murid YAPI" />
+          </div>
         </header>
 
         {/* Responsive Content Area */}

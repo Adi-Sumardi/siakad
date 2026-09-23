@@ -12,8 +12,9 @@
         table { width: 100%; border-collapse: collapse; }
         
         .header-table { border-bottom: 2px solid #13286B; padding-bottom: 12px; margin-bottom: 16px; }
-        .header-logo { width: 68px; vertical-align: middle; }
+        .header-logo { width: auto; vertical-align: middle; }
         .header-logo img { width: 64px; height: auto; }
+        .header-logo .logo-second { margin-left: 10px; }
         .header-text { vertical-align: middle; padding-left: 12px; }
         .org-title { font-size: 13pt; font-weight: bold; color: #13286B; letter-spacing: 0.02em; }
         .unit-title { font-size: 11pt; font-weight: bold; color: #1E3A8A; margin-top: 2px; }
@@ -61,9 +62,17 @@
 {{-- Header Kop Surat Yayasan --}}
 <table class="header-table">
     <tr>
-        @if (!empty($logoBase64))
+        {{-- Kop surat: dua logo berdampingan - YAPI (logo-yapi.png) dan YPIA
+             (Logo-YPIA.png). Variabel logo kedua di-guard ?? '' karena ada
+             pemanggil view langsung dari test yang hanya membawa yang pertama. --}}
+        @if (!empty($logoBase64) || !empty($logoYpiaBase64 ?? ''))
             <td class="header-logo">
-                <img src="{{ $logoBase64 }}" alt="Logo YAPI" />
+                @if (!empty($logoBase64))
+                    <img src="{{ $logoBase64 }}" alt="Logo YAPI" />
+                @endif
+                @if (!empty($logoYpiaBase64 ?? ''))
+                    <img src="{{ $logoYpiaBase64 }}" alt="Logo YPIA" class="logo-second" />
+                @endif
             </td>
         @endif
         <td class="header-text">

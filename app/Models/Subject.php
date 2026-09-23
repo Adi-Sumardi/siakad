@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Concerns\HasUlidKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Subject extends Model
 {
@@ -19,6 +20,16 @@ class Subject extends Model
     public function schoolUnit(): BelongsTo
     {
         return $this->belongsTo(SchoolUnit::class);
+    }
+
+    public function classSchedules(): HasMany
+    {
+        return $this->hasMany(ClassSchedule::class);
+    }
+
+    public function grades(): HasMany
+    {
+        return $this->hasMany(Grade::class);
     }
 
     public function scopeActive($query)

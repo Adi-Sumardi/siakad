@@ -10,20 +10,26 @@ use App\Models\FeeType;
 use App\Models\Guardian;
 use App\Models\SchoolUnit;
 use App\Models\Student;
+use App\Models\User;
 use App\Services\Billing\BillReminderSender;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
 use App\Services\Notification\QontakWhatsAppGateway;
+use App\Services\Notification\NotificationRetryService;
 use App\Services\Notification\WhatsAppGateway;
 use App\Services\Payment\BillingApiGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 /**
  * Reminders exist so a family notices a bill before it is overdue, and stop
  * existing once they have been sent - the fatigue case (four messages about
  * one SPP) is worse than the silence case, so every send is guarded by a
- * unique (bill_id, kind) row rather than trusted to "the job only runs once".
+ * unique (bill_id, kind, channel) row rather than trusted to "the job only
+ * runs once". The bill's own status is re-read from the database at dispatch
+ * time, so paying between the scheduler's query and its send is every bit as
+ * silencing as paying before the run started.
  */
 class BillReminderTest extends TestCase
 {
@@ -119,7 +125,7 @@ class BillReminderTest extends TestCase
     }
 
     /** A student with one open bill due on the given date, and a guardian to notify. */
-    private function billedStudentDueOn(\Illuminate\Support\Carbon $dueDate, ?string $email = 'budi@example.com', ?string $phone = null): Bill
+    private function billedStudentDueOn(Carbon $dueDate, ?string $email = 'budi@example.com', ?string $phone = null): Bill
     {
         $student = Student::create([
             'nama_lengkap' => 'Aisyah Nur Ramadhani',
@@ -294,5 +300,236 @@ class BillReminderTest extends TestCase
 
         $this->assertEmpty($this->sentMail);
         $this->assertDatabaseCount('bill_reminders', 0);
+    }
+
+    /** Marks a bill fully settled the way PaymentAllocator::settle() leaves it. */
+    private function settle(Bill $bill): Bill
+    {
+        $bill->update(['status' => 'paid', 'remaining_amount' => 0]);
+
+        return $bill->fresh();
+    }
+
+    public function test_a_reminder_fans_out_to_email_and_whatsapp_for_a_contact_with_both(): void
+    {
+        // Exercises the free-text Sendago lane: with no SPP template set,
+        // an SPP bill falls back to it exactly like a non-SPP fee type does.
+        // The Qontak template lane has its own test above.
+        config(['services.qontak.spp_reminder_template_id' => null]);
+
+        $bill = $this->billedStudentDueOn(now()->addDays(7), email: 'budi@example.com', phone: '081234567890');
+
+        $sent = app(BillReminderSender::class)->send($bill, 'h7');
+
+        $this->assertTrue($sent);
+        $this->assertCount(1, $this->sentMail);
+        $this->assertCount(1, $this->sentWhatsApp);
+        // Both deliveries carry the same bill snapshot (amount, due date, kind).
+        $this->assertSame('bill_reminder', $this->sentMail[0]['template']);
+        $this->assertStringContainsString('SPP', $this->sentWhatsApp[0]['message']);
+        // One sent-fact per channel, not one for the beat.
+        $this->assertDatabaseHas('bill_reminders', ['bill_id' => $bill->id, 'kind' => 'h7', 'channel' => 'email']);
+        $this->assertDatabaseHas('bill_reminders', ['bill_id' => $bill->id, 'kind' => 'h7', 'channel' => 'whatsapp']);
+        $this->assertSame(2, BillReminder::where('bill_id', $bill->id)->count());
+        $this->assertDatabaseCount('notification_logs', 2);
+
+        // The scheduler firing again the same day adds nothing on either channel.
+        app(BillReminderSender::class)->send($bill->fresh(), 'h7');
+        $this->artisan('bills:send-reminders')->assertSuccessful();
+        $this->assertCount(1, $this->sentMail);
+        $this->assertCount(1, $this->sentWhatsApp);
+        $this->assertSame(2, BillReminder::where('bill_id', $bill->id)->count());
+    }
+
+    public function test_a_bill_paid_between_the_query_and_the_send_still_gets_no_reminder(): void
+    {
+        // The scheduler loaded this bill while it was open; the family paid in
+        // the seconds since. The in-memory snapshot must not win.
+        $bill = $this->billedStudentDueOn(now()->addDays(7));
+        $staleOpenCopy = $bill->fresh();
+        $this->settle($bill);
+
+        $sent = app(BillReminderSender::class)->send($staleOpenCopy, 'h7');
+
+        $this->assertFalse($sent);
+        $this->assertEmpty($this->sentMail);
+        $this->assertEmpty($this->sentWhatsApp);
+        $this->assertDatabaseCount('bill_reminders', 0);
+        $this->assertDatabaseCount('notification_logs', 0);
+    }
+
+    public function test_payment_after_the_first_reminder_blocks_every_later_beat(): void
+    {
+        // 08:00 - the H-7 reminder goes out because the bill is unpaid.
+        $bill = $this->billedStudentDueOn(now()->addDays(7));
+        $this->assertTrue(app(BillReminderSender::class)->send($bill, 'h7'));
+        $this->assertCount(1, $this->sentMail);
+
+        // 10:00 - the family pays. 12:00 - the scheduler runs again, now on
+        // the H-1 beat: the settled bill must stay silent.
+        $this->settle($bill);
+        $bill->update(['due_date' => now()->addDay()]);
+
+        $this->assertFalse(app(BillReminderSender::class)->send($bill->fresh(), 'h1'));
+        $this->artisan('bills:send-reminders')->assertSuccessful();
+
+        $this->assertCount(1, $this->sentMail); // still only the morning's H-7
+        $this->assertDatabaseHas('bill_reminders', ['bill_id' => $bill->id, 'kind' => 'h7']);
+        $this->assertFalse(BillReminder::where('bill_id', $bill->id)->where('kind', 'h1')->exists());
+    }
+
+    public function test_among_many_bills_only_the_still_open_ones_are_reminded(): void
+    {
+        $h7 = $this->billedStudentDueOn(now()->addDays(7));
+        $h1 = $this->billedStudentDueOn(now()->addDays(1));
+        $overdue = $this->billedStudentDueOn(now()->subDays(3));
+        $paidH7 = $this->billedStudentDueOn(now()->addDays(7));
+        $this->settle($paidH7);
+
+        $this->artisan('bills:send-reminders')->assertSuccessful();
+
+        $this->assertCount(3, $this->sentMail);
+        $this->assertTrue(BillReminder::where('bill_id', $h7->id)->exists());
+        $this->assertTrue(BillReminder::where('bill_id', $h1->id)->exists());
+        $this->assertTrue(BillReminder::where('bill_id', $overdue->id)->exists());
+        $this->assertFalse(BillReminder::where('bill_id', $paidH7->id)->exists());
+    }
+
+    public function test_an_email_failure_does_not_stop_the_whatsapp_send(): void
+    {
+        // Exercises the free-text Sendago lane: with no SPP template set,
+        // an SPP bill falls back to it exactly like a non-SPP fee type does.
+        // The Qontak template lane has its own test above.
+        config(['services.qontak.spp_reminder_template_id' => null]);
+
+        $this->app->forgetInstance(MailGateway::class);
+        $this->app->bind(MailGateway::class, fn () => new class implements MailGateway
+        {
+            public function send(string $to, string $template, array $data, array $attachments = []): NotificationResult
+            {
+                return NotificationResult::fail('SMTP sedang down');
+            }
+        });
+
+        $bill = $this->billedStudentDueOn(now()->addDays(7), email: 'budi@example.com', phone: '081234567890');
+
+        $sent = app(BillReminderSender::class)->send($bill, 'h7');
+
+        // The WhatsApp half still counts as reaching the family.
+        $this->assertTrue($sent);
+        $this->assertEmpty($this->sentMail);
+        $this->assertCount(1, $this->sentWhatsApp);
+        $this->assertDatabaseHas('notification_logs', ['channel' => 'email', 'status' => 'failed', 'error' => 'SMTP sedang down']);
+        $this->assertDatabaseHas('notification_logs', ['channel' => 'whatsapp', 'status' => 'sent']);
+        // The failed email is the retry sweep's to pick up, not lost.
+        $this->assertSame(1, app(NotificationRetryService::class)->due()->count());
+    }
+
+    public function test_a_whatsapp_failure_does_not_stop_the_email_send(): void
+    {
+        // Exercises the free-text Sendago lane: with no SPP template set,
+        // an SPP bill falls back to it exactly like a non-SPP fee type does.
+        // The Qontak template lane has its own test above.
+        config(['services.qontak.spp_reminder_template_id' => null]);
+
+        $this->app->forgetInstance(WhatsAppGateway::class);
+        $this->app->bind(WhatsAppGateway::class, fn () => new class implements WhatsAppGateway
+        {
+            public function sendMessage(string $phone, string $message): NotificationResult
+            {
+                return NotificationResult::fail('gateway WhatsApp menolak');
+            }
+        });
+
+        $bill = $this->billedStudentDueOn(now()->addDays(7), email: 'budi@example.com', phone: '081234567890');
+
+        $sent = app(BillReminderSender::class)->send($bill, 'h7');
+
+        $this->assertTrue($sent);
+        $this->assertCount(1, $this->sentMail);
+        $this->assertDatabaseHas('notification_logs', ['channel' => 'email', 'status' => 'sent']);
+        $this->assertDatabaseHas('notification_logs', ['channel' => 'whatsapp', 'status' => 'failed', 'error' => 'gateway WhatsApp menolak']);
+    }
+
+    public function test_a_crashing_gateway_is_contained_and_the_other_channel_still_sends(): void
+    {
+        // Exercises the free-text Sendago lane: with no SPP template set,
+        // an SPP bill falls back to it exactly like a non-SPP fee type does.
+        // The Qontak template lane has its own test above.
+        config(['services.qontak.spp_reminder_template_id' => null]);
+
+        $this->app->forgetInstance(MailGateway::class);
+        $this->app->bind(MailGateway::class, fn () => new class implements MailGateway
+        {
+            public function send(string $to, string $template, array $data, array $attachments = []): NotificationResult
+            {
+                throw new \RuntimeException('connection reset by peer');
+            }
+        });
+
+        $bill = $this->billedStudentDueOn(now()->addDays(7), email: 'budi@example.com', phone: '081234567890');
+
+        // The exception must not escape the sender, let alone the run.
+        $sent = app(BillReminderSender::class)->send($bill, 'h7');
+
+        $this->assertTrue($sent);
+        $this->assertCount(1, $this->sentWhatsApp);
+        $this->assertDatabaseHas('bill_reminders', ['bill_id' => $bill->id, 'channel' => 'whatsapp']);
+    }
+
+    public function test_one_bill_throwing_does_not_stop_the_run_for_the_others(): void
+    {
+        $stub = new class(app(MailGateway::class), app(WhatsAppGateway::class), app(BillingApiGateway::class)) extends BillReminderSender
+        {
+            public ?int $throwForBill = null;
+
+            public function send(Bill $bill, string $kind): bool
+            {
+                if ($this->throwForBill === $bill->id) {
+                    throw new \RuntimeException('database glitch');
+                }
+
+                return parent::send($bill, $kind);
+            }
+        };
+        $this->app->instance(BillReminderSender::class, $stub);
+
+        $doomed = $this->billedStudentDueOn(now()->addDays(1));
+        $stub->throwForBill = $doomed->id;
+        $healthy = $this->billedStudentDueOn(now()->addDays(7));
+
+        $this->artisan('bills:send-reminders')->assertSuccessful();
+
+        $this->assertCount(1, $this->sentMail);
+        $this->assertTrue(BillReminder::where('bill_id', $healthy->id)->exists());
+        $this->assertFalse(BillReminder::where('bill_id', $doomed->id)->exists());
+    }
+
+    public function test_the_in_app_channel_never_lists_a_paid_bill(): void
+    {
+        // The wali navbar bell renders straight from /api/wali/bills?status=open,
+        // refreshed every minute - that live feed IS the in-app reminder
+        // channel, and it can only ever show bills the database still considers
+        // open. Settling the bill must drop it from the feed immediately.
+        $bill = $this->billedStudentDueOn(now()->addDays(5));
+
+        $user = User::create([
+            'name' => 'Budi Ramadhani',
+            'email' => 'budi.inapp@example.com',
+            'role' => 'orangtua',
+            'is_active' => true,
+            'activated_at' => now(),
+        ]);
+        $bill->student->guardians->first()->update(['user_id' => $user->id]);
+
+        $this->actingAs($user)->getJson('/api/wali/bills?status=open')
+            ->assertOk()
+            ->assertJsonCount(1, 'bills');
+
+        $this->settle($bill);
+
+        $this->actingAs($user)->getJson('/api/wali/bills?status=open')
+            ->assertOk()
+            ->assertJsonCount(0, 'bills');
     }
 }

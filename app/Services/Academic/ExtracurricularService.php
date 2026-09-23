@@ -10,10 +10,10 @@ use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
- * The only writer of extracurricular_members. Membership is admin/pembina
- * assigned, not self-registered - see docs/06-ROADMAP.md - so the checks
- * here are about not double-enrolling or overfilling a roster, not about
- * approval workflow.
+ * The only writer of extracurricular_members. Membership is assigned by
+ * admin/pembina OR self-registered by a parent (decision 2026-09-09) - the
+ * same rules apply to both callers, so the checks here are about not
+ * double-enrolling or overfilling a roster, not about approval workflow.
  */
 class ExtracurricularService
 {

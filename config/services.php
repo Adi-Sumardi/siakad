@@ -101,23 +101,6 @@ return [
         'base_url' => env('PMB_BASE_URL'),
     ],
 
-    // Gateway Pembayaran SendagoPay
-    'sendagopay' => [
-        'public_key' => env('SENDAGOPAY_PUBLIC_KEY'),
-        'secret_key' => env('SENDAGOPAY_SECRET_KEY'),
-        'webhook_secret' => env('SENDAGOPAY_WEBHOOK_SECRET'),
-        'base_url' => env('SENDAGOPAY_BASE_URL', 'https://api-sendagopay.adilabs.id'),
-    ],
-
-    // Payment gateway Xendit. Left unset, checkout still works end to end but produces
-    // no invoice URL - a laptop must not be able to mint payable invoices.
-    'xendit' => [
-        'secret_key' => env('XENDIT_SECRET_KEY'),
-        'webhook_token' => env('XENDIT_WEBHOOK_TOKEN'),
-        'base_url' => env('XENDIT_BASE_URL', 'https://api.xendit.co'),
-        'invoice_duration' => env('XENDIT_INVOICE_DURATION', 86400),
-    ],
-
     // Web Service Billing API e-SPP (Bank Muamalat BMI & Bank Syariah Indonesia BSI Virtual Account).
     // Endpoint paths and payload shape verified against docs/Dokumentasi_Billing_API
     // (sections 5.1-5.3) - see BillingApiClient for what that verification changed.
@@ -139,6 +122,13 @@ return [
         // and VA prefixes live together here so generateVaNumber() and
         // createInvoice() resolve everything about "which bank" from one key.
         'banks' => [
+            // VA prefixes below were CONFIRMED correct by the school on
+            // 2026-09-17 (Muamalat 8020.01-.08, BSI 3656.01-.08 - same layout,
+            // different institution head). Fee types WITHOUT a prefix here
+            // (seragam, buku, kegiatan) get NO VA at all: BillingApiClient
+            // refuses rather than borrowing another fee type's prefix, so
+            // those stay cash-at-the-desk until e-SPP registers one - add it
+            // as an explicit 'va_prefixes.{fee_code}' key when they do.
             'muamalat' => [
                 // Unconfirmed with e-SPP as of 2026-09 - defaults to '1', the
                 // original single-bank value, which is likely Muamalat's real
@@ -156,6 +146,9 @@ return [
                     'ekskul_sd' => env('BILLING_API_BMI_VA_PREFIX_EKSKUL_SD', '802006'),
                     'ekskul_smp12' => env('BILLING_API_BMI_VA_PREFIX_EKSKUL_SMP12', '802007'),
                     'ekskul_smp55' => env('BILLING_API_BMI_VA_PREFIX_EKSKUL_SMP55', '802008'),
+                    'cambridge_sd' => env('BILLING_API_BMI_VA_PREFIX_CAMBRIDGE_SD', '802009'),
+                    'cambridge_smp12' => env('BILLING_API_BMI_VA_PREFIX_CAMBRIDGE_SMP12', '802010'),
+                    'cambridge_smp55' => env('BILLING_API_BMI_VA_PREFIX_CAMBRIDGE_SMP55', '802011'),
                 ],
             ],
             'bsi' => [
@@ -177,6 +170,9 @@ return [
                     'ekskul_sd' => env('BILLING_API_BSI_VA_PREFIX_EKSKUL_SD', '365606'),
                     'ekskul_smp12' => env('BILLING_API_BSI_VA_PREFIX_EKSKUL_SMP12', '365607'),
                     'ekskul_smp55' => env('BILLING_API_BSI_VA_PREFIX_EKSKUL_SMP55', '365608'),
+                    'cambridge_sd' => env('BILLING_API_BSI_VA_PREFIX_CAMBRIDGE_SD', '365609'),
+                    'cambridge_smp12' => env('BILLING_API_BSI_VA_PREFIX_CAMBRIDGE_SMP12', '365610'),
+                    'cambridge_smp55' => env('BILLING_API_BSI_VA_PREFIX_CAMBRIDGE_SMP55', '365611'),
                 ],
             ],
         ],

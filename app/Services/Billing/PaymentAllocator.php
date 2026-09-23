@@ -20,12 +20,15 @@ use Throwable;
  *
  * Only allocations belonging to a *completed* payment count. A checkout that is
  * still pending has reserved nothing: the parent may abandon it, and a bill
- * marked paid on the strength of an unfinished Xendit invoice is a bill nobody
+ * marked paid on the strength of an unfinished bank invoice is a bill nobody
  * chases.
  */
 class PaymentAllocator
 {
-    public function __construct(private PaymentReceiptSender $receiptSender) {}
+    public function __construct(
+        private PaymentReceiptNotifier $receipts,
+        private PaymentReceiptSender $whatsappReceipts,
+    ) {}
 
     /**
      * Records what a payment is meant to settle.
@@ -59,12 +62,12 @@ class PaymentAllocator
     /**
      * Marks a payment settled and updates every bill it touched.
      *
-     * Idempotent on purpose: a Xendit callback can arrive twice, and the second
+     * Idempotent on purpose: a bank callback can arrive twice, and the second
      * one must change nothing rather than double-count.
      *
      * Refuses anything not still pending/processing, not only what is already
      * completed. A payment CheckoutService superseded because a fresher
-     * checkout covered the same bill is done, even if its old Xendit invoice
+     * checkout covered the same bill is done, even if its old bank invoice
      * is technically still sitting out there and gets paid late - completing
      * it here would double-count the bill exactly the way two live invoices
      * for one bill did before checkout started superseding them.
@@ -86,17 +89,23 @@ class PaymentAllocator
 
         $this->recomputeFor($payment->allocations()->pluck('bill_id')->all());
 
+        // Best-effort by design, and each channel on its own: money that
+        // already arrived is never rolled back because a gateway hiccuped,
+        // and the email receipt failing never silences the WhatsApp one (or
+        // the other way round).
         try {
-            // A receipt that fails to queue must never undo money already
-            // recorded above - see PaymentReceiptSender's own docblock for
-            // why every per-bill failure inside it is caught, not thrown;
-            // this catches whatever could still escape that (e.g. the
-            // allocations lookup itself).
-            $this->receiptSender->send($payment->fresh());
+            $this->receipts->notify($payment->fresh());
         } catch (Throwable $e) {
-            Log::warning('[PaymentAllocator] Failed to send payment receipt', [
+            Log::warning('[PaymentAllocator] Email receipt failed: '.$e->getMessage(), [
                 'payment' => $payment->payment_number,
-                'error' => $e->getMessage(),
+            ]);
+        }
+
+        try {
+            $this->whatsappReceipts->send($payment->fresh());
+        } catch (Throwable $e) {
+            Log::warning('[PaymentAllocator] WhatsApp receipt failed: '.$e->getMessage(), [
+                'payment' => $payment->payment_number,
             ]);
         }
     }
@@ -142,10 +151,19 @@ class PaymentAllocator
         // owed, which is how PMB's progress bar once exceeded 100%.
         $remaining = round(max(0, $total - $paid), 2);
 
+        // Overdue outranks partial - "still owing, past due" is the more
+        // urgent truth, and ranking it this way makes this recompute write
+        // exactly what bills:mark-overdue writes. The old order (partial
+        // first) flipped a partly-paid overdue bill back to 'partial' on
+        // every payment event and back to 'overdue' every night, so
+        // tunggakan counts and reminders oscillated with whoever wrote last.
+        // paid_amount still carries the partial payment either way.
+        // Comparison mirrors the sweep: strictly before the start of today,
+        // so a bill due today is not overdue until tomorrow.
         $status = match (true) {
             $remaining <= 0 => 'paid',
+            $bill->due_date->lt(now()->startOfDay()) => 'overdue',
             $paid > 0 => 'partial',
-            $bill->due_date->isPast() => 'overdue',
             default => 'unpaid',
         };
 

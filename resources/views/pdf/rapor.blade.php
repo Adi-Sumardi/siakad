@@ -136,7 +136,7 @@
         <td style="width: 3%"></td>
         <td>
             <div class="summary-box" style="float: left;">
-                <h4>Rekap Presensi Semester Ini</h4>
+                <h4>Rekap Presensi Semester Ini (hari)</h4>
                 <table>
                     <tr><td class="muted">Hadir</td><td class="right"><strong>{{ $attendance['hadir'] }}</strong></td></tr>
                     <tr><td class="muted">Sakit</td><td class="right"><strong>{{ $attendance['sakit'] }}</strong></td></tr>

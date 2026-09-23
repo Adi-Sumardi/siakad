@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreAcademicYearRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Classroom;
@@ -42,24 +43,26 @@ class ReferenceController extends Controller
         ]);
     }
 
-    /** Every semester that has ever existed - so a past one stays pickable for grade oversight and archived rapor downloads once a newer one activates. */
+    /** Every semester that has ever existed - so a past one stays pickable for grade oversight and archived rapor downloads once a newer one activates. Year/dates included so the term-management screen can group and create without a second round-trip. */
     public function terms(): JsonResponse
     {
         return response()->json([
-            'terms' => Term::orderByDesc('starts_on')->get()->map(fn (Term $t) => [
-                'ulid' => $t->ulid, 'label' => $t->label(), 'is_active' => $t->is_active,
+            'terms' => Term::with('academicYear')->orderByDesc('starts_on')->get()->map(fn (Term $t) => [
+                'ulid' => $t->ulid,
+                'label' => $t->label(),
+                'is_active' => $t->is_active,
+                'name' => $t->name,
+                'academic_year_ulid' => $t->academicYear?->ulid,
+                'academic_year' => $t->academicYear?->year,
+                'starts_on' => $t->starts_on?->format('Y-m-d'),
+                'ends_on' => $t->ends_on?->format('Y-m-d'),
             ]),
         ]);
     }
 
-    public function storeAcademicYear(Request $request): JsonResponse
+    public function storeAcademicYear(StoreAcademicYearRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'year' => 'required|string|regex:/^\d{4}\/\d{4}$/|unique:academic_years,year',
-            'starts_on' => 'nullable|date',
-            'ends_on' => 'nullable|date|after_or_equal:starts_on',
-            'is_active' => 'boolean',
-        ]);
+        $validated = $request->validated();
 
         $startsOn = $validated['starts_on'] ?? substr($validated['year'], 0, 4) . '-07-01';
         $endsOn = $validated['ends_on'] ?? substr($validated['year'], 5, 4) . '-06-30';

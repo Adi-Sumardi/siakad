@@ -14,11 +14,92 @@ import { ATTENDANCE_STATUS_LABEL, type AttendanceRosterEntry, type AttendanceSta
 
 type RosterResponse = {
   session: { ulid: string; is_open: boolean; expires_at: string };
-  checkin_url: string;
+  checkin_path: string;
   students: AttendanceRosterEntry[];
 };
 
 const MANUAL_STATUS_OPTIONS: AttendanceStatus[] = ["sakit", "izin", "alpa", "hadir"];
+
+/**
+ * The API returns only the check-in PATH (/presensi/{token}): the server
+ * cannot know which origin reaches the app for a given caller (localhost vs
+ * an ngrok tunnel host in the 2026-09-15 field test). This page is already
+ * on an origin that reaches the app, so it prefixes its own.
+ */
+function publicCheckinUrl(path: string): string {
+  return window.location.origin + path;
+}
+
+/**
+ * The roll-call screen's ONE QR - the same 30-second HMAC window the gate
+ * uses (RotatingQrService), carrying the session URL too: scanning it with
+ * the phone's own camera opens the check-in page AND delivers the fresh
+ * window code in the URL hash, so there is no separate static URL QR to
+ * share (a photographed one outlives the lesson; this one dies in ±a
+ * minute). The 8 characters below are the manual-typing fallback.
+ */
+function RotatingQrPanel({ sessionUlid, checkinUrl }: { sessionUlid: string; checkinUrl: string }) {
+  const [qr, setQr] = useState<{ code: string; rotates_in: number } | null>(null);
+  const [closed, setClosed] = useState(false);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+
+    const tick = () => {
+      api
+        .get<{ code: string; rotates_in: number }>(`/api/guru/attendance-sessions/${sessionUlid}/rotating-qr`)
+        .then((d) => {
+          if (cancelled) return;
+          setQr(d);
+          timer = setTimeout(tick, Math.max(3, d.rotates_in) * 1000);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          if (err instanceof ApiError && err.status === 410) {
+            setClosed(true);
+            return;
+          }
+          timer = setTimeout(tick, 15000);
+        });
+    };
+
+    tick();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [sessionUlid]);
+
+  if (closed) {
+    return (
+      <div className="flex items-center justify-center rounded-lg border border-border p-6 text-sm text-muted-foreground">
+        Sesi sudah ditutup — QR tidak lagi diterbitkan.
+      </div>
+    );
+  }
+
+  return (
+    <Card className="flex flex-col items-center gap-2 p-6">
+      <p className="text-xs font-medium text-muted-foreground">
+        Siswa scan QR ini dengan kamera HP — halaman presensi terbuka langsung
+      </p>
+      {qr ? (
+        <>
+          <QRCodeSVG value={`${checkinUrl}#${qr.code}`} size={208} className="rounded-lg bg-white p-2" />
+          <p className="font-mono text-lg font-bold tracking-[0.25em]">{qr.code}</p>
+          <p className="text-xs text-muted-foreground">
+            Berganti otomatis tiap ±{qr.rotates_in} detik — biarkan halaman ini terbuka. Kode 8 karakter di atas
+            untuk siswa yang kamera HP-nya bermasalah.
+          </p>
+        </>
+      ) : (
+        <Skeleton className="h-52 w-52" />
+      )}
+    </Card>
+  );
+}
 
 function RevokeDialog({
   record, onClose, onConfirm,
@@ -132,10 +213,13 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
         </p>
       </div>
 
-      <Card className="flex flex-col items-center gap-3 p-6">
-        <p className="text-xs font-medium text-muted-foreground">Siswa scan kode ini dengan HP mereka</p>
-        {roster ? <QRCodeSVG value={roster.checkin_url} size={200} /> : <Skeleton className="size-50" />}
-      </Card>
+      {roster?.session.is_open ? (
+        <RotatingQrPanel sessionUlid={sessionUlid} checkinUrl={publicCheckinUrl(roster.checkin_path)} />
+      ) : (
+        <Card className="flex flex-col items-center gap-3 p-6">
+          <p className="text-xs font-medium text-muted-foreground">Sesi ditutup — QR tidak lagi diterbitkan</p>
+        </Card>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>

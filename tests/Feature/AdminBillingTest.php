@@ -4,12 +4,16 @@ namespace Tests\Feature;
 
 use App\Models\AcademicYear;
 use App\Models\Bill;
+use App\Models\BillingRun;
 use App\Models\FeeRate;
 use App\Models\FeeType;
+use App\Models\Payment;
 use App\Models\SchoolUnit;
 use App\Models\Student;
+use App\Models\Term;
 use App\Models\User;
 use App\Services\Billing\BillGenerator;
+use App\Services\Billing\PaymentAllocator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -108,6 +112,46 @@ class AdminBillingTest extends TestCase
             ->getJson('/api/admin/bills')
             ->assertOk()
             ->assertJsonCount(2, 'bills.data');
+    }
+
+    public function test_the_central_admin_can_filter_bills_by_unit_and_year(): void
+    {
+        $this->studentIn($this->sd, 'Anak SD');
+        $this->studentIn($this->smp, 'Anak SMP');
+        $this->generateAll();
+
+        // By unit code - the dropdown the tagihan page has always sent.
+        $this->actingAs($this->staff('admin'))
+            ->getJson('/api/admin/bills?unit='.$this->smp->code)
+            ->assertOk()
+            ->assertJsonCount(1, 'bills.data')
+            ->assertJsonPath('bills.data.0.student.nama_lengkap', 'Anak SMP');
+
+        // By year string, as the page's picker sends it.
+        $this->actingAs($this->staff('admin'))
+            ->getJson('/api/admin/bills?year='.$this->year->year)
+            ->assertOk()
+            ->assertJsonCount(2, 'bills.data');
+
+        // A year nothing was billed in yields an honest empty list.
+        $this->actingAs($this->staff('admin'))
+            ->getJson('/api/admin/bills?year=2030/2031')
+            ->assertOk()
+            ->assertJsonCount(0, 'bills.data');
+    }
+
+    public function test_a_unit_admins_bill_list_ignores_a_foreign_unit_filter(): void
+    {
+        $this->studentIn($this->sd, 'Anak SD');
+        $this->studentIn($this->smp, 'Anak SMP');
+        $this->generateAll();
+
+        // The dropdown is hidden for a per-unit admin, but scope - not the
+        // query string - decides what they see even if one is sent anyway.
+        $this->actingAs($this->staff('admin_unit', $this->sd))
+            ->getJson('/api/admin/bills?unit='.$this->smp->code)
+            ->assertOk()
+            ->assertJsonCount(0, 'bills.data');
     }
 
     public function test_a_unit_admin_cannot_touch_another_units_bill(): void
@@ -230,9 +274,22 @@ class AdminBillingTest extends TestCase
         $bill = Bill::first();
         $admin = $this->staff('admin');
 
-        $this->actingAs($admin)
-            ->postJson("/api/admin/bills/{$bill->ulid}/payments", ['amount' => 200000, 'method' => 'cash'])
-            ->assertStatus(201);
+        // Keep the bill inside its due window regardless of when the suite
+        // runs - the subject here is the cancel refusal, and a partly-paid
+        // PAST-due bill is 'overdue' now that overdue outranks partial.
+        $bill->forceFill(['due_date' => now()->addDays(7)->startOfDay()])->save();
+
+        // Money on the bill via the ledger (the cash-recording endpoint is
+        // gone by school decision - payment is VA-only), so the payment is
+        // written the way a settled VA would leave it.
+        $payment = Payment::create([
+            'payment_number' => 'PAY-CANCEL-1',
+            'amount' => 200000,
+            'method' => 'virtual_account',
+            'status' => 'pending',
+        ]);
+        app(PaymentAllocator::class)->allocate($payment, [$bill->id => 200000]);
+        app(PaymentAllocator::class)->settle($payment);
 
         // Cancelling now would strand a real payment against nothing.
         $this->actingAs($admin)
@@ -240,28 +297,6 @@ class AdminBillingTest extends TestCase
             ->assertStatus(422);
 
         $this->assertSame('partial', $bill->fresh()->status);
-    }
-
-    public function test_recording_cash_settles_the_bill_through_the_ledger(): void
-    {
-        $this->studentIn($this->sd, 'Anak SD');
-        $this->generateAll();
-        $bill = Bill::first();
-
-        $this->actingAs($this->staff('admin_unit', $this->sd))
-            ->postJson("/api/admin/bills/{$bill->ulid}/payments", [
-                'amount' => 650000,
-                'method' => 'cash',
-                'notes' => 'Dibayar di TU',
-            ])
-            ->assertStatus(201);
-
-        $bill->refresh();
-        $this->assertSame('paid', $bill->status);
-        // Recorded as a payment with an allocation, not by editing the bill -
-        // so it appears in the collections report like any other money.
-        $this->assertDatabaseCount('payments', 1);
-        $this->assertDatabaseCount('payment_allocations', 1);
     }
 
     public function test_the_receivables_report_is_scoped_and_grouped_by_class(): void
@@ -303,5 +338,157 @@ class AdminBillingTest extends TestCase
             ])
             ->assertStatus(422)
             ->assertJsonPath('message', 'Tarif untuk kombinasi jenis biaya, unit, tingkat, dan tahun ajaran ini sudah ada.');
+    }
+
+    public function test_a_cambridge_run_bills_only_the_units_that_set_a_nominal(): void
+    {
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+        FeeRate::create([
+            'fee_type_id' => $cambridge->id,
+            'school_unit_id' => $this->sd->id,
+            'academic_year_id' => $this->year->id,
+            'amount' => 650000,
+        ]);
+        $this->studentIn($this->sd, 'Anak SD');
+        $this->studentIn($this->smp, 'Anak SMP'); // unit tanpa tarif Cambridge
+
+        // No month - Cambridge is a once-a-year type.
+        $this->actingAs($this->staff('admin'))
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'cambridge'])
+            ->assertStatus(201)
+            ->assertJsonPath('run.bills_created', 1)
+            ->assertJsonPath('run.bills_skipped', 1);
+
+        $this->assertSame(1, Bill::count());
+        $this->assertSame('Anak SD', Bill::first()->student->nama_lengkap);
+
+        // The SMP student is named with a reason, not silently unpriced.
+        $skipped = BillingRun::first()->skipped_detail;
+        $this->assertSame('Anak SMP', $skipped[0]['student']);
+        $this->assertSame('Tarif belum ada', $skipped[0]['reason']);
+    }
+
+    public function test_a_once_type_is_billed_once_per_year_even_after_the_semester_flips(): void
+    {
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+        FeeRate::create([
+            'fee_type_id' => $cambridge->id,
+            'school_unit_id' => $this->sd->id,
+            'academic_year_id' => $this->year->id,
+            'amount' => 650000,
+        ]);
+        $this->studentIn($this->sd, 'Anak SD');
+
+        $ganjil = Term::create(['academic_year_id' => $this->year->id, 'name' => 'ganjil', 'starts_on' => '2026-07-01', 'ends_on' => '2026-12-31']);
+        $ganjil->activate();
+
+        $this->actingAs($this->staff('admin'))
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'cambridge'])
+            ->assertStatus(201)
+            ->assertJsonPath('run.bills_created', 1);
+
+        // The December/July flip: a re-run in genap must not mint a second
+        // "once" bill for the same year - the old dedup key appended the
+        // active term's name, so it did.
+        $genap = Term::create(['academic_year_id' => $this->year->id, 'name' => 'genap', 'starts_on' => '2027-01-01', 'ends_on' => '2027-06-30']);
+        $genap->activate();
+
+        $this->actingAs($this->staff('admin'))
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'cambridge'])
+            ->assertStatus(201)
+            ->assertJsonPath('run.bills_created', 0)
+            ->assertJsonPath('run.bills_skipped', 1);
+
+        $this->assertSame(1, Bill::count());
+        $this->assertSame('Sudah punya tagihan', BillingRun::latest('id')->first()->skipped_detail[0]['reason']);
+    }
+
+    public function test_a_once_run_skips_a_student_already_billed_on_the_manual_lane(): void
+    {
+        // Both lanes issue cambridge (run + admin's manual bills), and a
+        // manual bill never carries the generator's dedup key - the
+        // (student, type, year) tuple is what must block the run.
+        $cambridge = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
+        FeeRate::create([
+            'fee_type_id' => $cambridge->id,
+            'school_unit_id' => $this->sd->id,
+            'academic_year_id' => $this->year->id,
+            'amount' => 650000,
+        ]);
+        $student = $this->studentIn($this->sd, 'Anak Manual');
+        $year = AcademicYear::where('is_active', true)->first();
+
+        $manual = Bill::create([
+            'bill_number' => 'CAM/M/0001',
+            'dedup_key' => 'manual:'.$student->id.':'.uniqid(),
+            'description' => 'Cambridge & Buku TA 2026/2027',
+            'student_id' => $student->id,
+            'academic_year_id' => $year->id,
+            'fee_type_id' => $cambridge->id,
+            'subtotal' => 900000, 'total_amount' => 900000, 'remaining_amount' => 900000,
+            'status' => 'unpaid', 'due_date' => now()->addDays(7)->toDateString(), 'issued_at' => now(),
+        ]);
+
+        $this->actingAs($this->staff('admin'))
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'cambridge'])
+            ->assertStatus(201)
+            ->assertJsonPath('run.bills_created', 0)
+            ->assertJsonPath('run.bills_skipped', 1);
+
+        // The run names the manual bill as the reason, and the family keeps
+        // exactly one cambridge bill.
+        $skipped = BillingRun::latest('id')->first()->skipped_detail;
+        $this->assertSame('Sudah punya tagihan', $skipped[0]['reason']);
+        $this->assertStringContainsString('manual', $skipped[0]['detail']);
+        $this->assertSame(1, Bill::where('fee_type_id', $cambridge->id)->count());
+        $this->assertTrue($manual->exists());
+    }
+
+    public function test_the_run_history_names_the_unit_and_actor_and_scopes_per_unit(): void
+    {
+        $this->studentIn($this->sd, 'Anak SD');
+        $admin = $this->staff('admin');
+
+        // A school-wide SPP run by the central admin...
+        $this->actingAs($admin)
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'spp', 'month' => 8])
+            ->assertStatus(201);
+
+        // ...and a run scoped to the other unit, which an SD admin must not see.
+        $this->actingAs($this->staff('admin_unit', $this->smp))
+            ->postJson('/api/admin/billing-runs', ['fee_type_code' => 'spp', 'month' => 9])
+            ->assertStatus(201);
+
+        $rows = $this->actingAs($admin)
+            ->getJson('/api/admin/bills') // warm - not the subject
+            ->assertOk();
+
+        $this->assertNotNull($rows);
+
+        $history = $this->actingAs($admin)
+            ->getJson('/api/admin/billing-runs')
+            ->assertOk()
+            ->json('runs');
+
+        $this->assertCount(2, $history);
+        // The school-wide run names its actor and carries a null unit.
+        $schoolWide = collect($history)->firstWhere('unit', null);
+        $this->assertNotNull($schoolWide);
+        $this->assertSame($admin->name, $schoolWide['run_by']);
+        $this->assertSame('SPP', $schoolWide['fee_type']);
+        $this->assertSame(8, $schoolWide['period_month']);
+        // The SMP run carries its unit.
+        $smpRun = collect($history)->first(fn ($r) => $r['unit'] !== null);
+        $this->assertSame('SMP-SAKINAH', $smpRun['unit']['code']);
+
+        // A per-unit admin sees their own unit's runs plus school-wide ones -
+        // never another unit's.
+        $scoped = $this->actingAs($this->staff('admin_unit', $this->sd))
+            ->getJson('/api/admin/billing-runs')
+            ->assertOk()
+            ->json('runs');
+
+        $this->assertCount(1, $scoped);
+        $this->assertNull($scoped[0]['unit']);
     }
 }

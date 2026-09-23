@@ -76,6 +76,19 @@ class Student extends Model
             ->withTimestamps();
     }
 
+    /**
+     * The guardian money questions belong to: the one marked as the billing
+     * contact, falling back to the primary one - a student with no marked
+     * contact should still reach somebody. The pick order used to live as
+     * private copies in BillReminderSender and PaymentReceiptNotifier.
+     */
+    public function billingContact(): ?Guardian
+    {
+        return $this->guardians->firstWhere('pivot.is_billing_contact', true)
+            ?? $this->guardians->firstWhere('pivot.is_primary', true)
+            ?? $this->guardians->first();
+    }
+
     public function enrollments(): HasMany
     {
         return $this->hasMany(Enrollment::class);
@@ -99,6 +112,12 @@ class Student extends Model
     public function attendanceRecords(): HasMany
     {
         return $this->hasMany(AttendanceRecord::class);
+    }
+
+    /** The daily layer's marks (T14) - the official attendance source since §8. */
+    public function dailyRecords(): HasMany
+    {
+        return $this->hasMany(DailyRecord::class);
     }
 
     public function extracurricularMemberships(): HasMany

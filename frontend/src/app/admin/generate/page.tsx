@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertCircle, CheckCircle2, Coins, Play, Sparkles, Users, Wallet } from "lucide-react";
+import { AlertCircle, CheckCircle2, Coins, Play, Sparkles, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
-import { rupiah } from "@/lib/format";
+import { rupiah, tanggal } from "@/lib/format";
 
 type FeeType = { ulid: string; code: string; name: string; recurrence: string };
 
@@ -21,6 +21,20 @@ type Preview = {
   total_amount: number;
   discount_amount: number;
   skipped: { student: string; kelas: string | null; reason: string; detail: string }[];
+};
+
+type RunRow = {
+  ulid: string;
+  fee_type: string;
+  unit: { code: string; label: string } | null;
+  period_month: number | null;
+  status: "pending" | "running" | "completed" | "failed";
+  bills_created: number;
+  bills_skipped: number;
+  total_amount: number;
+  run_by: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 };
 
 const MONTHS = [
@@ -38,13 +52,25 @@ export default function GenerateBillsPage() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ bills_created: number; total_amount: number } | null>(null);
+  const [runs, setRuns] = useState<RunRow[] | null>(null);
+
+  // .then() chains so setState only ever runs in an async callback - an
+  // effect calling this synchronously must not trip set-state-in-effect.
+  const loadRuns = useCallback(() => {
+    api
+      .get<{ runs: RunRow[] }>("/api/admin/billing-runs")
+      .then((d) => setRuns(d.runs))
+      .catch(() => setRuns([]));
+  }, []);
 
   useEffect(() => {
     api
       .get<{ fee_types: FeeType[] }>("/api/admin/fee-types")
       .then((d) => setFeeTypes(d.fee_types))
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat jenis biaya."));
-  }, []);
+
+    loadRuns();
+  }, [loadRuns]);
 
   const isMonthly = feeTypes?.find((t) => t.code === feeTypeCode)?.recurrence === "monthly";
 
@@ -77,6 +103,7 @@ export default function GenerateBillsPage() {
       setResult(run);
       setPreview(null);
       toast.success(`${run.bills_created} tagihan berhasil diterbitkan.`);
+      loadRuns();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menerbitkan tagihan.");
     } finally {
@@ -225,6 +252,68 @@ export default function GenerateBillsPage() {
           </div>
         </div>
       )}
+
+      {/* Run history - what has already been issued, by whom, and how it went. */}
+      <Card className="p-5 border-border/80">
+        <h2 className="text-base font-bold text-foreground">Riwayat Penerbitan</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          50 penerbitan terakhir. Admin unit melihat penerbitan unitnya dan penerbitan seluruh unit yang menjangkau
+          siswanya.
+        </p>
+
+        {runs === null ? (
+          <Skeleton className="mt-3 h-24 w-full rounded-lg" />
+        ) : runs.length === 0 ? (
+          <p className="mt-3 rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
+            Belum ada penerbitan tagihan tercatat.
+          </p>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-border text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="py-2.5 pr-4">Waktu</th>
+                  <th className="py-2.5 pr-4">Jenis</th>
+                  <th className="py-2.5 pr-4">Unit</th>
+                  <th className="py-2.5 pr-4">Periode</th>
+                  <th className="py-2.5 pr-4">Status</th>
+                  <th className="py-2.5 pr-4 text-right">Terbit / Lewati</th>
+                  <th className="py-2.5 pr-4 text-right">Total</th>
+                  <th className="py-2.5">Oleh</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {runs.map((r) => (
+                  <tr key={r.ulid} className="hover:bg-muted/20">
+                    <td className="py-2.5 pr-4 whitespace-nowrap">
+                      {tanggal(r.finished_at ?? r.started_at ?? "")}
+                    </td>
+                    <td className="py-2.5 pr-4 font-semibold">{r.fee_type}</td>
+                    <td className="py-2.5 pr-4 text-muted-foreground">{r.unit?.label ?? "Semua Unit"}</td>
+                    <td className="py-2.5 pr-4 text-muted-foreground">
+                      {r.period_month ? MONTHS[r.period_month - 1] : "—"}
+                    </td>
+                    <td className="py-2.5 pr-4">
+                      {r.status === "completed" && <Badge variant="good">Selesai</Badge>}
+                      {r.status === "failed" && <Badge variant="bad">Gagal</Badge>}
+                      {(r.status === "running" || r.status === "pending") && (
+                        <Badge variant="warn">{r.status === "running" ? "Berjalan" : "Menunggu"}</Badge>
+                      )}
+                    </td>
+                    <td className="py-2.5 pr-4 text-right font-semibold tabular-nums">
+                      {r.bills_created} <span className="text-muted-foreground">/ {r.bills_skipped}</span>
+                    </td>
+                    <td className="py-2.5 pr-4 text-right font-semibold tabular-nums text-primary">
+                      {rupiah(r.total_amount)}
+                    </td>
+                    <td className="py-2.5 text-muted-foreground">{r.run_by ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

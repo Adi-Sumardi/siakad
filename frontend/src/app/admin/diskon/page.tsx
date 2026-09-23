@@ -5,13 +5,11 @@ import { toast } from "sonner";
 import {
   BadgePercent,
   CheckCircle2,
-  Filter,
+  Pencil,
   Plus,
-  Search,
   Trash2,
   UserCheck,
   Users,
-  XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,6 +72,40 @@ export default function AdminDiscountPage() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Set while the scheme modal is editing an existing row (null = creating).
+  // Code stays locked in edit mode - the catalogue key grants point to.
+  const [editingScheme, setEditingScheme] = useState<DiscountScheme | null>(null);
+
+  function openEditScheme(s: DiscountScheme) {
+    setEditingScheme(s);
+    setSchemeForm({
+      code: s.code,
+      name: s.name,
+      type: s.type,
+      value: String(s.value),
+      fee_type_ulid: s.fee_type?.ulid ?? "",
+      school_unit_ulid: s.school_unit?.ulid ?? "",
+      is_active: s.is_active,
+      notes: s.notes ?? "",
+    });
+    setShowSchemeModal(true);
+  }
+
+  function closeSchemeModal() {
+    setShowSchemeModal(false);
+    setEditingScheme(null);
+    setSchemeForm({
+      code: "",
+      name: "",
+      type: "percent",
+      value: "",
+      fee_type_ulid: "",
+      school_unit_ulid: "",
+      is_active: true,
+      notes: "",
+    });
+  }
+
   // Scheme Form
   const [schemeForm, setSchemeForm] = useState({
     code: "",
@@ -98,59 +130,63 @@ export default function AdminDiscountPage() {
   });
 
   const [studentResults, setStudentResults] = useState<Array<{ ulid: string; nama_lengkap: string; nis: string | null; unit: string }>>([]);
-  const [searchingStudents, setSearchingStudents] = useState(false);
 
-  const loadData = useCallback(async () => {
-    try {
-      const [schRes, stRes, ftRes, unRes, yrRes] = await Promise.all([
-        api.get<{ schemes: DiscountScheme[] }>("/api/admin/discount-schemes"),
-        api.get<{ student_discounts: StudentDiscount[] }>("/api/admin/student-discounts"),
-        api.get<{ fee_types: FeeType[] }>("/api/admin/fee-types"),
-        api.get<{ school_units: SchoolUnit[] }>("/api/admin/school-units"),
-        api.get<{ academic_years: AcademicYear[] }>("/api/admin/academic-years"),
-      ]);
-
-      setSchemes(schRes.schemes);
-      setStudentDiscounts(stRes.student_discounts);
-      setFeeTypes(ftRes.fee_types);
-      setUnits(unRes.school_units);
-      setYears(yrRes.academic_years);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Gagal memuat data diskon.");
-    }
+  // .then() chains (not async/await) so setState only ever runs in an async
+  // callback - the effect below calls this synchronously, and awaiting first
+  // still trips react-hooks/set-state-in-effect's analysis.
+  const loadData = useCallback(() => {
+    Promise.all([
+      api.get<{ schemes: DiscountScheme[] }>("/api/admin/discount-schemes"),
+      api.get<{ student_discounts: StudentDiscount[] }>("/api/admin/student-discounts"),
+      api.get<{ fee_types: FeeType[] }>("/api/admin/fee-types"),
+      api.get<{ school_units: SchoolUnit[] }>("/api/admin/school-units"),
+      api.get<{ academic_years: AcademicYear[] }>("/api/admin/academic-years"),
+    ])
+      .then(([schRes, stRes, ftRes, unRes, yrRes]) => {
+        setSchemes(schRes.schemes);
+        setStudentDiscounts(stRes.student_discounts);
+        setFeeTypes(ftRes.fee_types);
+        setUnits(unRes.school_units);
+        setYears(yrRes.academic_years);
+      })
+      .catch((err) => {
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat data diskon.");
+      });
   }, []);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // Student search for assignment
+  // Student search for assignment. Hits the student list endpoint (the only
+  // API that actually searches students) - this used to call /api/admin/bills
+  // with a `student` param that endpoint never read, so the dropdown stayed
+  // forever empty and assignment was silently impossible.
   useEffect(() => {
     if (assignForm.student_search.length >= 2) {
-      setSearchingStudents(true);
-      const timer = setTimeout(async () => {
-        try {
-          const res = await api.get<{ students: Array<{ ulid: string; nama_lengkap: string; nis: string | null; school_unit: { label: string } | null }> }>(
-            `/api/admin/bills?student=${encodeURIComponent(assignForm.student_search)}&limit=8`
-          );
-          // Extract unique students
-          const list = (res.students || []).map((s) => ({
-            ulid: s.ulid,
-            nama_lengkap: s.nama_lengkap,
-            nis: s.nis,
-            unit: s.school_unit?.label ?? "-",
-          }));
-          setStudentResults(list);
-        } catch {
-          // fallback
-        } finally {
-          setSearchingStudents(false);
-        }
+      const timer = setTimeout(() => {
+        api
+          .get<{
+            students: {
+              data: Array<{ ulid: string; nama_lengkap: string; nis: string | null; unit: { label: string } | null }>;
+            };
+          }>(`/api/admin/students?search=${encodeURIComponent(assignForm.student_search)}&per_page=8`)
+          .then((res) => {
+            setStudentResults(
+              (res.students.data || []).map((s) => ({
+                ulid: s.ulid,
+                nama_lengkap: s.nama_lengkap,
+                nis: s.nis,
+                unit: s.unit?.label ?? "-",
+              })),
+            );
+          })
+          .catch(() => setStudentResults([]));
       }, 300);
       return () => clearTimeout(timer);
-    } else {
-      setStudentResults([]);
     }
+    const timer = setTimeout(() => setStudentResults([]), 0);
+    return () => clearTimeout(timer);
   }, [assignForm.student_search]);
 
   async function handleCreateScheme(e: React.FormEvent) {
@@ -158,29 +194,32 @@ export default function AdminDiscountPage() {
     setSubmitting(true);
 
     try {
-      await api.post("/api/admin/discount-schemes", {
-        code: schemeForm.code,
-        name: schemeForm.name,
-        type: schemeForm.type,
-        value: parseFloat(schemeForm.value),
-        fee_type_ulid: schemeForm.fee_type_ulid || null,
-        school_unit_ulid: schemeForm.school_unit_ulid || null,
-        is_active: schemeForm.is_active,
-        notes: schemeForm.notes || null,
-      });
+      if (editingScheme) {
+        await api.patch(`/api/admin/discount-schemes/${editingScheme.ulid}`, {
+          name: schemeForm.name,
+          type: schemeForm.type,
+          value: parseFloat(schemeForm.value),
+          fee_type_ulid: schemeForm.fee_type_ulid || null,
+          school_unit_ulid: schemeForm.school_unit_ulid || null,
+          is_active: schemeForm.is_active,
+          notes: schemeForm.notes || null,
+        });
+        toast.success("Skema diskon berhasil diperbarui.");
+      } else {
+        await api.post("/api/admin/discount-schemes", {
+          code: schemeForm.code,
+          name: schemeForm.name,
+          type: schemeForm.type,
+          value: parseFloat(schemeForm.value),
+          fee_type_ulid: schemeForm.fee_type_ulid || null,
+          school_unit_ulid: schemeForm.school_unit_ulid || null,
+          is_active: schemeForm.is_active,
+          notes: schemeForm.notes || null,
+        });
+        toast.success("Skema diskon baru berhasil disimpan.");
+      }
 
-      toast.success("Skema diskon baru berhasil disimpan.");
-      setShowSchemeModal(false);
-      setSchemeForm({
-        code: "",
-        name: "",
-        type: "percent",
-        value: "",
-        fee_type_ulid: "",
-        school_unit_ulid: "",
-        is_active: true,
-        notes: "",
-      });
+      closeSchemeModal();
       loadData();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menyimpan skema diskon.");
@@ -283,7 +322,7 @@ export default function AdminDiscountPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Skema</span>
             <BadgePercent className="size-5 text-primary" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{schemes?.length ?? <Skeleton className="h-8 w-16" />}</p>
+          <div className="mt-2 text-2xl font-bold">{schemes?.length ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Kategori beasiswa & potongan</p>
         </Card>
 
@@ -292,9 +331,9 @@ export default function AdminDiscountPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Skema Aktif</span>
             <CheckCircle2 className="size-5 text-emerald-600" />
           </div>
-          <p className="mt-2 text-2xl font-bold">
+          <div className="mt-2 text-2xl font-bold">
             {schemes?.filter((s) => s.is_active).length ?? <Skeleton className="h-8 w-16" />}
-          </p>
+          </div>
           <p className="mt-1 text-xs text-muted-foreground">Dapat diterapkan pada tagihan</p>
         </Card>
 
@@ -303,7 +342,7 @@ export default function AdminDiscountPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Siswa Penerima</span>
             <Users className="size-5 text-amber-600" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{studentDiscounts?.length ?? <Skeleton className="h-8 w-16" />}</p>
+          <div className="mt-2 text-2xl font-bold">{studentDiscounts?.length ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Siswa aktif penerima beasiswa</p>
         </Card>
       </div>
@@ -392,14 +431,25 @@ export default function AdminDiscountPage() {
                       </Badge>
                     </td>
                     <td className="px-5 py-4 text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteScheme(s.ulid, s.name)}
-                        className="text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openEditScheme(s)}
+                          className="text-muted-foreground hover:text-foreground"
+                          title="Edit skema"
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteScheme(s.ulid, s.name)}
+                          className="text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -488,9 +538,13 @@ export default function AdminDiscountPage() {
       {showSchemeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
           <div className="w-full max-w-lg rounded-2xl bg-card p-6 shadow-2xl border border-border">
-            <h2 className="text-lg font-bold text-foreground">Tambah Skema Diskon Baru</h2>
+            <h2 className="text-lg font-bold text-foreground">
+              {editingScheme ? `Edit Skema: ${editingScheme.name}` : "Tambah Skema Diskon Baru"}
+            </h2>
             <p className="text-xs text-muted-foreground mt-1">
-              Buat aturan potongan biaya atau beasiswa baru.
+              {editingScheme
+                ? "Kode terkunci - identitas katalog yang dipakai penetapan diskon siswa."
+                : "Buat aturan potongan biaya atau beasiswa baru."}
             </p>
 
             <form onSubmit={handleCreateScheme} className="mt-5 space-y-4">
@@ -502,8 +556,9 @@ export default function AdminDiscountPage() {
                     placeholder="misal: beasiswa_prestasi"
                     value={schemeForm.code}
                     onChange={(e) => setSchemeForm({ ...schemeForm, code: e.target.value.toLowerCase().replace(/\s+/g, "_") })}
+                    readOnly={!!editingScheme}
                     required
-                    className="mt-1"
+                    className={`mt-1 ${editingScheme ? "bg-muted/40 text-muted-foreground" : ""}`}
                   />
                 </div>
                 <div>
@@ -591,11 +646,11 @@ export default function AdminDiscountPage() {
               </div>
 
               <div className="flex justify-end gap-2.5 pt-3">
-                <Button type="button" variant="outline" onClick={() => setShowSchemeModal(false)}>
+                <Button type="button" variant="outline" onClick={closeSchemeModal}>
                   Batal
                 </Button>
                 <Button type="submit" disabled={submitting}>
-                  {submitting ? "Menyimpan..." : "Simpan Skema"}
+                  {submitting ? "Menyimpan..." : editingScheme ? "Simpan Perubahan" : "Simpan Skema"}
                 </Button>
               </div>
             </form>

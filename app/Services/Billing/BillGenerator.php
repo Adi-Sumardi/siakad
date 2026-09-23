@@ -232,7 +232,32 @@ class BillGenerator
 
         $dedup = $this->dedupKey($type, $year, $month, $term);
 
-        if (Bill::where('student_id', $student->id)->where('dedup_key', $dedup)->exists()) {
+        if ($type->recurrence === 'once') {
+            // Both lanes issue once-types (cambridge: billing run AND admin's
+            // manual bills), and a manual bill never carries the generator's
+            // key ('manual:{student}:{uniqid}') - so for a once-type the
+            // (student, fee type, year) tuple is the only honest guard. This
+            // check is therefore the sole cross-lane protection: issue()'s
+            // firstOrCreate on dedup_key still catches run-vs-run races, but
+            // a run racing a manual bill has no DB constraint (the same
+            // exposure two manual bills already have). Cancelled/waived bills
+            // count too, matching dedup_key semantics below, where a
+            // cancelled bill keeps its key and keeps blocking.
+            $existing = Bill::where('student_id', $student->id)
+                ->where('fee_type_id', $type->id)
+                ->where('academic_year_id', $year->id)
+                ->first();
+
+            if ($existing) {
+                $manual = str_starts_with((string) $existing->dedup_key, 'manual:');
+
+                return $base + [
+                    'reason' => 'Sudah punya tagihan',
+                    'detail' => $type->name.' TA '.$year->year.' sudah terbit'
+                        .($manual ? ' (dibuat manual)' : ''),
+                ];
+            }
+        } elseif (Bill::where('student_id', $student->id)->where('dedup_key', $dedup)->exists()) {
             return $base + [
                 'reason' => 'Sudah punya tagihan',
                 'detail' => $type->name.($month ? ' bulan '.$this->monthName($month) : '').' sudah terbit',
@@ -255,7 +280,7 @@ class BillGenerator
             'discount' => $discount,
             'total' => round($subtotal - $discount, 2),
             'dedup' => $dedup,
-            'due' => $this->dueDateFor($rate, $month, $dueDate),
+            'due' => $this->dueDateFor($rate, $month, $dueDate, $year),
         ];
     }
 
@@ -444,30 +469,46 @@ class BillGenerator
         return round(min($cut, $subtotal), 2);
     }
 
-    private function dueDateFor(FeeRate $rate, ?int $month, ?Carbon $override): Carbon
+    private function dueDateFor(FeeRate $rate, ?int $month, ?Carbon $override, AcademicYear $year): Carbon
     {
         if ($override) {
             return $override->copy();
         }
 
         if ($month && $rate->due_day) {
-            $year = (int) now()->year;
+            // The month belongs to the school year, not the wall calendar:
+            // pre-generating January for TA 2026/2027 must land in 2027 (the
+            // second half of the year), never in "this" calendar year - which
+            // is eleven months in the past and made the bill instantly
+            // overdue the moment it was born. Falls back to the year string's
+            // first half ("2026/2027" -> 2026) when starts_on is missing.
+            $startYear = (int) ($year->starts_on?->year ?? substr((string) $year->year, 0, 4));
+            $startMonth = (int) ($year->starts_on?->month ?? 7);
+            $calendarYear = $month >= $startMonth ? $startYear : $startYear + 1;
 
-            return Carbon::create($year, $month, min($rate->due_day, 28));
+            return Carbon::create($calendarYear, $month, min($rate->due_day, 28));
         }
 
         return now()->addDays(14);
     }
 
-    /** `spp:2026-2027:07` - stable for a given student, fee, and period. */
+    /**
+     * `spp:2026-2027:07` - stable for a given student, fee, and period.
+     *
+     * A `once` type pins to the year alone: appending the active term (the
+     * old non-monthly default) meant a run in semester ganjil and a re-run
+     * in genap minted two "once" bills for the same year.
+     */
     private function dedupKey(FeeType $type, AcademicYear $year, ?int $month, ?Term $term): string
     {
         $parts = [$type->code, str_replace('/', '-', $year->year)];
 
-        if ($month) {
-            $parts[] = str_pad((string) $month, 2, '0', STR_PAD_LEFT);
-        } elseif ($term) {
-            $parts[] = $term->name;
+        if ($type->recurrence !== 'once') {
+            if ($month) {
+                $parts[] = str_pad((string) $month, 2, '0', STR_PAD_LEFT);
+            } elseif ($term) {
+                $parts[] = $term->name;
+            }
         }
 
         return implode(':', $parts);

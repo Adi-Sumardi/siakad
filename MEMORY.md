@@ -24,6 +24,7 @@
   - Setiap checkout membuat billing ke e-SPP dengan mendaftarkan 2 channel sekaligus: `bmi_billing` (Muamalat) & `bsm_billing` (BSI).
   - Pilihan bank yang dipilih orang tua (`bank=muamalat` atau `bank=bsi`) disimpan di metadata dan dijadikan nomor VA utama di UI invoice dan instruksi pembayaran.
   - Callback webhook e-SPP (`/api/payment-webhook/{uuid}`) dan cron poller (`payments:poll-billing-va`) memverifikasi status pelunasan multi-bank melalui `all_va`.
+  - **Notifikasi Pembayaran Berhasil**: `PaymentReceiptNotifier` (dipanggil dari `PaymentAllocator::settle()`) mengirim struk pembayaran ke wali via **email saja** (gateway Sendago, mode log-only bila kredensial kosong; jalur WhatsApp dihapus 18-09-2026 — bel in-app wali tetap baca feed payments). Idempotent lewat `notification_logs` (template `payment_receipt`) — callback ganda tetap 1 struk. Berlaku untuk semua jalur pelunasan: webhook, poller, simulasi dev, dan tunai TU.
 - **UI Wali Murid**:
   - Pemilihan channel Bank Muamalat (147) vs BSI (451) di floating basket bar dan modal custom payment.
   - Tampilan rincian invoice & instruksi pembayaran lengkap untuk BSI Mobile (Institusi / Akademik 3656 & VA), ATM BSI, Muamalat DIN, ATM Muamalat, serta Transfer Antar Bank.
@@ -77,12 +78,11 @@
 - **Email Gateway**: `https://sendagomail.adilabs.id` (Sendago Mail)
 - **PMB Handoff**: `POST /api/webhooks/pmb/students` (HMAC SHA-256)
 - **Admin Akun**: `adisumardi888@gmail.com` (Role: Super Admin / Administrator)
-- **8 Unit Sekolah**:
-  1. RA Sakinah
-  2. Playgroup Sakinah
-  3. TK Islam Al Azhar 13
-  4. SD Islam Al Azhar 13
-  5. SMP Islam Al Azhar 12
-  6. SMP Islam Al Azhar 55
-  7. SMA Islam Al Azhar 33
-  8. SMA Islam Al Azhar 48
+- **7 Unit Sekolah** (daftar resmi 2026-09-09):
+  1. Playgroup Sakinah Rawamangun (`PG-SAKINAH`)
+  2. RA Sakinah Kebayoran Baru (`RA-SAKINAH`)
+  3. TKI Al Azhar 13 Rawamangun (`TK-13`)
+  4. SDI Al Azhar 13 Rawamangun (`SD-13`)
+  5. SMPI Al Azhar 12 Rawamangun (`SMP-12`)
+  6. SMPI Al Azhar 55 Jatimakmur (`SMP-55`)
+  7. SMAI Al Azhar 33 Jatimakmur (`SMA-33`)

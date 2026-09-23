@@ -1,36 +1,59 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\AchievementController as AdminAchievementController;
+use App\Http\Controllers\Api\Admin\ActivityLogController;
 use App\Http\Controllers\Api\Admin\AnnouncementController as AdminAnnouncementController;
+use App\Http\Controllers\Api\Admin\AttendanceReportController;
+use App\Http\Controllers\Api\Admin\AttentionController;
 use App\Http\Controllers\Api\Admin\BillController as AdminBillController;
 use App\Http\Controllers\Api\Admin\BillingRunController;
+use App\Http\Controllers\Api\Admin\ClassroomController;
+use App\Http\Controllers\Api\Admin\DailyAttendanceSessionController;
+use App\Http\Controllers\Api\Admin\DailyAttendanceSettingController;
+use App\Http\Controllers\Api\Admin\DashboardSummaryController;
+use App\Http\Controllers\Api\Admin\DiscountController;
+use App\Http\Controllers\Api\Admin\FailedJobController;
 use App\Http\Controllers\Api\Admin\FeeSettingController;
+use App\Http\Controllers\Api\Admin\GradeController;
+use App\Http\Controllers\Api\Admin\HolidayController;
+use App\Http\Controllers\Api\Admin\ImportController;
+use App\Http\Controllers\Api\Admin\IntegrationEventController;
+use App\Http\Controllers\Api\Admin\NotificationFailureController;
+use App\Http\Controllers\Api\Admin\NotificationLogController;
 use App\Http\Controllers\Api\Admin\PointController as AdminPointController;
 use App\Http\Controllers\Api\Admin\PointRuleController;
 use App\Http\Controllers\Api\Admin\PointThresholdController;
+use App\Http\Controllers\Api\Admin\PromotionController;
 use App\Http\Controllers\Api\Admin\ReferenceController;
 use App\Http\Controllers\Api\Admin\ReportController;
-use App\Http\Controllers\Api\Auth\SessionController;
+use App\Http\Controllers\Api\Admin\ScheduleController;
+use App\Http\Controllers\Api\Admin\SchoolUnitController;
+use App\Http\Controllers\Api\Admin\StudentController;
+use App\Http\Controllers\Api\Admin\SubjectController;
+use App\Http\Controllers\Api\Admin\TermController;
+use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\Auth\InvitationController;
 use App\Http\Controllers\Api\Auth\OtpController;
+use App\Http\Controllers\Api\Auth\SessionController;
 use App\Http\Controllers\Api\FileController;
 use App\Http\Controllers\Api\Guru\AchievementController as GuruAchievementController;
 use App\Http\Controllers\Api\Guru\AttendanceSessionController as GuruAttendanceSessionController;
 use App\Http\Controllers\Api\Guru\ClassroomController as GuruClassroomController;
+use App\Http\Controllers\Api\Guru\DailyAttendanceController as GuruDailyAttendanceController;
 use App\Http\Controllers\Api\Guru\GradeController as GuruGradeController;
 use App\Http\Controllers\Api\Guru\PointController as GuruPointController;
 use App\Http\Controllers\Api\Public\AttendancePresensiController;
+use App\Http\Controllers\Api\Public\DailyGateController;
 use App\Http\Controllers\Api\Wali\AchievementController as WaliAchievementController;
 use App\Http\Controllers\Api\Wali\AnnouncementController as WaliAnnouncementController;
 use App\Http\Controllers\Api\Wali\AttendanceController as WaliAttendanceController;
 use App\Http\Controllers\Api\Wali\BillController as WaliBillController;
 use App\Http\Controllers\Api\Wali\DashboardController as WaliDashboardController;
+use App\Http\Controllers\Api\Wali\ExtracurricularController;
 use App\Http\Controllers\Api\Wali\FeeSelectionController as WaliFeeSelectionController;
 use App\Http\Controllers\Api\Wali\GradeController as WaliGradeController;
 use App\Http\Controllers\Api\Wali\PointController as WaliPointController;
 use App\Http\Controllers\Api\Webhooks\PmbHandoffController;
-use App\Http\Controllers\Api\Webhooks\SendagoPayController;
-use App\Http\Controllers\Api\Webhooks\XenditController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -51,11 +74,6 @@ Route::get('/login', fn () => response()->json(['message' => 'Unauthenticated.']
 Route::post('/webhooks/pmb/students', [PmbHandoffController::class, 'store'])
     ->middleware('pmb.signature');
 
-// Settles money, so it verifies its own token and records every delivery before
-// acting - see the controller.
-Route::post('/webhooks/xendit', [XenditController::class, 'handle']);
-Route::post('/webhooks/sendagopay', [SendagoPayController::class, 'handle']);
-
 Route::prefix('auth')->group(function () {
     // The only way in, for everyone. The identifier decides the channel: an
     // email gets an emailed code, a phone number gets one over WhatsApp. There
@@ -63,7 +81,10 @@ Route::prefix('auth')->group(function () {
     Route::post('/otp/request', [OtpController::class, 'request'])->middleware('throttle:10,1');
     Route::post('/otp/verify', [OtpController::class, 'verify'])->middleware('throttle:20,1');
 
-    Route::middleware('auth:sanctum')->group(function () {
+    // `active` (not just auth): a deactivated account must stop reading its
+    // own profile too - the SPA's identity refresh lands here, so a 403 is
+    // what turns into the forced logout on the next page load.
+    Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('/logout', [SessionController::class, 'logout']);
         Route::get('/me', [SessionController::class, 'me']);
     });
@@ -88,6 +109,18 @@ Route::prefix('presensi')->middleware('throttle:300,1')->group(function () {
     Route::post('/{token}/check-in', [AttendancePresensiController::class, 'checkIn']);
 });
 
+// The daily gate check-in (T14 mode gerbang, DESAIN-PRESENSI-HARIAN.md §5D).
+// Same unauthenticated shape as /presensi above: the unit's public_slug is
+// the only credential, and the whole morning can scan in over one school
+// WiFi egress IP - hence the shared 300/min bucket, not the usual 60.
+// GET only reads today's window; it never lazily creates one - sessions are
+// written by the scheduler and the staff boards, never by anonymous traffic.
+Route::prefix('absen')->middleware('throttle:300,1')->group(function () {
+    Route::get('/{slug}', [DailyGateController::class, 'show']);
+    Route::post('/{slug}/lookup', [DailyGateController::class, 'lookup']);
+    Route::post('/{slug}/check-in', [DailyGateController::class, 'checkIn']);
+});
+
 Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(function () {
     Route::get('/students', [WaliDashboardController::class, 'index']);
 
@@ -110,7 +143,11 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
     Route::get('/students/{ulid}/grades', [WaliGradeController::class, 'index']);
     Route::get('/students/{ulid}/rapor', [WaliGradeController::class, 'rapor']);
 
-    Route::get('/students/{ulid}/extracurriculars', [\App\Http\Controllers\Api\Wali\ExtracurricularController::class, 'index']);
+    Route::get('/students/{ulid}/extracurriculars', [ExtracurricularController::class, 'index']);
+    // Self-service enrolment (decision 2026-09-09): same service rules as an
+    // admin assign - unit match, capacity, no double-enrol - reached through
+    // the parent's own scope of children.
+    Route::post('/students/{ulid}/extracurriculars', [ExtracurricularController::class, 'enroll']);
 
     Route::get('/announcements', [WaliAnnouncementController::class, 'index']);
 });
@@ -123,6 +160,15 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
 Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function () {
     Route::get('/classrooms', [GuruClassroomController::class, 'index']);
     Route::get('/classrooms/{ulid}/students', [GuruClassroomController::class, 'students']);
+    // Term-to-date H/S/I/A per student - the class-wide view the live
+    // session roster can never give (it only ever shows one lesson period).
+    Route::get('/classrooms/{ulid}/attendance', [GuruClassroomController::class, 'attendanceRecap']);
+
+    // Daily attendance (T14, mode wali_kelas): the homeroom teacher's
+    // marking board - today's masuk/pulang windows over their own roster,
+    // re-marking supersedes so a correction is one tap.
+    Route::get('/daily-attendance/today', [GuruDailyAttendanceController::class, 'today']);
+    Route::post('/daily-attendance/sessions/{ulid}/records', [GuruDailyAttendanceController::class, 'mark']);
 
     Route::get('/point-rules', [GuruPointController::class, 'rules']);
     Route::get('/students/{ulid}/points', [GuruPointController::class, 'studentLedger']);
@@ -138,6 +184,7 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
 
     Route::get('/classrooms/{ulid}/schedules/today', [GuruClassroomController::class, 'schedulesToday']);
     Route::post('/schedules/{ulid}/attendance-sessions', [GuruAttendanceSessionController::class, 'open']);
+    Route::get('/attendance-sessions/{ulid}/rotating-qr', [GuruAttendanceSessionController::class, 'rotatingQr']);
     Route::get('/attendance-sessions/{ulid}/roster', [GuruAttendanceSessionController::class, 'roster']);
     Route::patch('/attendance-sessions/{ulid}/records/{recordUlid}/revoke', [GuruAttendanceSessionController::class, 'revoke']);
     Route::post('/attendance-sessions/{ulid}/complete', [GuruAttendanceSessionController::class, 'complete']);
@@ -145,12 +192,19 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     Route::get('/my-subjects', [GuruGradeController::class, 'myAssignments']);
     Route::get('/classrooms/{classroomUlid}/subjects/{subjectUlid}/grades', [GuruGradeController::class, 'roster']);
     Route::post('/classrooms/{classroomUlid}/subjects/{subjectUlid}/grades', [GuruGradeController::class, 'store']);
+    // The whole-class matrix of those grades - entry only ever shows one
+    // category of one subject at a time, so this is the only place a
+    // teacher can see who still owes a UAS or how the class is doing.
+    Route::get('/classrooms/{classroomUlid}/grades', [GuruGradeController::class, 'classRecap']);
+    // The report card itself, for the teacher to check before the guardian
+    // ever sees it - same on-demand PDF the wali portal downloads.
+    Route::get('/students/{ulid}/rapor', [GuruGradeController::class, 'rapor']);
 
     // A pembina manages only the activities they themselves supervise.
-    Route::get('/my-extracurriculars', [\App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'index']);
-    Route::get('/extracurriculars/{ulid}/members', [\App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'roster']);
-    Route::post('/extracurriculars/{ulid}/members', [\App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'assignStudent']);
-    Route::delete('/extracurriculars/{ulid}/members/{memberUlid}', [\App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'removeMember']);
+    Route::get('/my-extracurriculars', [App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'index']);
+    Route::get('/extracurriculars/{ulid}/members', [App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'roster']);
+    Route::post('/extracurriculars/{ulid}/members', [App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'assignStudent']);
+    Route::delete('/extracurriculars/{ulid}/members/{memberUlid}', [App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'removeMember']);
 });
 
 /*
@@ -160,7 +214,7 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
  * governs its JSON. No role restriction beyond being signed in - the
  * ownership check does the actual work.
  */
-Route::middleware('auth:sanctum')->prefix('files')->group(function () {
+Route::middleware(['auth:sanctum', 'active'])->prefix('files')->group(function () {
     Route::get('/achievements/{ulid}/sertifikat', [FileController::class, 'achievementSertifikat']);
     Route::get('/achievements/{ulid}/foto', [FileController::class, 'achievementFoto']);
     Route::get('/points/{ulid}/evidence', [FileController::class, 'pointEvidence']);
@@ -173,17 +227,31 @@ Route::middleware('auth:sanctum')->prefix('files')->group(function () {
  * alone would let one unit's admin open another unit's student.
  */
 Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->group(function () {
-    Route::get('/dashboard/billing-chart', [\App\Http\Controllers\Api\Admin\DashboardChartController::class, 'billingChart']);
-    Route::get('/dashboard/achievements-chart', [\App\Http\Controllers\Api\Admin\DashboardChartController::class, 'achievementsChart']);
-    Route::get('/students', [\App\Http\Controllers\Api\Admin\StudentController::class, 'index']);
-    Route::get('/students/dapodik-export', [\App\Http\Controllers\Api\Admin\StudentController::class, 'exportDapodik']);
+    // (billing-chart / achievements-chart were removed 2026-09-21: no screen
+    // ever read them - everything visual lives in /dashboard/summary.)
+    Route::get('/dashboard/summary', [DashboardSummaryController::class, 'summary']);
+    Route::get('/students', [StudentController::class, 'index']);
+    // The named students behind the dashboard's watchlist counts (T20) -
+    // registered before any /students/{ulid} capture so the literal path wins.
+    Route::get('/students/attention', [AttentionController::class, 'index']);
+    Route::get('/students/dapodik-export', [StudentController::class, 'exportDapodik']);
     Route::get('/bills', [AdminBillController::class, 'index']);
+    // One-off bills for unexpected cases - same fee catalogue, statuses and
+    // payment lanes as generated bills; VA follows the fee type's prefix
+    // (cash at the desk for types e-SPP has no prefix for).
+    Route::post('/bills/manual', [AdminBillController::class, 'storeManual']);
+
+    // An admin minting a VA walks the same checkout lane a wali walks - the
+    // same basket, prefix, and supersede guards - with the student's billing
+    // contact as payer so the family still sees it under /api/wali/payments.
+    // Throttled like the wali's own checkout: both mint bank billings.
+    Route::post('/bills/{ulid}/va', [AdminBillController::class, 'storeVa'])
+        ->middleware('throttle:20,1');
     Route::get('/bills/{ulid}/pdf', [AdminBillController::class, 'pdf']);
     Route::post('/bills/{ulid}/waive', [AdminBillController::class, 'waive']);
     Route::post('/bills/{ulid}/cancel', [AdminBillController::class, 'cancel']);
-    Route::post('/bills/{ulid}/payments', [AdminBillController::class, 'recordPayment']);
 
-    // No manual verification endpoints: Xendit's callback settles online
+    // No manual verification endpoints: the bank's callback settles online
     // payments on its own, and cash at the front desk is settled the moment the
     // admin records it. Nothing arrives here needing a human to approve it.
 
@@ -195,35 +263,37 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 
     Route::get('/reports/receivables', [ReportController::class, 'receivables']);
     Route::get('/reports/collections', [ReportController::class, 'collections']);
-    Route::get('/reports/attendance', [\App\Http\Controllers\Api\Admin\AttendanceReportController::class, 'summary']);
+    Route::get('/reports/attendance', [AttendanceReportController::class, 'summary']);
 
-    Route::get('/subjects', [\App\Http\Controllers\Api\Admin\SubjectController::class, 'index']);
-    Route::post('/subjects', [\App\Http\Controllers\Api\Admin\SubjectController::class, 'store']);
+    Route::get('/subjects', [SubjectController::class, 'index']);
+    Route::post('/subjects', [SubjectController::class, 'store']);
+    Route::patch('/subjects/{subject}', [SubjectController::class, 'update']);
+    Route::delete('/subjects/{subject}', [SubjectController::class, 'destroy']);
 
-    Route::get('/classrooms/{classroomUlid}/schedules', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'index']);
-    Route::post('/classrooms/{classroomUlid}/schedules', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'store']);
-    Route::patch('/classrooms/{classroomUlid}/schedules/{ulid}', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'update']);
-    Route::delete('/classrooms/{classroomUlid}/schedules/{ulid}', [\App\Http\Controllers\Api\Admin\ScheduleController::class, 'destroy']);
+    Route::get('/classrooms/{classroomUlid}/schedules', [ScheduleController::class, 'index']);
+    Route::post('/classrooms/{classroomUlid}/schedules', [ScheduleController::class, 'store']);
+    Route::patch('/classrooms/{classroomUlid}/schedules/{ulid}', [ScheduleController::class, 'update']);
+    Route::delete('/classrooms/{classroomUlid}/schedules/{ulid}', [ScheduleController::class, 'destroy']);
 
     // Classroom management - the one prerequisite kenaikan kelas massal
     // needed and never had (read stays on ReferenceController::classrooms()
     // below, this only writes).
-    Route::post('/classrooms', [\App\Http\Controllers\Api\Admin\ClassroomController::class, 'store']);
-    Route::patch('/classrooms/{ulid}', [\App\Http\Controllers\Api\Admin\ClassroomController::class, 'update']);
-    Route::delete('/classrooms/{ulid}', [\App\Http\Controllers\Api\Admin\ClassroomController::class, 'destroy']);
+    Route::post('/classrooms', [ClassroomController::class, 'store']);
+    Route::patch('/classrooms/{ulid}', [ClassroomController::class, 'update']);
+    Route::delete('/classrooms/{ulid}', [ClassroomController::class, 'destroy']);
 
     // Kenaikan kelas massal: roster of one classroom -> candidate classrooms
     // in the next academic year -> execute the batch.
-    Route::get('/classrooms/{classroomUlid}/promotion-roster', [\App\Http\Controllers\Api\Admin\PromotionController::class, 'roster']);
-    Route::get('/classrooms/{classroomUlid}/promotion-targets', [\App\Http\Controllers\Api\Admin\PromotionController::class, 'targets']);
-    Route::post('/classrooms/{classroomUlid}/promote', [\App\Http\Controllers\Api\Admin\PromotionController::class, 'store']);
+    Route::get('/classrooms/{classroomUlid}/promotion-roster', [PromotionController::class, 'roster']);
+    Route::get('/classrooms/{classroomUlid}/promotion-targets', [PromotionController::class, 'targets']);
+    Route::post('/classrooms/{classroomUlid}/promote', [PromotionController::class, 'store']);
 
-    Route::get('/extracurriculars', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'index']);
-    Route::post('/extracurriculars', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'store']);
-    Route::patch('/extracurriculars/{ulid}', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'update']);
-    Route::get('/extracurriculars/{ulid}/members', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'roster']);
-    Route::post('/extracurriculars/{ulid}/members', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'assignStudent']);
-    Route::delete('/extracurriculars/{ulid}/members/{memberUlid}', [\App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'removeMember']);
+    Route::get('/extracurriculars', [App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'index']);
+    Route::post('/extracurriculars', [App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'store']);
+    Route::patch('/extracurriculars/{ulid}', [App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'update']);
+    Route::get('/extracurriculars/{ulid}/members', [App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'roster']);
+    Route::post('/extracurriculars/{ulid}/members', [App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'assignStudent']);
+    Route::delete('/extracurriculars/{ulid}/members/{memberUlid}', [App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'removeMember']);
 
     // A per-unit admin manages their own unit's rules/thresholds and never a
     // school-wide one - PointRuleController and PointThresholdController
@@ -255,11 +325,36 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     // unit regardless of what was asked for.
     Route::get('/fee-types', [FeeSettingController::class, 'types']);
     Route::get('/fee-rates', [FeeSettingController::class, 'rates']);
-    Route::get('/discount-schemes', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'schemes']);
-    Route::get('/student-discounts', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'studentDiscounts']);
 
-    // User management (viewable by admins)
-    Route::get('/users', [\App\Http\Controllers\Api\Admin\UserController::class, 'index']);
+    // Rate writes live here for one exception: the Cambridge rate, whose
+    // nominal each unit sets for itself (school decision 2026-09-22).
+    // FeeSettingController draws the line - a per-unit admin may only write
+    // the cambridge type, and the unit is forced from their account, never
+    // taken from the request (the BillingRun line).
+    Route::post('/fee-rates', [FeeSettingController::class, 'storeRate']);
+    Route::patch('/fee-rates/{feeRate}', [FeeSettingController::class, 'updateRate']);
+    Route::get('/discount-schemes', [DiscountController::class, 'schemes']);
+    Route::get('/student-discounts', [DiscountController::class, 'studentDiscounts']);
+
+    // User management (viewable by admins). A per-unit admin may also CREATE
+    // accounts for their own unit - UserController::store() forces the unit
+    // (and limits the role) rather than trusting the parameters, the same
+    // line BillingRunController draws - so the route can live in this
+    // shared group.
+    Route::get('/users', [UserController::class, 'index']);
+    Route::post('/users', [UserController::class, 'store']);
+    // Bulk counterpart: a whole year's staff in one CSV. Same forced-unit
+    // and role limits for a per-unit admin, inside ImportController.
+    Route::post('/import/users', [ImportController::class, 'importUsers']);
+    Route::get('/import/users/template', [ImportController::class, 'downloadUserTemplate']);
+
+    // Students CSV works the same way for a per-unit admin - every row lands
+    // in their own unit, the file's unit column is ignored (ImportController
+    // forces it) - while fee rates stay a foundation-level decision, except
+    // the Cambridge rate each unit manages itself (see the fee-rate routes
+    // above).
+    Route::post('/import/students', [ImportController::class, 'importStudents']);
+    Route::get('/import/students/template', [ImportController::class, 'downloadStudentTemplate']);
 
     // Pickers every admin form needs - none of it sensitive, so one response
     // shape for both admin kinds.
@@ -268,50 +363,100 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/terms', [ReferenceController::class, 'terms']);
     Route::get('/classrooms', [ReferenceController::class, 'classrooms']);
 
-    Route::get('/grades', [\App\Http\Controllers\Api\Admin\GradeController::class, 'index']);
-    Route::get('/students/{ulid}/rapor', [\App\Http\Controllers\Api\Admin\GradeController::class, 'rapor']);
+    Route::get('/grades', [GradeController::class, 'index']);
+    Route::get('/students/{ulid}/rapor', [GradeController::class, 'rapor']);
+
+    // Daily attendance (T14, DESAIN-PRESENSI-HARIAN.md): a unit's own bells
+    // and gate policy plus today's monitoring board. A per-unit admin edits
+    // only their unit's row - the controller forces the unit rather than
+    // trusting the parameter (the BillingRun line).
+    Route::get('/daily-attendance/settings', [DailyAttendanceSettingController::class, 'index']);
+    Route::patch('/daily-attendance/settings', [DailyAttendanceSettingController::class, 'update']);
+    Route::get('/daily-attendance/today', [DailyAttendanceSessionController::class, 'today']);
+    // Gate mode: the unit's public check-in link (issue once, rotate on a
+    // leak), the rotating QR the TU screen polls, and the manual mark lane.
+    Route::post('/daily-attendance/public-link', [DailyAttendanceSettingController::class, 'issuePublicLink']);
+    Route::post('/daily-attendance/public-link/reset', [DailyAttendanceSettingController::class, 'resetPublicLink']);
+    Route::get('/daily-attendance/sessions/{ulid}/gate-qr', [DailyAttendanceSessionController::class, 'gateQr']);
+    Route::post('/daily-attendance/sessions/{ulid}/records', [DailyAttendanceSessionController::class, 'mark']);
 });
 
 /*
- * Setting prices & discounts and full user CRUD is central-admin only.
+ * Setting prices & discounts and full user CRUD is central-admin only - the
+ * sole rate exception (a unit's own Cambridge nominal) lives in the shared
+ * group above; deleting any rate, Cambridge included, stays here.
  */
 Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
     Route::post('/fee-types', [FeeSettingController::class, 'storeType']);
     Route::patch('/fee-types/{feeType}', [FeeSettingController::class, 'updateType']);
     Route::delete('/fee-types/{feeType}', [FeeSettingController::class, 'destroyType']);
 
-    Route::post('/fee-rates', [FeeSettingController::class, 'storeRate']);
-    Route::patch('/fee-rates/{feeRate}', [FeeSettingController::class, 'updateRate']);
     Route::delete('/fee-rates/{feeRate}', [FeeSettingController::class, 'destroyRate']);
 
-    Route::post('/discount-schemes', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'storeScheme']);
-    Route::patch('/discount-schemes/{discountScheme}', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'updateScheme']);
-    Route::delete('/discount-schemes/{discountScheme}', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'destroyScheme']);
+    Route::post('/discount-schemes', [DiscountController::class, 'storeScheme']);
+    Route::patch('/discount-schemes/{discountScheme}', [DiscountController::class, 'updateScheme']);
+    Route::delete('/discount-schemes/{discountScheme}', [DiscountController::class, 'destroyScheme']);
 
-    Route::post('/student-discounts', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'assignStudentDiscount']);
-    Route::delete('/student-discounts/{studentDiscount}', [\App\Http\Controllers\Api\Admin\DiscountController::class, 'revokeStudentDiscount']);
+    Route::post('/student-discounts', [DiscountController::class, 'assignStudentDiscount']);
+    Route::delete('/student-discounts/{studentDiscount}', [DiscountController::class, 'revokeStudentDiscount']);
 
-    Route::post('/users', [\App\Http\Controllers\Api\Admin\UserController::class, 'store']);
-    Route::patch('/users/{user}', [\App\Http\Controllers\Api\Admin\UserController::class, 'update']);
-    Route::delete('/users/{user}', [\App\Http\Controllers\Api\Admin\UserController::class, 'destroy']);
+    Route::patch('/users/{user}', [UserController::class, 'update']);
+    Route::delete('/users/{user}', [UserController::class, 'destroy']);
 
-    Route::patch('/students/{student}', [\App\Http\Controllers\Api\Admin\StudentController::class, 'update']);
-    Route::delete('/students/{student}', [\App\Http\Controllers\Api\Admin\StudentController::class, 'destroy']);
+    // The lost-access lane: sends a reset invitation to a NEW contact an
+    // admin collected in person. Throttled like the invitation consume lane -
+    // both mint single-use credentials.
+    Route::post('/users/{user}/reset-access', [UserController::class, 'resetAccess'])
+        ->middleware('throttle:20,1');
 
-    Route::get('/school-units/manage', [\App\Http\Controllers\Api\Admin\SchoolUnitController::class, 'index']);
-    Route::post('/school-units', [\App\Http\Controllers\Api\Admin\SchoolUnitController::class, 'store']);
-    Route::patch('/school-units/{schoolUnit}', [\App\Http\Controllers\Api\Admin\SchoolUnitController::class, 'update']);
-    Route::delete('/school-units/{schoolUnit}', [\App\Http\Controllers\Api\Admin\SchoolUnitController::class, 'destroy']);
+    Route::patch('/students/{student}', [StudentController::class, 'update']);
+    Route::delete('/students/{student}', [StudentController::class, 'destroy']);
+
+    Route::get('/school-units/manage', [SchoolUnitController::class, 'index']);
+    Route::post('/school-units', [SchoolUnitController::class, 'store']);
+    Route::patch('/school-units/{schoolUnit}', [SchoolUnitController::class, 'update']);
+    Route::delete('/school-units/{schoolUnit}', [SchoolUnitController::class, 'destroy']);
 
     // Academic year management
     Route::post('/academic-years', [ReferenceController::class, 'storeAcademicYear']);
     Route::post('/academic-years/{academicYear}/activate', [ReferenceController::class, 'activateAcademicYear']);
 
-    // Bulk Import endpoints
-    Route::post('/import/students', [\App\Http\Controllers\Api\Admin\ImportController::class, 'importStudents']);
-    Route::post('/import/fee-rates', [\App\Http\Controllers\Api\Admin\ImportController::class, 'importFeeRates']);
-    Route::get('/import/students/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadStudentTemplate']);
-    Route::get('/import/fee-rates/template', [\App\Http\Controllers\Api\Admin\ImportController::class, 'downloadFeeRateTemplate']);
+    // Semester (term) management - the December/July flip. Creating and
+    // activating a semester is central-only, same line as its academic year:
+    // every write lane in every unit files under the one active term.
+    Route::post('/terms', [TermController::class, 'store']);
+    Route::post('/terms/{term}/activate', [TermController::class, 'activate']);
+
+    // School-wide holiday calendar: on a listed date no unit's daily
+    // attendance opens, so a national holiday can never sweep the school
+    // into mass auto-alpa. Central only - holidays are shared by every unit.
+    Route::get('/holidays', [HolidayController::class, 'index']);
+    Route::post('/holidays', [HolidayController::class, 'store']);
+    Route::delete('/holidays/{ulid}', [HolidayController::class, 'destroy']);
+
+    // Bulk Import endpoints - fee rates only: setting prices is central.
+    Route::post('/import/fee-rates', [ImportController::class, 'importFeeRates']);
+    Route::get('/import/fee-rates/template', [ImportController::class, 'downloadFeeRateTemplate']);
+
+    // Read-only audit trail viewer - see the controller for why this is
+    // central-admin only for now.
+    Route::get('/activity-logs', [ActivityLogController::class, 'index']);
+
+    // Aggregates over failed notification sends - the alerting half of the
+    // notifications:retry-failed sweep. Central-admin only for the same
+    // reason as the activity log above.
+    Route::get('/notification-failures', [NotificationFailureController::class, 'summary']);
+
+    // The ruang kontrol (/admin/monitoring, audit C7 / P4-15): the three
+    // lists a central admin watches when things quietly stop working -
+    // failed notifications (with manual resend), the integration webhook
+    // inbox (with PMB replay), and the queue's dead-letter shelf.
+    // Central-only for the same reason as the two above.
+    Route::get('/notification-logs', [NotificationLogController::class, 'index']);
+    Route::post('/notification-logs/{ulid}/resend', [NotificationLogController::class, 'resend']);
+    Route::get('/integration-events', [IntegrationEventController::class, 'index']);
+    Route::post('/integration-events/{ulid}/reprocess', [IntegrationEventController::class, 'reprocess']);
+    Route::get('/failed-jobs', [FailedJobController::class, 'index']);
 });
 
 // Dev-only convenience for exercising checkout end to end without a live

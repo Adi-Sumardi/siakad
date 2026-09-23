@@ -5,13 +5,14 @@ namespace App\Services\Attendance;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\ClassSchedule;
-use App\Models\Student;
+use App\Models\Holiday;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 /**
  * Opens and closes the "roll call windows" a teacher runs one lesson period
@@ -30,6 +31,13 @@ class AttendanceSessionService
      */
     public function open(ClassSchedule $schedule, Carbon $date, User $openedBy): AttendanceSession
     {
+        // The same calendar the daily layer consults: a national holiday
+        // opens no lesson sessions either, or the school ends up with
+        // attendance on a day the gates never opened.
+        if (Holiday::query()->whereDate('date', $date->toDateString())->exists()) {
+            throw new RuntimeException('Hari ini hari libur sekolah - tidak ada sesi pelajaran yang bisa dibuka.');
+        }
+
         $existing = AttendanceSession::where('class_schedule_id', $schedule->id)
             ->whereDate('occurred_on', $date->toDateString())
             ->first();
@@ -73,22 +81,13 @@ class AttendanceSessionService
         }
     }
 
-    /** Closes the session and syncs the enrollment rollup once for every student touched in it - self check-ins never sync per-scan, so this is where that catches up. */
-    public function close(AttendanceSession $session, AttendanceLedger $ledger): void
+    /** Closes the session. The enrollment rollup is no longer synced here: since the daily layer (T14) became the official attendance source, that rollup is fed by DailyAttendanceService - lesson-period data never touches it. */
+    public function close(AttendanceSession $session): void
     {
         $session->forceFill([
             'status' => 'closed',
             'closed_at' => now(),
         ])->save();
-
-        $students = Student::whereIn('id', AttendanceRecord::where('attendance_session_id', $session->id)
-            ->active()
-            ->pluck('student_id')
-            ->unique())->get();
-
-        foreach ($students as $student) {
-            $ledger->syncEnrollmentRollup($student);
-        }
     }
 
     /** Roster for the guru panel: every active student in the schedule's classroom, plus who has checked in. */

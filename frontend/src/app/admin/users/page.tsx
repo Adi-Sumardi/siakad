@@ -1,22 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
+  Download,
   Edit2,
+  FileUp,
+  KeyRound,
   Mail,
   Phone,
-  Plus,
   RefreshCw,
   Search,
   Shield,
   ShieldAlert,
   ShieldCheck,
   Trash2,
-  UserCheck,
+  Upload,
   UserPlus,
   Users,
-  UserX,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -26,9 +27,10 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Pagination } from "@/components/pagination";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, API_BASE } from "@/lib/api";
+import { useAuth } from "@/lib/auth/auth-context";
 import { tanggalWaktu } from "@/lib/format";
+import { Pagination, type PageMeta } from "@/components/ui/pagination";
 
 type UserItem = {
   ulid: string;
@@ -47,17 +49,32 @@ type UserItem = {
 type SchoolUnit = { ulid: string; code: string; label: string };
 
 export default function UserManagementPage() {
+  const { user } = useAuth();
+  // A per-unit admin can only onboard guru accounts for their own unit -
+  // the backend forces both, this only keeps the form honest about it.
+  const isUnitAdmin = user?.role === "admin_unit";
+
   const [users, setUsers] = useState<UserItem[] | null>(null);
-  const [meta, setMeta] = useState<{ current_page: number; last_page: number } | null>(null);
+  const [meta, setMeta] = useState<PageMeta | null>(null);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+
+  // "Reset Akses" - the lost-contact lane (central admin only)
+  const [resettingUser, setResettingUser] = useState<UserItem | null>(null);
+  const [resetContact, setResetContact] = useState("");
+  const [resetting, setResetting] = useState(false);
+
+  // Guru CSV import
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ message: string; imported: number; updated: number; errors: string[] } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Filters
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [unitFilter, setUnitFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [page, setPage] = useState(1);
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -73,22 +90,26 @@ export default function UserManagementPage() {
   const [formIsActive, setFormIsActive] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  function loadUsers() {
-    setLoading(true);
+  // No setLoading here: `users === null` IS the first-load state, so a
+  // refetch (filter/page change) keeps the previous rows on screen instead of
+  // flashing a skeleton - and nothing calls setState synchronously in the
+  // effect below.
+  function loadUsers(targetPage: number = page) {
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (roleFilter) params.set("role", roleFilter);
     if (unitFilter) params.set("unit", unitFilter);
     if (statusFilter !== "") params.set("is_active", statusFilter);
-    if (page > 1) params.set("page", String(page));
+    params.set("page", String(targetPage));
+    params.set("per_page", "20");
 
     api
-      .get<{ users: { data: UserItem[]; meta: { current_page: number; last_page: number } } }>(
-        `/api/admin/users?${params.toString()}`,
-      )
-      .then((d) => { setUsers(d.users.data); setMeta(d.users.meta); })
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat pengguna."))
-      .finally(() => setLoading(false));
+      .get<{ users: { data: UserItem[]; meta: PageMeta } }>(`/api/admin/users?${params.toString()}`)
+      .then((d) => {
+        setUsers(d.users.data);
+        setMeta(d.users.meta);
+      })
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat pengguna."));
   }
 
   useEffect(() => {
@@ -101,18 +122,78 @@ export default function UserManagementPage() {
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setPage(1);
-    loadUsers();
+    // A new search can shrink the result set - always land on page 1. When
+    // we're already there the effect above won't re-fire, so fetch by hand.
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      loadUsers(1);
+    }
   }
 
   function openCreate() {
     setFormName("");
     setFormEmail("");
     setFormPhone("");
-    setFormRole("admin_unit");
-    setFormUnitUlid(units[0]?.ulid ?? "");
+    setFormRole(isUnitAdmin ? "guru" : "admin_unit");
+    setFormUnitUlid(isUnitAdmin ? (user?.school_unit?.ulid ?? "") : (units[0]?.ulid ?? ""));
     setFormIsActive(true);
     setShowCreateModal(true);
+  }
+
+  async function downloadApiFile(path: string, filename: string) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Gagal mengunduh file.");
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Gagal mengunduh template. Pastikan sesi Anda masih aktif.");
+    }
+  }
+
+  async function handleImportUsers(e: React.FormEvent) {
+    e.preventDefault();
+    if (!importFile) {
+      toast.error("Silakan pilih file CSV terlebih dahulu.");
+      return;
+    }
+
+    setImporting(true);
+    setImportResult(null);
+
+    const form = new FormData();
+    form.set("file", importFile);
+
+    try {
+      const res = await api.post<{
+        message: string;
+        imported_count: number;
+        updated_count: number;
+        errors: string[];
+      }>("/api/admin/import/users", form);
+
+      toast.success(res.message);
+      setImportResult({
+        message: res.message,
+        imported: res.imported_count,
+        updated: res.updated_count,
+        errors: res.errors || [],
+      });
+      loadUsers();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengimpor akun pengguna.");
+    } finally {
+      setImporting(false);
+    }
   }
 
   function openEdit(u: UserItem) {
@@ -134,7 +215,9 @@ export default function UserManagementPage() {
         email: formEmail || null,
         phone: formPhone || null,
         role: formRole,
-        school_unit_ulid: (formRole === "admin_unit" || formRole === "guru") ? formUnitUlid : null,
+        school_unit_ulid: (formRole === "admin_unit" || formRole === "guru")
+          ? (isUnitAdmin ? (user?.school_unit?.ulid ?? null) : formUnitUlid)
+          : null,
         is_active: formIsActive,
       });
       toast.success("Pengguna baru berhasil ditambahkan.");
@@ -177,7 +260,13 @@ export default function UserManagementPage() {
       await api.delete(`/api/admin/users/${deletingUser.ulid}`);
       toast.success("Pengguna berhasil dihapus.");
       setDeletingUser(null);
-      loadUsers();
+      // Deleting the last row of a page would strand the user on an empty
+      // page - step back instead of refetching the now-empty one.
+      if (users && users.length === 1 && page > 1) {
+        setPage(page - 1);
+      } else {
+        loadUsers();
+      }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menghapus pengguna.");
     } finally {
@@ -192,7 +281,7 @@ export default function UserManagementPage() {
       case "admin_unit":
         return <Badge variant="primary" className="gap-1 font-bold"><ShieldCheck className="size-3" /> TU / Unit</Badge>;
       case "guru":
-        return <Badge variant="good" className="gap-1 font-bold"><Shield className="size-3" /> Guru / Wali Kelas</Badge>;
+        return <Badge variant="good" className="gap-1 font-bold"><Shield className="size-3" /> Guru</Badge>;
       case "orangtua":
         return <Badge variant="default" className="gap-1 font-bold"><Users className="size-3" /> Wali Murid</Badge>;
     }
@@ -215,6 +304,81 @@ export default function UserManagementPage() {
         </Button>
       </div>
 
+      {/* Impor Akun CSV */}
+      <Card className="p-5 border-border/80 shadow-xs">
+        <h2 className="text-sm font-semibold">
+          {isUnitAdmin ? "Impor Akun Guru & Wali Murid (CSV)" : "Impor Akun Pengguna (CSV)"}
+        </h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {isUnitAdmin ? (
+            <>
+              Masukkan banyak akun sekaligus — kolom: nama_lengkap, email, no_hp,
+              role (guru / orangtua; kosong = guru). Semua akun otomatis terhubung ke
+              unit Anda. Akun wali murid langsung siap dihubungkan ke siswa saat impor
+              siswa (dicocokkan lewat No HP / email). Login memakai OTP ke email atau No HP.
+            </>
+          ) : (
+            <>
+              Masukkan banyak akun sekaligus (sesuai form Tambah Pengguna) — kolom:
+              nama_lengkap, email, no_hp, role (admin / admin_unit / guru / orangtua),
+              unit_code (wajib untuk admin_unit &amp; guru — isi persis nama unit pada
+              dropdown Tambah Pengguna, kosongkan untuk lainnya), is_aktif (kosong = aktif).
+              Login memakai OTP ke email atau No HP.
+            </>
+          )}
+        </p>
+        <form onSubmit={handleImportUsers} className="mt-3 flex flex-col gap-2.5">
+          {/* The native "Choose File" control ignores the theme; a styled block */}
+          {/* button opens the same dialog via a hidden input. */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv,text/plain"
+            onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+            className="hidden"
+          />
+          <Button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full gap-2 font-bold shadow-xs"
+          >
+            <FileUp className="size-4" />
+            {importFile ? importFile.name : "Pilih File CSV"}
+          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={() =>
+                downloadApiFile(
+                  "/api/admin/import/users/template",
+                  isUnitAdmin ? "template_import_guru_wali_siakad.csv" : "template_import_pengguna_siakad.csv",
+                )
+              }
+            >
+              <Download className="size-3.5" />
+              Unduh Template
+            </Button>
+            <Button type="submit" size="sm" disabled={!importFile || importing} className="gap-1.5">
+              <Upload className="size-3.5" />
+              {importing ? "Mengimpor…" : isUnitAdmin ? "Impor Akun" : "Impor Pengguna"}
+            </Button>
+          </div>
+        </form>
+        {importResult && (
+          <div className="mt-3 rounded-lg bg-muted/30 p-3 text-xs">
+            <p className="font-semibold">{importResult.message}</p>
+            {importResult.errors.length > 0 && (
+              <ul className="mt-1.5 list-disc pl-4 text-destructive">
+                {importResult.errors.map((err, i) => <li key={i}>{err}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+      </Card>
+
       {/* Filter & Search Bar */}
       <Card className="p-4 border-border/80 shadow-xs">
         <form onSubmit={handleSearchSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -231,43 +395,66 @@ export default function UserManagementPage() {
             </div>
           </div>
 
+          {/* A per-unit admin's list holds exactly two account kinds - their */}
+          {/* own unit's guru and wali murid - so their role filter offers only */}
+          {/* those; the unit filter stays central-only (one unit, no choice). */}
           <div>
             <Label className="text-xs">Role / Peran</Label>
             <select
               value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
+              onChange={(e) => {
+                setRoleFilter(e.target.value);
+                setPage(1);
+              }}
               className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
             >
               <option value="">Semua Role</option>
-              <option value="admin">Administrator Pusat</option>
-              <option value="admin_unit">Tata Usaha / Admin Unit</option>
-              <option value="guru">Guru / Wali Kelas</option>
-              <option value="orangtua">Wali Murid</option>
+              {isUnitAdmin ? (
+                <>
+                  <option value="guru">Guru</option>
+                  <option value="orangtua">Wali Murid</option>
+                </>
+              ) : (
+                <>
+                  <option value="admin">Administrator Pusat</option>
+                  <option value="admin_unit">Tata Usaha / Admin Unit</option>
+                  <option value="guru">Guru</option>
+                  <option value="orangtua">Wali Murid</option>
+                </>
+              )}
             </select>
           </div>
 
-          <div>
-            <Label className="text-xs">Unit Sekolah</Label>
-            <select
-              value={unitFilter}
-              onChange={(e) => setUnitFilter(e.target.value)}
-              className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
-            >
-              <option value="">Semua Unit</option>
-              {units.map((u) => (
-                <option key={u.ulid} value={u.code}>
-                  {u.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!isUnitAdmin && (
+            <div>
+              <Label className="text-xs">Unit Sekolah</Label>
+              <select
+                value={unitFilter}
+                onChange={(e) => {
+                  setUnitFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
+              >
+                <option value="">Semua Unit</option>
+                {units.map((u) => (
+                  <option key={u.ulid} value={u.code}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="flex items-end gap-2">
             <div className="flex-1">
               <Label className="text-xs">Status Akun</Label>
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setPage(1);
+                }}
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
               >
                 <option value="">Semua Status</option>
@@ -297,7 +484,7 @@ export default function UserManagementPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {loading && (
+              {users === null && (
                 <tr>
                   <td colSpan={6} className="p-5">
                     <Skeleton className="h-20 w-full rounded-xl" />
@@ -305,7 +492,7 @@ export default function UserManagementPage() {
                 </tr>
               )}
 
-              {!loading && users?.length === 0 && (
+              {users !== null && users.length === 0 && (
                 <tr>
                   <td colSpan={6} className="p-8 text-center text-muted-foreground">
                     Tidak ada data pengguna yang sesuai dengan filter pencarian.
@@ -313,7 +500,7 @@ export default function UserManagementPage() {
                 </tr>
               )}
 
-              {!loading &&
+              {users !== null &&
                 users?.map((u) => (
                   <tr key={u.ulid} className="hover:bg-accent/30 transition-colors">
                     <td className="px-5 py-4">
@@ -361,25 +548,44 @@ export default function UserManagementPage() {
                       {u.last_login_at ? tanggalWaktu(u.last_login_at) : "Belum pernah masuk"}
                     </td>
                     <td className="px-5 py-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openEdit(u)}
-                          className="h-8 px-2.5 text-xs font-semibold gap-1"
-                        >
-                          <Edit2 className="size-3.5" />
-                          <span>Edit</span>
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setDeletingUser(u)}
-                          className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </div>
+                      {/* Editing/deleting any account stays central-admin only - */}
+                      {/* hidden rather than left to 403 on click. */}
+                      {!isUnitAdmin && (
+                        <div className="flex items-center justify-end gap-1.5">
+                          {(u.role === "orangtua" || u.role === "guru") && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setResettingUser(u);
+                                setResetContact("");
+                              }}
+                              title="Kirim tautan pembaruan kontak ke email/HP baru"
+                              className="h-8 px-2.5 text-xs font-semibold gap-1"
+                            >
+                              <KeyRound className="size-3.5" />
+                              <span>Reset Akses</span>
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openEdit(u)}
+                            className="h-8 px-2.5 text-xs font-semibold gap-1"
+                          >
+                            <Edit2 className="size-3.5" />
+                            <span>Edit</span>
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setDeletingUser(u)}
+                            className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -387,13 +593,14 @@ export default function UserManagementPage() {
           </table>
         </div>
 
-        <div className="px-4 pb-4">
+        {meta && (
           <Pagination
-            currentPage={meta?.current_page ?? 1}
-            lastPage={meta?.last_page ?? 1}
-            onChange={setPage}
+            meta={meta}
+            onPage={setPage}
+            label="pengguna"
+            className="border-t border-border/60 px-5 py-3.5"
           />
-        </div>
+        )}
       </Card>
 
       {/* Modal Tambah User */}
@@ -446,19 +653,36 @@ export default function UserManagementPage() {
 
               <div>
                 <Label className="text-xs">Peran / Role Pengguna</Label>
-                <select
-                  value={formRole}
-                  onChange={(e) => setFormRole(e.target.value as any)}
-                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
-                >
-                  <option value="admin">Administrator Pusat (Akses Penuh Semua Unit)</option>
-                  <option value="admin_unit">Tata Usaha / Admin Unit (Akses 1 Unit)</option>
-                  <option value="guru">Guru / Wali Kelas (Pencatatan Poin & Prestasi)</option>
-                  <option value="orangtua">Wali Murid</option>
-                </select>
+                {isUnitAdmin ? (
+                  <div className="mt-1 space-y-1.5">
+                    <select
+                      value={formRole}
+                      onChange={(e) => setFormRole(e.target.value as UserItem["role"])}
+                      className="w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                    >
+                      <option value="guru">Guru</option>
+                      <option value="orangtua">Wali Murid</option>
+                    </select>
+                    <p className="text-[11px] text-muted-foreground">
+                      Akun otomatis terpasang di unit {user?.school_unit?.label ?? "Anda"}. Guru mengajar
+                      sesuai jadwal pelajaran; akun wali murid langsung bisa dihubungkan ke siswa saat impor siswa.
+                    </p>
+                  </div>
+                ) : (
+                  <select
+                    value={formRole}
+                    onChange={(e) => setFormRole(e.target.value as UserItem["role"])}
+                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
+                  >
+                    <option value="admin">Administrator Pusat (Akses Penuh Semua Unit)</option>
+                    <option value="admin_unit">Tata Usaha / Admin Unit (Akses 1 Unit)</option>
+                    <option value="guru">Guru (mengajar sesuai jadwal; catat poin &amp; prestasi)</option>
+                    <option value="orangtua">Wali Murid</option>
+                  </select>
+                )}
               </div>
 
-              {(formRole === "admin_unit" || formRole === "guru") && (
+              {(formRole === "admin_unit" || formRole === "guru") && !isUnitAdmin && (
                 <div>
                   <Label className="text-xs">Unit Sekolah Penugasan</Label>
                   <select
@@ -551,12 +775,12 @@ export default function UserManagementPage() {
                 <Label className="text-xs">Peran / Role Pengguna</Label>
                 <select
                   value={formRole}
-                  onChange={(e) => setFormRole(e.target.value as any)}
+                  onChange={(e) => setFormRole(e.target.value as UserItem["role"])}
                   className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-2xs"
                 >
                   <option value="admin">Administrator Pusat</option>
                   <option value="admin_unit">Tata Usaha / Admin Unit</option>
-                  <option value="guru">Guru / Wali Kelas</option>
+                  <option value="guru">Guru</option>
                   <option value="orangtua">Wali Murid</option>
                 </select>
               </div>
@@ -598,6 +822,77 @@ export default function UserManagementPage() {
                 </Button>
                 <Button type="submit" disabled={submitting} className="font-bold shadow-xs">
                   {submitting ? "Menyimpan…" : "Simpan Perubahan"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* Modal Reset Akses */}
+      {resettingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-md p-6 border-border shadow-2xl space-y-4 my-8">
+            <div>
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <KeyRound className="size-5 text-primary" />
+                <span>Reset Akses — {resettingUser.name}</span>
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Untuk wali/guru yang kehilangan email DAN nomor HP sekaligus. Tautan pembaruan kontak dikirim ke kontak
+                baru di bawah (kumpulkan langsung dari yang bersangkutan setelah memastikan identitasnya). Kontak baru
+                aktif setelah tautan dibuka; tautan berlaku 7 hari.
+              </p>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setResetting(true);
+                try {
+                  const res = await api.post<{
+                    invitation: { channel: "email" | "whatsapp"; sent_to: string };
+                    delivered: boolean;
+                  }>(`/api/admin/users/${resettingUser.ulid}/reset-access`, { contact: resetContact });
+
+                  toast.success(
+                    `Tautan reset dikirim ke ${res.invitation.sent_to} via ${res.invitation.channel === "email" ? "email" : "WhatsApp"}. Kontak baru aktif setelah tautan dibuka.`,
+                  );
+                  setResettingUser(null);
+                  setResetContact("");
+                } catch (err) {
+                  toast.error(err instanceof ApiError ? err.message : "Gagal mengirim tautan reset.");
+                } finally {
+                  setResetting(false);
+                }
+              }}
+              className="space-y-3.5 text-xs"
+            >
+              <div>
+                <Label className="text-xs">Kontak baru (email atau No. HP/WhatsApp)</Label>
+                <Input
+                  value={resetContact}
+                  onChange={(e) => setResetContact(e.target.value)}
+                  placeholder="mis. wali@email.com atau 081234567890"
+                  required
+                  className="mt-1"
+                  autoFocus
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {resetContact.includes("@")
+                    ? "Terkirim via Email."
+                    : /^[\d+\-\s()]{9,}$/.test(resetContact)
+                      ? "Terkirim via WhatsApp."
+                      : "Kanal terdeteksi otomatis dari bentuk isian."}
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="ghost" onClick={() => setResettingUser(null)} disabled={resetting}>
+                  Batal
+                </Button>
+                <Button type="submit" disabled={resetting || !resetContact.trim()} className="font-bold shadow-xs">
+                  {resetting ? "Mengirim…" : "Kirim Tautan Reset"}
                 </Button>
               </div>
             </form>

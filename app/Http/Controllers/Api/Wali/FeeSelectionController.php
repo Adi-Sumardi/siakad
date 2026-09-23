@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Wali;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Wali\StoreFeeSelectionRequest;
 use App\Models\AcademicYear;
 use App\Models\FeeRate;
 use App\Models\FeeType;
@@ -69,17 +70,11 @@ class FeeSelectionController extends Controller
         return response()->json(['fee_selections' => $entries]);
     }
 
-    public function store(Request $request, string $studentUlid, FeeSelectionService $service): JsonResponse
+    public function store(StoreFeeSelectionRequest $request, string $studentUlid, FeeSelectionService $service): JsonResponse
     {
         $student = Student::visibleTo($request->user())->where('ulid', $studentUlid)->firstOrFail();
 
-        $validated = $request->validate([
-            'fee_rate_ulid' => 'required|string',
-            'items' => 'required|array|min:1',
-            'items.*.component_ulid' => 'required|string',
-            'items.*.included' => 'boolean',
-            'items.*.size_option' => 'nullable|string|max:20',
-        ]);
+        $validated = $request->validated();
 
         $rate = FeeRate::where('ulid', $validated['fee_rate_ulid'])->with('components', 'feeType')->firstOrFail();
 

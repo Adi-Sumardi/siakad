@@ -36,16 +36,6 @@ Schedule::command('bills:send-reminders')
     ->withoutOverlapping()
     ->description('Pengingat jatuh tempo H-7, H-1, dan H+3');
 
-// Morning, after the day has started - a family should not open their phone
-// before dawn to a notice about their child's points. Idempotent: see the
-// unique row in point_threshold_notifications, not this schedule, for why a
-// second run sends nothing.
-Schedule::command('points:evaluate-thresholds')
-    ->dailyAt('06:30')
-    ->name('evaluate-point-thresholds')
-    ->withoutOverlapping()
-    ->description('Notifikasi wali murid saat saldo poin melewati ambang');
-
 // Keeps the unit master in step with PMB. Daily is often enough: units change
 // once a year at most, but a stale code means a handoff for a new unit fails
 // with "Unit tidak dikenal" until someone notices.
@@ -71,4 +61,32 @@ Schedule::command('payments:poll-billing-va')
     ->name('poll-billing-va-payments')
     ->withoutOverlapping(5)
     ->description('Periksa status pelunasan Virtual Account Bank Muamalat (e-SPP)');
+
+// The daily attendance heartbeat (T14): opens each unit's masuk/pulang
+// sessions from its own settings and closes windows that have ended -
+// closing a morning window sweeps unmarked students into alpa.
+// Idempotent both ways: the (unit, date, type) unique stops double opens,
+// the status column stops double closes. Every few minutes rather than
+// fixed hours so a mid-morning settings edit applies the same day.
+Schedule::command('attendance:daily-sweep')
+    ->everyFiveMinutes()
+    ->name('sweep-daily-attendance')
+    // Bounded lock, not the 24h default: a run killed mid-sweep (deploy,
+    // OOM) would otherwise leave its mutex in cache_locks and silently stop
+    // attendance opening/closing for a whole day - the exact failure PMB's
+    // payment poller hit on 2026-09-19.
+    ->withoutOverlapping(10)
+    ->description('Buka/tutup sesi presensi harian sesuai setting unit');
+
+// The consumer half of notification_logs (audit C2): rows a Sendago send
+// refused get read back and retried, bounded at three attempts over 24 hours
+// - beyond that, the failure is a human's problem and the exhaustion digest
+// in the log plus the dashboard card are how a human notices. OTP rows are
+// excluded on purpose; see the command's docblock.
+Schedule::command('notifications:retry-failed')
+    ->everyThirtyMinutes()
+    ->name('retry-failed-notifications')
+    // Same reason as the attendance sweep above: bounded, not 24h.
+    ->withoutOverlapping(30)
+    ->description('Coba ulang notifikasi email/WhatsApp yang gagal terkirim');
 

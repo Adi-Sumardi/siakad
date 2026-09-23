@@ -3,12 +3,17 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\ResetUserAccessRequest;
+use App\Http\Requests\Admin\StoreUserRequest;
+use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Models\ActivityLog;
+use App\Models\Guardian;
 use App\Models\SchoolUnit;
+use App\Models\StaffProfile;
 use App\Models\User;
+use App\Services\Handoff\AccountInvitationSender;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 class UserController extends Controller
 {
@@ -21,17 +26,24 @@ class UserController extends Controller
 
         $users = User::query()
             ->with('schoolUnit')
-            // A per-unit admin manages their own unit's staff, and the
-            // parents of their own unit's students - never the whole
-            // foundation's roster. Without this an admin_unit's GET here
-            // returned every staff and parent account system-wide, contact
-            // details included - the exact cross-unit leak this codebase's
-            // role-check-alone-is-not-enough rule (see the admin route group
-            // in routes/api.php) exists to prevent, just never applied here.
+            // A per-unit admin's whole job on this page is onboarding their
+            // own unit's teachers and parents - the two account kinds they
+            // can create, so the two kinds the list shows them. Other staff
+            // stays invisible; parents show whether they were imported with
+            // this unit stamped on them or arrived via PMB linked to this
+            // unit's student. Without this an admin_unit's GET here returned
+            // every account system-wide, contact details included - the exact
+            // cross-unit leak the role-check-alone-is-not-enough rule (see
+            // the admin route group in routes/api.php) exists to prevent.
             ->when($caller->isUnitScoped(), function ($q) use ($caller) {
                 $q->where(function ($sq) use ($caller) {
-                    $sq->where('school_unit_id', $caller->school_unit_id)
-                        ->orWhereHas('guardian.students', fn ($gq) => $gq->where('school_unit_id', $caller->school_unit_id));
+                    $sq->where(function ($uq) use ($caller) {
+                        $uq->whereIn('role', ['guru', 'orangtua'])
+                            ->where('school_unit_id', $caller->school_unit_id);
+                    })->orWhere(function ($pq) use ($caller) {
+                        $pq->where('role', 'orangtua')
+                            ->whereHas('guardian.students', fn ($gq) => $gq->where('school_unit_id', $caller->school_unit_id));
+                    });
                 });
             })
             ->when($request->string('search')->value(), function ($q, $search) {
@@ -58,7 +70,7 @@ class UserController extends Controller
                     'role_label' => match ($u->role) {
                         'admin' => 'Administrator Pusat',
                         'admin_unit' => 'Tata Usaha / Admin Unit',
-                        'guru' => 'Guru / Wali Kelas',
+                        'guru' => 'Guru',
                         'orangtua' => 'Wali Murid',
                         default => $u->role,
                     },
@@ -85,16 +97,20 @@ class UserController extends Controller
     /**
      * Create a new user.
      */
-    public function store(Request $request): JsonResponse
+    public function store(StoreUserRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:120',
-            'email' => 'nullable|email|max:120|unique:users,email',
-            'phone' => 'nullable|string|max:32',
-            'role' => 'required|in:admin,admin_unit,guru,orangtua',
-            'school_unit_ulid' => 'nullable|exists:school_units,ulid',
-            'is_active' => 'boolean',
-        ]);
+        $validated = $request->validated();
+
+        // A per-unit admin may onboard their own unit's teachers and parents,
+        // nothing else - the controller forces the unit rather than trusting
+        // the parameter, the same line BillingRunController draws.
+        if ($request->user()->isUnitScoped()) {
+            if (! in_array($validated['role'], ['guru', 'orangtua'], true)) {
+                return response()->json(['message' => 'Admin unit hanya dapat membuat akun guru atau wali murid untuk unitnya sendiri.'], 422);
+            }
+
+            $validated['school_unit_ulid'] = $request->user()->schoolUnit->ulid;
+        }
 
         if (empty($validated['email']) && empty($validated['phone'])) {
             return response()->json(['message' => 'Email atau Nomor HP/WhatsApp harus diisi untuk proses autentikasi OTP.'], 422);
@@ -113,6 +129,25 @@ class UserController extends Controller
             'is_active' => $validated['is_active'] ?? true,
         ]);
 
+        // A parent account is only useful once a guardian row exists to
+        // attach students to - students CSV import later matches wali by
+        // phone/email and links the children through it. PMB handoff
+        // creates its own; every other creation path starts one here.
+        if ($user->role === 'orangtua' && ! Guardian::where('user_id', $user->id)->exists()) {
+            Guardian::create([
+                'user_id' => $user->id,
+                'nama' => $user->name,
+                'hubungan' => 'wali',
+                'no_hp' => $user->phone,
+                'email' => $user->email,
+            ]);
+        }
+
+        // The staff record's mirrored contact (03-ERD) - the same
+        // one-field-two-homes reasoning as the guardian block above, for
+        // the staff roles. No-op for parents.
+        StaffProfile::mirrorUserPhone($user);
+
         ActivityLog::record($request->user(), 'user.created', $user, ['role' => $user->role]);
 
         return response()->json(['user' => $user->load('schoolUnit')], 201);
@@ -121,16 +156,9 @@ class UserController extends Controller
     /**
      * Update user details.
      */
-    public function update(Request $request, User $user): JsonResponse
+    public function update(UpdateUserRequest $request, User $user): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:120',
-            'email' => ['nullable', 'email', 'max:120', Rule::unique('users', 'email')->ignore($user->id)],
-            'phone' => 'nullable|string|max:32',
-            'role' => 'sometimes|in:admin,admin_unit,guru,orangtua',
-            'school_unit_ulid' => 'nullable|exists:school_units,ulid',
-            'is_active' => 'boolean',
-        ]);
+        $validated = $request->validated();
 
         if (array_key_exists('school_unit_ulid', $validated)) {
             $unit = ! empty($validated['school_unit_ulid'])
@@ -141,6 +169,19 @@ class UserController extends Controller
 
         $user->fill(collect($validated)->except(['school_unit_ulid'])->all());
         $user->save();
+
+        // Note: deactivation needs no token revocation here - this app has no
+        // personal access tokens (auth is Sanctum SPA cookie sessions; User
+        // has no HasApiTokens). Enforcement is the `active` middleware on
+        // /auth/me + /files/*, which refuses the existing session on its next
+        // request, and OTP login already refuses deactivated accounts.
+
+        // Keep the staff record's mirrored contact in step when the shared
+        // field changes. The request is `sometimes`, so an absent key means
+        // "untouched", not "cleared".
+        if (array_key_exists('phone', $validated)) {
+            StaffProfile::mirrorUserPhone($user);
+        }
 
         ActivityLog::record($request->user(), 'user.updated', $user, $validated);
 
@@ -160,5 +201,67 @@ class UserController extends Controller
         $user->delete();
 
         return response()->json(['message' => 'User berhasil dihapus.']);
+    }
+
+    /**
+     * "Reset Akses" - the lost-access lane. A parent or teacher who lost BOTH
+     * their email and their phone has no OTP to receive and no other way in;
+     * this sends a reset invitation to a NEW contact the admin collected in
+     * person. Opening the link (InvitationController::activate) writes the
+     * new contact onto the account. Central admin only, like every other
+     * user write - the new contact becomes the account's only way in.
+     */
+    public function resetAccess(ResetUserAccessRequest $request, User $user, AccountInvitationSender $invitations): JsonResponse
+    {
+        if (! in_array($user->role, ['orangtua', 'guru'], true)) {
+            return response()->json([
+                'message' => 'Jalur reset hanya untuk akun wali murid dan guru - akun admin dikelola lewat jalur lain.',
+            ], 422);
+        }
+
+        $contact = $request->normalized;
+
+        // The new contact must not silently point at somebody ELSE's account:
+        // a duplicate means OTP codes for one identifier reach two accounts.
+        // Email compares in SQL (plaintext column); phone goes through the
+        // blind index because the column is ciphertext.
+        $existing = $request->channel === 'email'
+            ? User::where('email', $contact)->where('id', '!=', $user->id)->first()
+            : User::findByEncrypted('phone', $contact);
+
+        if ($existing !== null && $existing->id !== $user->id) {
+            return response()->json([
+                'message' => 'Kontak ini sudah dipakai akun lain - tidak bisa menjadi kontak akun ini.',
+            ], 422);
+        }
+
+        $result = $invitations->sendReset($user, $contact, $request->user());
+
+        // Delivery failure is not issuance failure: the invitation row exists
+        // and the retry sweep (or a manual resend from ruang kontrol) delivers
+        // it - the same stance PMB handoff takes.
+        if (! $result->success) {
+            report(new \RuntimeException("Reset invitation for user {$user->ulid} failed to deliver: ".(string) $result->message));
+        }
+
+        ActivityLog::record($request->user(), 'user.reset_access_issued', $user, [
+            'channel' => $request->channel,
+            'sent_to' => $contact,
+            'delivered' => $result->success,
+        ]);
+
+        $invitation = $user->invitations()->where('purpose', 'reset')->whereNull('used_at')->latest('id')->first();
+
+        return response()->json([
+            'invitation' => [
+                'ulid' => $invitation?->ulid,
+                'channel' => $request->channel,
+                'sent_to' => $contact,
+                'expires_at' => $invitation?->expires_at,
+                'purpose' => 'reset',
+            ],
+            'delivered' => $result->success,
+            'delivery_message' => $result->message,
+        ], 201);
     }
 }

@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, Plus, ScrollText, Search, Sparkles } from "lucide-react";
+import { AlertCircle, ScrollText, Search, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import {  } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -73,7 +73,7 @@ export default function AdminPointsPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card className="p-5 border-border/80">
           <span className="text-xs font-semibold text-muted-foreground uppercase">Total Siswa Terdaftar</span>
-          <p className="mt-2 text-2xl font-bold text-foreground">{rows?.length ?? <Skeleton className="h-8 w-16" />}</p>
+          <div className="mt-2 text-2xl font-bold text-foreground">{rows?.length ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Dalam cakupan unit sekolah</p>
         </Card>
 
@@ -85,9 +85,9 @@ export default function AdminPointsPage() {
 
         <Card className="p-5 border-border/80">
           <span className="text-xs font-semibold text-muted-foreground uppercase">Kondisi Tertib / Aman</span>
-          <p className="mt-2 text-2xl font-bold text-emerald-600">
+          <div className="mt-2 text-2xl font-bold text-emerald-600">
             {rows ? `${rows.length - flagged.length} siswa` : <Skeleton className="h-8 w-16" />}
-          </p>
+          </div>
           <p className="mt-1 text-xs text-muted-foreground">Tidak memiliki poin pelanggaran kritis</p>
         </Card>
       </div>

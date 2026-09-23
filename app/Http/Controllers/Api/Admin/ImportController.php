@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\ImportFeeRatesRequest;
+use App\Http\Requests\Admin\ImportStudentsRequest;
+use App\Http\Requests\Admin\ImportUsersRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Classroom;
@@ -11,8 +14,10 @@ use App\Models\FeeRate;
 use App\Models\FeeType;
 use App\Models\Guardian;
 use App\Models\SchoolUnit;
+use App\Models\StaffProfile;
 use App\Models\Student;
 use App\Models\User;
+use App\Services\Notification\PhoneNumberFormatter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -24,12 +29,17 @@ class ImportController extends Controller
     /**
      * Import students, their classes, and their guardians from CSV.
      */
-    public function importStudents(Request $request): JsonResponse
+    public function importStudents(ImportStudentsRequest $request): JsonResponse
     {
-        $request->validate([
-            'file' => 'required|file|mimes:csv,txt|max:5120',
-            'academic_year_ulid' => 'nullable|exists:academic_years,ulid',
-        ]);
+
+        $caller = $request->user();
+
+        // A per-unit admin imports into their own unit only; without one
+        // there is nowhere for rows to land, so fail up front rather than
+        // per row.
+        if ($caller->isUnitScoped() && ! $caller->schoolUnit) {
+            return response()->json(['message' => 'Akun Anda tidak terpasang pada unit sekolah mana pun.'], 422);
+        }
 
         $academicYear = $request->filled('academic_year_ulid')
             ? AcademicYear::where('ulid', $request->input('academic_year_ulid'))->first()
@@ -46,7 +56,7 @@ class ImportController extends Controller
         }
 
         // Read header
-        $header = fgetcsv($handle, 2000, ',');
+        $header = $this->readCsvRow($handle);
         if (! $header) {
             fclose($handle);
             return response()->json(['message' => 'File CSV kosong atau tidak valid.'], 422);
@@ -68,7 +78,13 @@ class ImportController extends Controller
             };
         }, $header);
 
-        $requiredCols = ['nama_lengkap', 'unit_code'];
+        // The unit template a per-unit admin downloads carries no unit_code
+        // column (their rows land in their own unit, the column would be
+        // ignored) - demanding it anyway would reject the app's own template.
+        // Only the central admin's file must name a unit per row.
+        $requiredCols = $caller->isUnitScoped()
+            ? ['nama_lengkap']
+            : ['nama_lengkap', 'unit_code'];
         foreach ($requiredCols as $req) {
             if (! in_array($req, $normalizedHeader, true)) {
                 fclose($handle);
@@ -86,7 +102,7 @@ class ImportController extends Controller
 
         DB::beginTransaction();
         try {
-            while (($row = fgetcsv($handle, 2000, ',')) !== false) {
+            while (($row = $this->readCsvRow($handle)) !== false) {
                 $rowNum++;
                 if (empty(array_filter($row))) {
                     continue;
@@ -103,16 +119,19 @@ class ImportController extends Controller
                     continue;
                 }
 
-                // Match unit
-                $unitCodeRaw = strtolower($data['unit_code'] ?? '');
-                $unit = $allUnits->first(function ($u) use ($unitCodeRaw) {
-                    return strtolower($u->code) === $unitCodeRaw ||
-                           strtolower($u->label) === $unitCodeRaw ||
-                           str_contains(strtolower($u->label), $unitCodeRaw);
-                });
+                // Whose unit imported students land in never depends on the
+                // uploaded file: a per-unit admin's own unit always wins
+                // (the unit_code column is ignored for them, the same line
+                // importUsers draws), the central admin follows the column -
+                // which must name exactly one campus; a jenjang shorthand
+                // like "smp" that fits two campuses is an error row naming
+                // both, never a silent first-match.
+                [$unit, $unitError] = $caller->isUnitScoped()
+                    ? [$caller->schoolUnit, null]
+                    : self::resolveUnit($allUnits, $data['unit_code'] ?? '');
 
                 if (! $unit) {
-                    $errors[] = "Baris {$rowNum}: Unit sekolah '{$data['unit_code']}' tidak ditemukan.";
+                    $errors[] = "Baris {$rowNum}: {$unitError}.";
                     continue;
                 }
 
@@ -157,9 +176,20 @@ class ImportController extends Controller
                 // Handle Classroom & Enrollment
                 $kelasName = $data['kelas'] ?? '';
                 if (! empty($kelasName)) {
-                    // Try to parse tingkat e.g. "1-A" -> 1, "7B" -> 7, "TK-A" -> 0
+                    // Try to parse tingkat e.g. "1-A" -> 1, "7B" -> 7. A name
+                    // with no number is only valid in the kindergarten
+                    // jenjang, whose rung on the ladder is 0 ("TK-A" -> 0) -
+                    // the old null made the classroom permanently invisible
+                    // as a promotion target/source (tingkat+1 finds nothing).
                     preg_match('/\d+/', $kelasName, $matches);
-                    $tingkat = ! empty($matches[0]) ? (int) $matches[0] : null;
+
+                    if (! empty($matches[0])) {
+                        $tingkat = (int) $matches[0];
+                    } elseif (in_array((string) $unit->jenjang_group, ['pg', 'ra', 'tk'], true)) {
+                        $tingkat = 0;
+                    } else {
+                        $tingkat = null;
+                    }
 
                     $classroom = Classroom::firstOrCreate(
                         [
@@ -298,11 +328,8 @@ class ImportController extends Controller
     /**
      * Import fee rates from CSV.
      */
-    public function importFeeRates(Request $request): JsonResponse
+    public function importFeeRates(ImportFeeRatesRequest $request): JsonResponse
     {
-        $request->validate([
-            'file' => 'required|file|mimes:csv,txt|max:5120',
-        ]);
 
         $file = $request->file('file');
         $handle = fopen($file->getRealPath(), 'r');
@@ -310,7 +337,7 @@ class ImportController extends Controller
             return response()->json(['message' => 'Gagal membaca file CSV.'], 422);
         }
 
-        $header = fgetcsv($handle, 2000, ',');
+        $header = $this->readCsvRow($handle);
         if (! $header) {
             fclose($handle);
             return response()->json(['message' => 'File CSV kosong atau tidak valid.'], 422);
@@ -344,7 +371,7 @@ class ImportController extends Controller
 
         DB::beginTransaction();
         try {
-            while (($row = fgetcsv($handle, 2000, ',')) !== false) {
+            while (($row = $this->readCsvRow($handle)) !== false) {
                 $rowNum++;
                 if (empty(array_filter($row))) {
                     continue;
@@ -372,16 +399,13 @@ class ImportController extends Controller
                     $allTypes->push($feeType);
                 }
 
-                // Match School Unit
-                $unitCodeRaw = strtolower($data['unit_code'] ?? '');
-                $unit = $allUnits->first(function ($u) use ($unitCodeRaw) {
-                    return strtolower($u->code) === $unitCodeRaw ||
-                           strtolower($u->label) === $unitCodeRaw ||
-                           str_contains(strtolower($u->label), $unitCodeRaw);
-                });
+                // Match School Unit - same one-campus rule as the students
+                // import: an ambiguous cell is an error row, and a rate that
+                // lands on the wrong campus misprices that school's bills.
+                [$unit, $unitError] = self::resolveUnit($allUnits, $data['unit_code'] ?? '');
 
                 if (! $unit) {
-                    $errors[] = "Baris {$rowNum}: Unit sekolah '{$data['unit_code']}' tidak ditemukan.";
+                    $errors[] = "Baris {$rowNum}: {$unitError}.";
                     continue;
                 }
 
@@ -459,6 +483,278 @@ class ImportController extends Controller
     }
 
     /**
+     * Import user accounts from CSV. Two shapes share one endpoint: a per-unit
+     * admin bulk-onboards their own unit's teachers (role guru and their unit
+     * are forced - the CSV's role/unit columns are ignored for them), while
+     * the central admin imports any role, each row routed by its role and
+     * unit_code columns exactly like the manual "Tambah Pengguna" form.
+     * Re-importing the same file updates rather than duplicates, and an
+     * email/number already owned by an account of a different role is an
+     * error, never a silent role flip.
+     */
+    public function importUsers(ImportUsersRequest $request): JsonResponse
+    {
+
+        $caller = $request->user();
+
+        $file = $request->file('file');
+        $handle = fopen($file->getRealPath(), 'r');
+        if (! $handle) {
+            return response()->json(['message' => 'Gagal membaca file CSV.'], 422);
+        }
+
+        $header = $this->readCsvRow($handle);
+        if (! $header) {
+            fclose($handle);
+            return response()->json(['message' => 'File CSV kosong atau tidak valid.'], 422);
+        }
+
+        $normalizedHeader = array_map(function ($col) {
+            $cleaned = strtolower(trim(preg_replace('/[^a-zA-Z0-9_]/', '', str_replace([' ', '-'], '_', $col))));
+            return match ($cleaned) {
+                'nama', 'nama_guru', 'nama_lengkap' => 'nama_lengkap',
+                'no_hp', 'no_wa', 'nomor_hp', 'nomor_wa', 'telepon', 'wa', 'kontak' => 'no_hp',
+                'unit', 'sekolah', 'unit_sekolah', 'kode_unit' => 'unit_code',
+                'peran', 'role_pengguna', 'peran_pengguna' => 'role',
+                'aktif', 'status', 'status_aktif', 'is_active' => 'is_aktif',
+                default => $cleaned,
+            };
+        }, $header);
+
+        if (! in_array('nama_lengkap', $normalizedHeader, true)) {
+            fclose($handle);
+            return response()->json([
+                'message' => "Kolom wajib 'nama_lengkap' tidak ditemukan di baris header CSV. Kolom yang terdeteksi: " . implode(', ', $normalizedHeader),
+            ], 422);
+        }
+
+        $allUnits = SchoolUnit::all();
+        $importedCount = 0;
+        $updatedCount = 0;
+        $errors = [];
+        $rowNum = 1;
+
+        DB::beginTransaction();
+        try {
+            while (($row = $this->readCsvRow($handle)) !== false) {
+                $rowNum++;
+                if (empty(array_filter($row))) {
+                    continue;
+                }
+
+                $data = [];
+                foreach ($normalizedHeader as $idx => $key) {
+                    $data[$key] = isset($row[$idx]) ? trim($row[$idx]) : '';
+                }
+
+                $nama = $data['nama_lengkap'] ?? '';
+                if ($nama === '') {
+                    $errors[] = "Baris {$rowNum}: Nama kosong, dilewati.";
+                    continue;
+                }
+
+                // The role column is read for everyone, but a per-unit admin
+                // may only onboard guru and orangtua accounts for their own
+                // unit - any other role named in their file is an error, not
+                // a silent downgrade. Unrecognised spellings are an error
+                // too, never a guess. Blank means guru, the common case.
+                $role = 'guru';
+                if (! empty($data['role'])) {
+                    $role = match (strtolower(trim($data['role']))) {
+                        'admin', 'admin_pusat', 'administrator', 'pusat' => 'admin',
+                        'admin_unit', 'tu', 'tata_usaha' => 'admin_unit',
+                        'guru', 'guru_mapel' => 'guru',
+                        'orangtua', 'wali', 'wali_murid' => 'orangtua',
+                        default => null,
+                    };
+
+                    if ($role === null) {
+                        $errors[] = "Baris {$rowNum}: Role '{$data['role']}' tidak dikenal (pilih: admin, admin_unit, guru, orangtua).";
+                        continue;
+                    }
+
+                    if ($caller->isUnitScoped() && ! in_array($role, ['guru', 'orangtua'], true)) {
+                        $errors[] = "Baris {$rowNum}: Admin unit hanya bisa impor guru atau wali murid - role '{$data['role']}' ditolak.";
+                        continue;
+                    }
+                }
+
+                // Whose unit this row lands in must never depend on the
+                // contents of an uploaded file: a per-unit admin's own unit
+                // always wins; the central admin follows the column, which
+                // the unit-scoped roles require and admin never carries.
+                $unit = null;
+                if ($caller->isUnitScoped()) {
+                    $unit = $caller->schoolUnit;
+                } else {
+                    // Resolved only for the roles that carry a unit. A
+                    // parent's unit is optional list metadata, so a blank
+                    // cell is fine there - but a filled cell that cannot
+                    // name ONE campus ("smp" with two SMPs on the roll) is
+                    // an error row: silently dropping it would hide the
+                    // parent from the unit list the importer meant.
+                    if (in_array($role, ['admin_unit', 'guru', 'orangtua'], true) && ($data['unit_code'] ?? '') !== '') {
+                        [$unit, $unitError] = self::resolveUnit($allUnits, $data['unit_code']);
+
+                        if (! $unit) {
+                            $errors[] = "Baris {$rowNum}: {$unitError}.";
+                            continue;
+                        }
+                    }
+
+                    if (in_array($role, ['admin_unit', 'guru'], true) && ! $unit) {
+                        $errors[] = "Baris {$rowNum}: Role {$role} wajib punya unit - kolom unit_code kosong.";
+                        continue;
+                    }
+
+                    // An admin account is never unit-scoped; whatever the
+                    // column said for one, it stays ignored.
+                    if ($role === 'admin') {
+                        $unit = null;
+                    }
+                }
+
+                // Anything not explicitly "off" is active - a column left
+                // blank means aktif, matching the form's checked-by-default.
+                $isActiveRaw = strtolower(trim($data['is_aktif'] ?? ''));
+                $isActive = ! in_array($isActiveRaw, ['0', 'tidak', 'nonaktif', 'false', 'no', 'n'], true);
+
+                $email = ! empty($data['email']) ? mb_strtolower($data['email']) : null;
+                // Stored normalised to 08xxxxxxxxxx: that is the form OTP
+                // login normalises its identifier to before hashing, so a
+                // number arriving as 62-format or bare digits would otherwise
+                // create an account its own CSV says can log in, but can't.
+                $phone = PhoneNumberFormatter::toWhatsAppFormat($data['no_hp'] ?? null);
+
+                if (! $email && ! $phone) {
+                    $errors[] = "Baris {$rowNum}: Email atau No HP harus diisi (untuk login OTP).";
+                    continue;
+                }
+
+                if ($email && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $errors[] = "Baris {$rowNum}: Email '{$email}' tidak valid.";
+                    continue;
+                }
+
+                // phone is an encrypted column - only the blind-index lookup
+                // can find an existing account by number (same note as in
+                // importStudents()).
+                $existing = null;
+                if ($email) {
+                    $existing = User::where('email', $email)->first();
+                }
+                if (! $existing && $phone) {
+                    $existing = User::findByEncrypted('phone', $phone);
+                }
+
+                if ($existing) {
+                    if ($existing->role !== $role) {
+                        $errors[] = "Baris {$rowNum}: ".($email ?: $phone)." sudah dipakai akun {$existing->role} ({$existing->name}) - tidak diubah.";
+                        continue;
+                    }
+
+                    // Only a guru's unit is identity: a per-unit admin must
+                    // not pull another unit's teacher in. A parent's unit is
+                    // just list metadata - PMB creates them with none, so the
+                    // unit importing them may stamp its own.
+                    if ($role === 'guru' && $caller->isUnitScoped() && $existing->school_unit_id !== $unit->id) {
+                        $errors[] = "Baris {$rowNum}: Guru '{$nama}' terdaftar di unit lain - tidak diambil alih unit Anda.";
+                        continue;
+                    }
+
+                    // Identity keys (email/phone) are the dedup match itself,
+                    // so a re-import refreshes the name (and the unit where
+                    // the caller may set it) - never the login channel.
+                    $existing->fill(['name' => $nama])->save();
+                    if (! $caller->isUnitScoped()) {
+                        $existing->school_unit_id = $unit?->id;
+                    } elseif ($existing->school_unit_id === null) {
+                        $existing->school_unit_id = $unit?->id;
+                    }
+                    $existing->save();
+
+                    if ($role === 'orangtua') {
+                        self::ensureGuardianFor($existing, $phone, $email);
+                    }
+
+                    // The re-import refreshes name/unit, never the login
+                    // channel - the staff mirror follows the same line: only
+                    // make sure the record exists for a staff account that
+                    // predates the column.
+                    if (! $existing->staffProfile) {
+                        StaffProfile::mirrorUserPhone($existing);
+                    }
+                    $updatedCount++;
+                    continue;
+                }
+
+                $user = User::create([
+                    'name' => $nama,
+                    'email' => $email,
+                    'phone' => $phone,
+                    'role' => $role,
+                    'school_unit_id' => $unit?->id,
+                    'is_active' => $isActive,
+                ]);
+
+                // Same reason as UserController::store(): a parent account
+                // needs its guardian row before any student can ever be
+                // attached to it.
+                if ($role === 'orangtua') {
+                    self::ensureGuardianFor($user, $phone, $email);
+                }
+
+                // Same reason as UserController::store(): the staff
+                // record's mirrored contact. No-op for parents.
+                StaffProfile::mirrorUserPhone($user);
+                $importedCount++;
+            }
+
+            DB::commit();
+            fclose($handle);
+
+            ActivityLog::record($caller, 'users.imported', null, [
+                'imported' => $importedCount,
+                'updated' => $updatedCount,
+            ]);
+
+            return response()->json([
+                'message' => "Proses impor pengguna selesai. {$importedCount} akun baru ditambahkan, {$updatedCount} akun diperbarui.",
+                'imported_count' => $importedCount,
+                'updated_count' => $updatedCount,
+                'errors' => $errors,
+            ]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            fclose($handle);
+            return response()->json([
+                'message' => 'Terjadi kesalahan saat mengimpor akun pengguna: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * A parent account is only useful once a guardian row exists to attach
+     * students to - the students CSV import later matches wali by phone/email
+     * and links the children through it. Idempotent: an existing guardian
+     * (e.g. PMB's own) is left untouched.
+     */
+    private static function ensureGuardianFor(User $user, ?string $phone, ?string $email): void
+    {
+        if (Guardian::where('user_id', $user->id)->exists()) {
+            return;
+        }
+
+        Guardian::create([
+            'user_id' => $user->id,
+            'nama' => $user->name,
+            'hubungan' => 'wali',
+            'no_hp' => $phone,
+            'email' => $email,
+        ]);
+    }
+
+    /**
      * A rupiah amount typed or pasted from a spreadsheet, in whichever of the
      * two conventions the person filling out the CSV happens to use: plain
      * digits (650000), or grouped with a period the Indonesian way (650.000).
@@ -487,62 +783,203 @@ class ImportController extends Controller
     }
 
     /**
-     * Download student CSV template.
+     * Resolve one CSV row's unit cell to exactly one school unit, or say why
+     * it can't be. Exact code (the PMB integration contract, unique by
+     * constraint) and exact label win outright. The substring fallback is a
+     * convenience for hand-typed files and only fires when it points at a
+     * SINGLE unit: with two SMP campuses on the roll a bare "smp" matches
+     * both, and quietly taking the first would enrol the other campus's
+     * students in the wrong school - fees, classroom and bills all follow
+     * school_unit_id from there. Ambiguity names its candidates and stops,
+     * never guesses.
+     *
+     * @param  \Illuminate\Support\Collection<SchoolUnit>  $allUnits
+     * @return array{0: SchoolUnit|null, 1: string|null} [unit, error reason]
      */
-    public function downloadStudentTemplate(): StreamedResponse
+    private static function resolveUnit($allUnits, string $raw): array
     {
+        $raw = strtolower(trim($raw));
+
+        if ($raw === '') {
+            return [null, 'kolom unit_code kosong - unit tidak ditentukan'];
+        }
+
+        $exact = $allUnits->filter(fn ($u) => strtolower($u->code) === $raw || strtolower($u->label) === $raw);
+        if ($exact->isNotEmpty()) {
+            return $exact->count() === 1
+                ? [$exact->first(), null]
+                : [null, self::ambiguousUnitError($raw, $exact)];
+        }
+
+        $partial = $allUnits->filter(
+            fn ($u) => str_contains(strtolower($u->label), $raw) || str_contains(strtolower($u->code), $raw)
+        );
+
+        if ($partial->isEmpty()) {
+            return [null, "unit '{$raw}' tidak ditemukan"];
+        }
+
+        return $partial->count() === 1
+            ? [$partial->first(), null]
+            : [null, self::ambiguousUnitError($raw, $partial)];
+    }
+
+    /**
+     * The candidates are capped so a too-short needle ("a", "s") doesn't turn
+     * the error into a wall of every unit on the roll.
+     */
+    private static function ambiguousUnitError(string $raw, $candidates): string
+    {
+        $listed = $candidates->take(4)
+            ->map(fn ($u) => $u->code.' ('.$u->label.')')
+            ->implode(', ');
+
+        return sprintf(
+            "unit '%s' cocok ke beberapa unit - %s%s. Tulis kode unit satu kampus secara spesifik",
+            $raw,
+            $listed,
+            $candidates->count() > 4 ? ', …' : '',
+        );
+    }
+
+    /**
+     * Download student CSV template, shaped for whoever asks: the central
+     * admin's carries the unit_code column, its sample rows citing REAL
+     * codes from the database (fetched inside the stream so the file always
+     * matches the unit master, deliberately including a same-jenjang pair -
+     * that is the case a jenjang shorthand like "smp" was never enough
+     * for). A per-unit admin gets the shape their import actually accepts:
+     * no unit column at all, since every row lands in their own unit
+     * regardless of what a file might claim.
+     */
+    public function downloadStudentTemplate(Request $request): StreamedResponse
+    {
+        $isUnitScoped = $request->user()->isUnitScoped();
+
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => 'attachment; filename="template_import_siswa_siakad.csv"',
         ];
 
-        return response()->stream(function () {
+        return response()->stream(function () use ($isUnitScoped, $request) {
             $handle = fopen('php://output', 'w');
-            fputcsv($handle, [
-                'nama_lengkap',
-                'nis',
-                'nisn',
-                'jenis_kelamin',
-                'unit_code',
-                'kelas',
-                'wali_nama',
-                'wali_phone',
-                'wali_email',
-                'status',
-            ]);
 
-            // Sample rows
-            fputcsv($handle, [
-                'Muhammad Rayhan Pratama',
-                '27001',
-                '0012345678',
-                'L',
-                'sd',
-                '1-A',
-                'Bambang Sutrisno',
-                '081234567890',
-                'bambang@gmail.com',
-                'active',
-            ]);
-            fputcsv($handle, [
-                'Aisyah Putri Azzahra',
-                '27002',
-                '0012345679',
-                'P',
-                'smp',
-                '7-B',
-                'Hendra Gunawan',
-                '081987654321',
-                'hendra@gmail.com',
-                'active',
-            ]);
+            $people = [
+                ['Ahmad Fauzan', '27001', '0012345678', 'L', 'Bambang Sutrisno', '081234567890', 'bambang@gmail.com'],
+                ['Siti Rahmawati', '27002', '0012345679', 'P', 'Hendra Gunawan', '081987654321', 'hendra@gmail.com'],
+                ['Budi Santoso', '27003', '0012345680', 'L', 'Slamet Riyadi', '081377788899', 'slamet@gmail.com'],
+            ];
+
+            // A class name plausible for the level, since the import parses
+            // tingkat out of it.
+            $kelasFor = fn (?string $jenjang) => match ($jenjang) {
+                'pg', 'tk' => 'A',
+                'smp' => '7-B',
+                'sma' => 'X-1',
+                default => '1-A',
+            };
+
+            if ($isUnitScoped) {
+                $this->writeCsvRow($handle,['nama_lengkap', 'nis', 'nisn', 'jenis_kelamin', 'kelas', 'wali_nama', 'wali_phone', 'wali_email', 'status']);
+
+                $kelas = $kelasFor($request->user()->schoolUnit?->jenjang_group);
+
+                foreach ([0, 1] as $i) {
+                    [$nama, $nis, $nisn, $jk, $wali, $hp, $email] = $people[$i];
+
+                    $this->writeCsvRow($handle,[$nama, $nis, $nisn, $jk, $kelas, $wali, $hp, $email, 'active']);
+                }
+            } else {
+                $this->writeCsvRow($handle,['nama_lengkap', 'nis', 'nisn', 'jenis_kelamin', 'unit_code', 'kelas', 'wali_nama', 'wali_phone', 'wali_email', 'status']);
+
+                $units = SchoolUnit::active()->ordered()->get();
+
+                // First the roll's first campus, then two that share a
+                // jenjang. Prefer a pair that really are two campuses of
+                // the SAME school type - labels sharing their jenjang
+                // token, like "SMPI Al Azhar 12/55": an RA and a TKI also
+                // share a jenjang_group, but they read as different kinds
+                // of school rather than the "two SMPs" case the shorthand
+                // fails on.
+                $multiCampus = $units->groupBy('jenjang_group')->filter(fn ($group) => $group->count() > 1);
+                $pair = $multiCampus->first(function ($group) {
+                    [$a, $b] = $group->values()->take(2);
+
+                    return $a && $b && str_starts_with(strtolower($b->label), substr(strtolower($a->label), 0, 3));
+                }) ?? $multiCampus->first();
+
+                $samples = $units->take(1);
+                if ($pair) {
+                    $samples = $samples->concat($pair->values()->take(2));
+                }
+
+                foreach ($samples->unique('id')->values() as $i => $unit) {
+                    [$nama, $nis, $nisn, $jk, $wali, $hp, $email] = $people[$i % count($people)];
+
+                    $this->writeCsvRow($handle,[$nama, $nis, $nisn, $jk, $unit->code, $kelasFor($unit->jenjang_group), $wali, $hp, $email, 'active']);
+                }
+            }
 
             fclose($handle);
         }, 200, $headers);
     }
 
     /**
-     * Download fee rate CSV template.
+     * Download the user-import CSV template, shaped for whoever asks: the
+     * central admin's mirrors the "Tambah Pengguna" form (role + unit +
+     * is_aktif columns, unit blank for the non-unit roles) and is filled
+     * with the REAL unit names from the database - the same labels the
+     * form's unit dropdown shows, RA/TK included, so nobody has to guess
+     * codes. A per-unit admin gets the teacher-only shape their import
+     * actually accepts (no unit column at all - it would be ignored).
+     */
+    public function downloadUserTemplate(Request $request): StreamedResponse
+    {
+        $isUnitScoped = $request->user()->isUnitScoped();
+
+        $headers = [
+            'Content-Type' => 'text/csv',
+            'Content-Disposition' => 'attachment; filename="'.($isUnitScoped ? 'template_import_guru_wali_siakad.csv' : 'template_import_pengguna_siakad.csv').'"',
+        ];
+
+        // Sample rows cite real units by their dropdown label, not made-up
+        // codes - fetched inside the stream so the template always matches
+        // whatever the unit master holds at download time.
+        return response()->stream(function () use ($isUnitScoped) {
+            $handle = fopen('php://output', 'w');
+
+            if ($isUnitScoped) {
+                // No unit column: their import lands every row in their own
+                // unit. Role is the one choice left: their unit's teachers
+                // and its parents.
+                $this->writeCsvRow($handle,['nama_lengkap', 'email', 'no_hp', 'role']);
+
+                $this->writeCsvRow($handle,['Ahmad Fauzi, S.Pd.', 'ahmad.fauzi@alazhar.sch.id', '081234567801', 'guru']);
+                $this->writeCsvRow($handle,['Siti Rahmawati', '', '081234567802', 'guru']);
+                $this->writeCsvRow($handle,['Hendra Gunawan', '', '081234567803', 'orangtua']);
+            } else {
+                $units = SchoolUnit::query()->orderBy('sort_order')->orderBy('label')->limit(3)->get()->values();
+                $unitLabel = fn (int $i) => $units->get($i)?->label ?? '';
+
+                $this->writeCsvRow($handle,['nama_lengkap', 'email', 'no_hp', 'role', 'unit_code', 'is_aktif']);
+
+                $this->writeCsvRow($handle,['Ahmad Fauzi, S.Pd.', 'ahmad.fauzi@alazhar.sch.id', '081234567801', 'guru', $unitLabel(0), '1']);
+                $this->writeCsvRow($handle,['Siti Rahmawati', '', '081234567802', 'guru', $unitLabel(1), '1']);
+                $this->writeCsvRow($handle,['Rina Amalia, S.E.', 'rina.amalia@alazhar.sch.id', '', 'admin_unit', $unitLabel(2), '1']);
+                // admin & orangtua are not tied to one unit - leave unit_code blank.
+                $this->writeCsvRow($handle,['Yusuf Hanafi', 'yusuf.hanafi@yapinet.id', '', 'admin', '', '1']);
+                $this->writeCsvRow($handle,['Wali Aisyah', 'wali.aisyah@gmail.com', '', 'orangtua', '', '1']);
+            }
+
+            fclose($handle);
+        }, 200, $headers);
+    }
+
+    /**
+     * Download fee rate CSV template. Same rule as the students template:
+     * sample rows cite real unit codes from the database at download time,
+     * never a jenjang shorthand - a rate that resolves to the wrong campus
+     * misprices that school's bills.
      */
     public function downloadFeeRateTemplate(): StreamedResponse
     {
@@ -553,7 +990,7 @@ class ImportController extends Controller
 
         return response()->stream(function () {
             $handle = fopen('php://output', 'w');
-            fputcsv($handle, [
+            $this->writeCsvRow($handle,[
                 'fee_type_code',
                 'unit_code',
                 'tingkat',
@@ -564,27 +1001,30 @@ class ImportController extends Controller
             ]);
 
             // Sample rows
-            fputcsv($handle, [
+            $units = SchoolUnit::active()->ordered()->get();
+            $codeAt = fn (int $i) => $units->get($i)?->code ?? '';
+
+            $this->writeCsvRow($handle,[
                 'spp',
-                'sd',
+                $codeAt(0),
                 '1',
                 '2027/2028',
                 '650000',
                 '10',
                 '0',
             ]);
-            fputcsv($handle, [
+            $this->writeCsvRow($handle,[
                 'spp',
-                'smp',
+                $codeAt(1),
                 '',
                 '2027/2028',
                 '750000',
                 '10',
                 '0',
             ]);
-            fputcsv($handle, [
+            $this->writeCsvRow($handle,[
                 'uang_gedung',
-                'sma',
+                $codeAt(2),
                 '',
                 '2027/2028',
                 '5000000',
@@ -594,5 +1034,22 @@ class ImportController extends Controller
 
             fclose($handle);
         }, 200, $headers);
+    }
+
+    /**
+     * PHP 8.4 deprecates relying on fgetcsv/fputcsv defaults - the $escape
+     * parameter must be passed explicitly. Both wrappers live here so every
+     * read and write of an import/template CSV goes through ONE spot, and
+     * the escaping stays the pre-8.4 behaviour ('\'): byte-identical output
+     * to what production has always written.
+     */
+    private function readCsvRow($handle): array|false
+    {
+        return fgetcsv($handle, 2000, ',', '"', '\\');
+    }
+
+    private function writeCsvRow($handle, array $fields): int|false
+    {
+        return fputcsv($handle, $fields, ',', '"', '\\');
     }
 }

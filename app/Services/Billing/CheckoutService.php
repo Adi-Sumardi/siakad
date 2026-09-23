@@ -9,9 +9,6 @@ use App\Models\PaymentAllocation;
 use App\Models\User;
 use App\Services\Payment\BillingApiGateway;
 use App\Services\Payment\PaymentGateway;
-use App\Services\Payment\SendagoPayGateway;
-use App\Services\Payment\XenditGateway;
-use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -24,11 +21,12 @@ class CheckoutService
     public function __construct(
         private PaymentGateway $gateway,
         private PaymentAllocator $allocator,
+        private BillingApiClient $client,
     ) {}
 
     /**
      * Creates a pending Payment row and its bill allocations, then hands off
-     * to the active payment gateway (e-SPP Virtual Account, SendagoPay, or Xendit).
+     * to the payment gateway (e-SPP Virtual Account).
      *
      * @param  array<int, string>  $billUlids
      * @param  array<string, float|int|numeric-string>  $customAmounts  Bill ULID => custom partial amount
@@ -46,7 +44,35 @@ class CheckoutService
             throw new RuntimeException('Akun ini tidak terdaftar sebagai wali murid.');
         }
 
-        $bills = $this->collectPayable($user, $billUlids);
+        return $this->checkout($user, $guardian, $billUlids, $method, $customAmounts, $bank);
+    }
+
+    /**
+     * The admin's door into the same lane the wali walks: same basket rules,
+     * same prefix assertion, same supersede guards, same allocator - only the
+     * payer differs, resolved by the caller (the student's billing contact)
+     * so the payment stays visible to that family under /api/wali/payments.
+     */
+    public function startForGuardian(
+        User $collector,
+        Guardian $guardian,
+        array $billUlids,
+        string $method = 'virtual_account',
+        array $customAmounts = [],
+        string $bank = 'muamalat',
+    ): Payment {
+        return $this->checkout($collector, $guardian, $billUlids, $method, $customAmounts, $bank);
+    }
+
+    private function checkout(
+        User $collector,
+        Guardian $guardian,
+        array $billUlids,
+        string $method,
+        array $customAmounts,
+        string $bank,
+    ): Payment {
+        $bills = $this->collectPayable($collector, $billUlids);
 
         if ($bills->isEmpty()) {
             throw new RuntimeException('Tidak ada tagihan yang dapat dibayar.');
@@ -58,6 +84,11 @@ class CheckoutService
         $this->assertSingleVaGroupInBasket($bills);
 
         $selectedBank = in_array(strtolower($bank), ['muamalat', 'bsi'], true) ? strtolower($bank) : 'muamalat';
+
+        // Refuse before any payment row exists - a fee type e-SPP has no VA
+        // prefix for cannot be paid by VA at all, and the old behavior (reusing
+        // the SPP prefix) silently collided with the student's SPP VA.
+        $this->assertVaPrefixAvailable($bills, $selectedBank);
 
         // Compute per-bill charge amount (either custom amount or remaining balance)
         $allocations = [];
@@ -74,7 +105,7 @@ class CheckoutService
                 }
                 if ($custom > $remaining) {
                     throw new RuntimeException(
-                        "Nominal kustom untuk tagihan '{$bill->description}' (Rp ".number_format($custom, 0, ',', '.').") melebihi sisa tagihan (Rp ".number_format($remaining, 0, ',', '.').').'
+                        "Nominal kustom untuk tagihan '{$bill->description}' (Rp ".number_format($custom, 0, ',', '.').') melebihi sisa tagihan (Rp '.number_format($remaining, 0, ',', '.').').'
                     );
                 }
                 $charge = $custom;
@@ -86,10 +117,14 @@ class CheckoutService
 
         $amount = round($amount, 2);
 
-        $payment = DB::transaction(function () use ($guardian, $bills, $amount, $method, $allocations, $selectedBank) {
-            $this->supersedePendingPaymentsFor($bills);
-            $this->supersedeOtherVaPaymentsForSameGroup($bills);
+        // Outside the transaction on purpose: supersedeOtherVaPaymentsForSameGroup()
+        // may call the bank, and one of its outcomes settles money (which opens
+        // its own transaction and notifies the family) - neither belongs inside
+        // the checkout's lock window.
+        $this->supersedePendingPaymentsFor($bills);
+        $this->supersedeOtherVaPaymentsForSameGroup($bills);
 
+        $payment = DB::transaction(function () use ($guardian, $bills, $amount, $method, $allocations, $selectedBank) {
             $payment = Payment::create([
                 'payment_number' => Payment::generateNumber(),
                 'payer_guardian_id' => $guardian->id,
@@ -161,7 +196,38 @@ class CheckoutService
     }
 
     /**
-     * Supersedes older pending VA payments for the same student & fee type group.
+     * A fee type with no registered VA prefix must not reach the gateway.
+     *
+     * @param  Collection<int, Bill>  $bills
+     */
+    private function assertVaPrefixAvailable(Collection $bills, string $bank): void
+    {
+        if (! $this->gateway instanceof BillingApiGateway) {
+            return;
+        }
+
+        $primary = $bills->first();
+
+        if (! $primary) {
+            return;
+        }
+
+        $feeTypeCode = $primary->feeType?->code ?? 'spp';
+
+        if (BillingApiClient::resolvePrefix($feeTypeCode, $primary->student->schoolUnit, $bank) === null) {
+            $name = $primary->feeType?->name ?? $feeTypeCode;
+
+            throw new RuntimeException(
+                "Jenis biaya '{$name}' belum punya nomor Virtual Account di bank. Silakan bayar tunai di Tata Usaha sementara."
+            );
+        }
+    }
+
+    /**
+     * Supersedes older pending VA payments for the same student & fee type
+     * group - but only after asking the bank about each one. A VA the parent
+     * already paid must be SETTLED (the money exists), never silently failed;
+     * the old behavior buried it and the money vanished from the system.
      *
      * @param  Collection<int, Bill>  $bills
      */
@@ -193,10 +259,50 @@ class CheckoutService
                     ->orWhereNotNull('gateway_response->va_number');
             })
             ->get()
-            ->each(fn (Payment $stale) => $this->failAndExpire(
-                $stale,
-                'Digantikan oleh checkout baru untuk anak dan jenis biaya yang sama.',
-            ));
+            ->each(function (Payment $stale) {
+                $this->settleStaleIfAlreadyPaid($stale);
+
+                $this->failAndExpire(
+                    $stale,
+                    'Digantikan oleh checkout baru untuk anak dan jenis biaya yang sama.',
+                );
+            });
+    }
+
+    /**
+     * Asks e-SPP whether this pending VA has in fact been paid. Fail-closed
+     * on the response, same as the webhook: a missing "sisa" is "cannot
+     * tell" (and then superseding proceeds only when the bank is reachable -
+     * an unreachable bank aborts the whole checkout rather than risking it).
+     */
+    private function settleStaleIfAlreadyPaid(Payment $stale): void
+    {
+        $vaNumber = $stale->gateway_response['va_number'] ?? null;
+
+        if (! $vaNumber) {
+            return;
+        }
+
+        try {
+            $statusRes = $this->client->getByVaNumber($vaNumber);
+        } catch (\Throwable $e) {
+            throw new RuntimeException(
+                'Tidak bisa menghubungi bank untuk memeriksa pembayaran Virtual Account sebelumnya ('.$e->getMessage().'). Mohon coba beberapa saat lagi.'
+            );
+        }
+
+        $rawRemaining = $statusRes['sisa'] ?? $statusRes['data']['sisa'] ?? null;
+
+        if ($rawRemaining !== null && is_numeric($rawRemaining) && (float) $rawRemaining <= 0) {
+            // The money exists - book it under the payment that earned it.
+            // settle() keeps the payment's own external id and gateway
+            // response when handed empties.
+            $this->allocator->settle($stale);
+
+            throw new RuntimeException(
+                'Pembayaran Virtual Account sebelumnya terdeteksi sudah dibayar dan baru saja dibukukan. Silakan muat ulang halaman tagihan.'
+            );
+        }
     }
 
     /**
@@ -204,9 +310,9 @@ class CheckoutService
      * its e-SPP bill to today so the abandoned VA stops accepting money at
      * the bank counter - see BillingApiGateway::expireVa() for why this
      * matters. Resolved from the container rather than $this->gateway: the
-     * NEW checkout replacing this one may be on a different gateway
-     * entirely (Xendit, SendagoPay), but the STALE payment being failed here
-     * can still be the one still-open VA that needs closing.
+     * NEW checkout replacing this one may be on a different gateway, but the
+     * STALE payment being failed here can still be the one still-open VA
+     * that needs closing.
      */
     private function failAndExpire(Payment $stale, string $reason): void
     {
@@ -240,39 +346,36 @@ class CheckoutService
     }
 
     /**
-     * A payment recorded by staff: cash at the front desk, or a verified transfer.
+     * Fails every still-pending online payment that touches this bill - the
+     * shared guard for every lane that takes a bill out of the payable world
+     * by other means (today: waived and cancelled; payment itself is VA-only
+     * per the school's 2026-09-21 decision, so the VA IS the lane that must
+     * never outlive the decision). A lingering bank invoice that completes
+     * AFTER one of those decisions is a payment the system no longer has a
+     * place for (double charge / money against a closed bill).
+     *
+     * VA payments are asked about at the bank first (settleStaleIfAlreadyPaid):
+     * one that turns out to have been paid is settled - the money exists and
+     * must be booked - and the RuntimeException it then throws aborts the
+     * caller, because the bill is no longer in the state the caller assumed.
+     * An unreachable bank also aborts (fail-closed): voiding an invoice the
+     * bank may already have collected is how money disappears.
      */
-    public function recordManual(
-        Bill $bill,
-        float $amount,
-        string $method,
-        User $actor,
-        ?Guardian $payer = null,
-        ?string $notes = null,
-    ): Payment {
-        if (! $bill->isOpen()) {
-            throw new RuntimeException('Tagihan ini sudah lunas atau ditutup.');
-        }
+    public function voidPendingPaymentsFor(Bill $bill, string $reason): void
+    {
+        $paymentIds = PaymentAllocation::where('bill_id', $bill->id)
+            ->pluck('payment_id')
+            ->unique();
 
-        if ($amount <= 0 || $amount > (float) $bill->remaining_amount) {
-            throw new RuntimeException('Jumlah pembayaran melebihi sisa tagihan.');
-        }
+        Payment::whereIn('id', $paymentIds)
+            ->whereIn('status', ['pending', 'processing'])
+            ->get()
+            ->each(function (Payment $pending) use ($reason) {
+                if ($this->gateway instanceof BillingApiGateway) {
+                    $this->settleStaleIfAlreadyPaid($pending);
+                }
 
-        $payment = Payment::create([
-            'payment_number' => Payment::generateNumber(),
-            'payer_guardian_id' => $payer?->id,
-            'amount' => round($amount, 2),
-            'method' => $method,
-            'status' => 'pending',
-            'recorded_by' => $actor->id,
-            'verified_by' => $actor->id,
-            'verified_at' => now(),
-            'verification_notes' => $notes,
-        ]);
-
-        $this->allocator->allocate($payment, [$bill->id => round($amount, 2)]);
-        $this->allocator->settle($payment);
-
-        return $payment->fresh();
+                $this->failAndExpire($pending, $reason);
+            });
     }
 }

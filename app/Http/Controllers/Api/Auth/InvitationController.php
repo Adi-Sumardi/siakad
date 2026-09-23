@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\AccountInvitation;
 use App\Models\ActivityLog;
+use App\Models\StaffProfile;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -54,6 +55,11 @@ class InvitationController extends Controller
      * they control the address the school has on file, which is the same thing
      * a code checks, so the account is marked activated here and the session
      * starts immediately.
+     *
+     * A reset invitation goes one step further: the link was sent to a NEW
+     * contact the old one could not reach, so opening it proves that contact -
+     * and it is written onto the account (plus the guardian/staff mirrors)
+     * before the session starts.
      */
     public function activate(Request $request, string $token): JsonResponse
     {
@@ -68,20 +74,48 @@ class InvitationController extends Controller
         $user = $invitation->user;
 
         DB::transaction(function () use ($invitation, $user) {
+            if ($invitation->purpose === 'reset') {
+                // The encrypted cast keeps phone_hash (blind index) in step on
+                // write, which is exactly what OTP lookup reads later.
+                if ($invitation->channel === 'email') {
+                    $user->email = $invitation->sent_to;
+                    $user->email_verified_at = now();
+                } else {
+                    $user->phone = $invitation->sent_to;
+                }
+
+                // The one-field-two-homes mirrors every other contact write
+                // (UserController::store): parents carry theirs on Guardian,
+                // staff on StaffProfile.
+                if ($user->role === 'orangtua' && $user->guardian) {
+                    $user->guardian->forceFill([
+                        $invitation->channel === 'email' ? 'email' : 'no_hp' => $invitation->sent_to,
+                    ])->save();
+                }
+            }
+
             $user->forceFill([
                 'activated_at' => now(),
-                'email_verified_at' => $user->email ? now() : null,
+                'email_verified_at' => $user->email ? ($user->email_verified_at ?? now()) : null,
                 'last_login_at' => now(),
             ])->save();
 
+            if ($invitation->purpose === 'reset' && $user->role === 'guru') {
+                StaffProfile::mirrorUserPhone($user);
+            }
+
             $invitation->markUsed();
 
-            ActivityLog::record($user, 'account.activated', $user, [
+            ActivityLog::record($user, $invitation->purpose === 'reset' ? 'account.contact_reset' : 'account.activated', $user, [
                 'channel' => $invitation->channel,
             ]);
         });
 
-        Auth::login($user, remember: true);
+        // Explicit session guard: an earlier auth:sanctum-authenticated
+        // request in the same process leaves the ambient default pointing at
+        // the (login-less) Sanctum request guard - the SPA session is what
+        // this lane always means, same explicitness as SessionController.
+        Auth::guard('web')->login($user, remember: true);
 
         // Only stateful (browser) requests carry a session; Sanctum adds the
         // session middleware from the frontend origin. Guarding it keeps a

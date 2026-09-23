@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\Api\Guru;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Guru\CompleteAttendanceSessionRequest;
+use App\Http\Requests\Guru\RevokeReasonRequest;
 use App\Models\ActivityLog;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\ClassSchedule;
 use App\Services\Attendance\AttendanceLedger;
 use App\Services\Attendance\AttendanceSessionService;
+use App\Services\Attendance\RotatingQrService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -28,11 +31,10 @@ class AttendanceSessionController extends Controller
             ->where('ulid', $scheduleUlid)
             ->firstOrFail();
 
-        // config('app.timezone') is UTC, not the Asia/Jakarta .env sets it to
-        // (config/app.php never reads the env var) - a bare Carbon::today()
-        // dates the session to the previous calendar day for the seven hours
-        // every morning (00:00-07:00 WIB) that fall on UTC's previous day,
-        // exactly when a teacher opens roll call for an early first period.
+        // Explicit Asia/Jakarta rather than relying on app.timezone (now
+        // env-read, default Jakarta): stays correct even if the env flips
+        // back to UTC, which used to date the session to the previous
+        // calendar day during 00:00-07:00 WIB.
         $session = $sessions->open($schedule, Carbon::today('Asia/Jakarta'), $request->user());
 
         ActivityLog::record($request->user(), 'attendance.session_opened', $session, [
@@ -45,7 +47,30 @@ class AttendanceSessionController extends Controller
                 'token' => $session->token,
                 'expires_at' => $session->expires_at,
             ],
-            'checkin_url' => rtrim((string) config('app.frontend_url'), '/').'/presensi/'.$session->token,
+            'checkin_path' => $this->checkinPath($session),
+        ]);
+    }
+
+    /**
+     * The roll-call screen's rotating code - the same HMAC window scheme the
+     * gate uses (RotatingQrService), scoped to this lesson session. A code
+     * scanned anywhere the teacher's screen is NOT visible is dead within a
+     * minute, so the session's static check-in URL stops being a shareable
+     * "absen dari kantin" credential: the URL gets you to the page, the
+     * rotating code gets you counted.
+     */
+    public function rotatingQr(Request $request, string $sessionUlid, RotatingQrService $qr): JsonResponse
+    {
+        $session = $this->ownSession($request, $sessionUlid);
+
+        if (! $session->isOpen()) {
+            return response()->json(['message' => 'Sesi presensi ini sudah ditutup.'], 410);
+        }
+
+        return response()->json([
+            'code' => $qr->code(RotatingQrService::lessonScope($session->ulid)),
+            'rotates_in' => $qr->secondsUntilRotation(),
+            'window_seconds' => RotatingQrService::WINDOW_SECONDS,
         ]);
     }
 
@@ -65,15 +90,15 @@ class AttendanceSessionController extends Controller
             // ClassSchedule::visibleTo(), so only a teacher already
             // authorized for this classroom sees it - the QR still needs to
             // survive a page reload without re-opening the session.
-            'checkin_url' => rtrim((string) config('app.frontend_url'), '/').'/presensi/'.$session->token,
+            'checkin_path' => $this->checkinPath($session),
             'students' => $sessions->roster($session),
         ]);
     }
 
     /** A teacher striking one self-service check-in they believe is wrong (someone else's NIS, or a no-show). */
-    public function revoke(Request $request, string $sessionUlid, string $recordUlid, AttendanceLedger $ledger): JsonResponse
+    public function revoke(RevokeReasonRequest $request, string $sessionUlid, string $recordUlid, AttendanceLedger $ledger): JsonResponse
     {
-        $validated = $request->validate(['reason' => 'required|string|max:500']);
+        $validated = $request->validated();
 
         $session = $this->ownSession($request, $sessionUlid);
 
@@ -92,14 +117,9 @@ class AttendanceSessionController extends Controller
     }
 
     /** Marks the rest of the roster (sick/permitted/unexcused, or a teacher-witnessed "hadir") and closes the session. */
-    public function complete(Request $request, string $sessionUlid, AttendanceLedger $ledger, AttendanceSessionService $sessions): JsonResponse
+    public function complete(CompleteAttendanceSessionRequest $request, string $sessionUlid, AttendanceLedger $ledger, AttendanceSessionService $sessions): JsonResponse
     {
-        $validated = $request->validate([
-            'records' => 'array|max:200',
-            'records.*.student_ulid' => 'required_with:records|string',
-            'records.*.status' => 'required_with:records|in:hadir,sakit,izin,alpa',
-            'records.*.description' => 'nullable|string|max:500',
-        ]);
+        $validated = $request->validated();
 
         $session = $this->ownSession($request, $sessionUlid);
 
@@ -134,7 +154,7 @@ class AttendanceSessionController extends Controller
             }
         }
 
-        $sessions->close($session, $ledger);
+        $sessions->close($session);
 
         ActivityLog::record($request->user(), 'attendance.session_completed', $session, [
             'manual_records' => $entries->count(),
@@ -154,5 +174,17 @@ class AttendanceSessionController extends Controller
             'classSchedule',
             fn ($q) => $q->visibleTo($request->user())->where('teacher_id', $request->user()->id)
         )->where('ulid', $sessionUlid)->firstOrFail();
+    }
+
+    /**
+     * Path-only on purpose: the server cannot know which origin reaches the
+     * frontend for a given caller (dev proxy, ngrok tunnel, production domain
+     * all differ), and an absolute URL baked from app.frontend_url produced
+     * dead QR codes in the 2026-09-15 tunnel test. Callers rebase this path
+     * onto their own origin - only they know it.
+     */
+    private function checkinPath(AttendanceSession $session): string
+    {
+        return '/presensi/'.$session->token;
     }
 }

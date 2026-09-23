@@ -25,23 +25,24 @@ function ActivationCard() {
   const token = params.get("token") ?? "";
 
   const [invitation, setInvitation] = useState<Invitation | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Checked before anything is clicked, so a guardian who opened an expired
-  // link is told immediately rather than after trying.
+  // "Tautan tidak lengkap" is a property of the URL, derived at render - the
+  // effect only ever writes state from async callbacks. Checked before
+  // anything is clicked, so a guardian who opened an expired link is told
+  // immediately rather than after trying.
+  const loadError = !token ? "Tautan aktivasi tidak lengkap." : fetchError;
+
   useEffect(() => {
-    if (!token) {
-      setLoadError("Tautan aktivasi tidak lengkap.");
-      return;
-    }
+    if (!token) return;
 
     api
       .get<Invitation>(`/api/invitations/${token}`)
       .then(setInvitation)
       .catch((err) =>
-        setLoadError(
+        setFetchError(
           err instanceof ApiError ? err.message : "Tidak dapat memeriksa tautan aktivasi.",
         ),
       );

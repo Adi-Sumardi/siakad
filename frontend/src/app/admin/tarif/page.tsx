@@ -5,16 +5,12 @@ import { toast } from "sonner";
 import {
   Building2,
   Calendar,
-  CheckCircle2,
   Download,
   Edit2,
   Filter,
   Layers,
   Plus,
   Power,
-  RefreshCw,
-  Search,
-  Sparkles,
   Trash2,
   UploadCloud,
   X,
@@ -25,7 +21,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, API_BASE } from "@/lib/api";
 import { rupiah } from "@/lib/format";
 import { useAuth } from "@/lib/auth/auth-context";
 
@@ -67,6 +63,17 @@ type Rate = {
 
 type Option = { ulid: string; code?: string; label?: string; year?: string; is_active?: boolean; starts_on?: string; ends_on?: string };
 
+type TermRow = {
+  ulid: string;
+  label: string;
+  is_active: boolean;
+  name: string;
+  academic_year_ulid: string | null;
+  academic_year: string | null;
+  starts_on: string | null;
+  ends_on: string | null;
+};
+
 const RECURRENCE_LABEL: Record<string, string> = {
   monthly: "Bulanan (SPP)",
   per_term: "Per Semester",
@@ -82,6 +89,14 @@ export default function FeeRatesPage() {
   const [rates, setRates] = useState<Rate[] | null>(null);
   const [units, setUnits] = useState<Option[]>([]);
   const [years, setYears] = useState<Option[]>([]);
+
+  // A unit admin manages exactly one rate themselves: their own unit's
+  // Cambridge nominal (school decision 2026-09-22 - each unit prices it
+  // differently). Every other rate stays a central-admin decision, so all
+  // write affordances below funnel through canManageType().
+  const cambridgeType = feeTypes?.find((t) => t.code === "cambridge") ?? null;
+  const myUnit = user?.school_unit ?? null;
+  const canManageType = (code: string) => isCentral || code === "cambridge";
 
   // Filters
   const [filterUnit, setFilterUnit] = useState<string>("");
@@ -143,41 +158,60 @@ export default function FeeRatesPage() {
   const [newYearStarts, setNewYearStarts] = useState("2027-07-01");
   const [newYearEnds, setNewYearEnds] = useState("2028-06-30");
 
+  // Semester (term) management - the December/July flip lives next to the
+  // year it belongs to. Loading only while the modal is open keeps the
+  // page's initial payload unchanged.
+  const [terms, setTerms] = useState<TermRow[]>([]);
+  const [newTermYear, setNewTermYear] = useState("");
+  const [newTermName, setNewTermName] = useState("ganjil");
+  const [newTermStarts, setNewTermStarts] = useState("");
+  const [newTermEnds, setNewTermEnds] = useState("");
+
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ message: string; imported: number; updated: number; errors: string[] } | null>(null);
 
-  const loadData = useCallback(async () => {
-    try {
-      const queryParams = new URLSearchParams();
-      if (filterUnit) queryParams.set("unit", filterUnit);
-      if (filterType) queryParams.set("type", filterType);
-      if (filterYear) queryParams.set("year", filterYear);
+  // .then() chains (not async/await) so setState only ever runs in an async
+  // callback - the effect below calls this synchronously, and awaiting first
+  // still trips react-hooks/set-state-in-effect's analysis.
+  const loadData = useCallback(() => {
+    const queryParams = new URLSearchParams();
+    if (filterUnit) queryParams.set("unit", filterUnit);
+    if (filterType) queryParams.set("type", filterType);
+    if (filterYear) queryParams.set("year", filterYear);
 
-      const [ftRes, rRes, uRes, yRes] = await Promise.all([
-        api.get<{ fee_types: FeeType[] }>("/api/admin/fee-types"),
-        api.get<{ rates: Rate[] }>(`/api/admin/fee-rates?${queryParams.toString()}`),
-        api.get<{ school_units: Option[] }>("/api/admin/school-units"),
-        api.get<{ academic_years: Option[] }>("/api/admin/academic-years"),
-      ]);
+    Promise.all([
+      api.get<{ fee_types: FeeType[] }>("/api/admin/fee-types"),
+      api.get<{ rates: Rate[] }>(`/api/admin/fee-rates?${queryParams.toString()}`),
+      api.get<{ school_units: Option[] }>("/api/admin/school-units"),
+      api.get<{ academic_years: Option[] }>("/api/admin/academic-years"),
+    ])
+      .then(([ftRes, rRes, uRes, yRes]) => {
+        setFeeTypes(ftRes.fee_types);
+        setRates(rRes.rates);
+        setUnits(uRes.school_units);
+        setYears(yRes.academic_years);
 
-      setFeeTypes(ftRes.fee_types);
-      setRates(rRes.rates);
-      setUnits(uRes.school_units);
-      setYears(yRes.academic_years);
-
-      if (ftRes.fee_types.length > 0 && !rateForm.fee_type_ulid) {
-        setRateForm((f) => ({
-          ...f,
-          fee_type_ulid: ftRes.fee_types[0].ulid,
-          school_unit_ulid: uRes.school_units[0]?.ulid ?? "",
-          academic_year_ulid: yRes.academic_years.find((y) => y.is_active)?.ulid ?? yRes.academic_years[0]?.ulid ?? "",
-        }));
-      }
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Gagal memuat data tarif.");
-    }
-  }, [filterUnit, filterType, filterYear, rateForm.fee_type_ulid]);
+        if (ftRes.fee_types.length > 0 && !rateForm.fee_type_ulid) {
+          // A unit admin's only writable rate is their unit's Cambridge - the
+          // form opens pre-locked to it so a submit can never name anything
+          // the API would refuse.
+          setRateForm((f) => ({
+            ...f,
+            fee_type_ulid: isCentral
+              ? ftRes.fee_types[0].ulid
+              : ftRes.fee_types.find((t) => t.code === "cambridge")?.ulid ?? "",
+            school_unit_ulid: isCentral
+              ? uRes.school_units[0]?.ulid ?? ""
+              : user?.school_unit?.ulid ?? uRes.school_units[0]?.ulid ?? "",
+            academic_year_ulid: yRes.academic_years.find((y) => y.is_active)?.ulid ?? yRes.academic_years[0]?.ulid ?? "",
+          }));
+        }
+      })
+      .catch((err) => {
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat data tarif.");
+      });
+  }, [filterUnit, filterType, filterYear, rateForm.fee_type_ulid, isCentral, user?.school_unit?.ulid]);
 
   useEffect(() => {
     loadData();
@@ -275,6 +309,45 @@ export default function FeeRatesPage() {
       loadData();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal mengaktifkan tahun ajaran.");
+    }
+  }
+
+  async function loadTerms() {
+    const d = await api.get<{ terms: TermRow[] }>("/api/admin/terms");
+    setTerms(d.terms);
+    setNewTermYear((prev) => prev
+      || d.terms.find((t) => t.is_active)?.academic_year_ulid
+      || years.find((y) => y.is_active)?.ulid
+      || "");
+    return d.terms;
+  }
+
+  async function handleCreateTerm(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      await api.post("/api/admin/terms", {
+        academic_year_ulid: newTermYear,
+        name: newTermName,
+        starts_on: newTermStarts,
+        ends_on: newTermEnds,
+      });
+      toast.success(`Semester ${newTermName} berhasil ditambahkan.`);
+      await loadTerms();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal menambahkan semester.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleActivateTerm(termUlid: string, termLabel: string) {
+    try {
+      await api.post(`/api/admin/terms/${termUlid}/activate`);
+      toast.success(`Semester ${termLabel} kini aktif — semester lain otomatis dinonaktifkan.`);
+      await loadTerms();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengaktifkan semester.");
     }
   }
 
@@ -388,6 +461,32 @@ export default function FeeRatesPage() {
     }
   }
 
+  // Download endpoints live on the API origin, so a plain <a href="/api/...">
+  // would hit Next.js itself and 404 in development. Fetch with the Sanctum
+  // session cookie and hand the browser a blob instead - same pattern as the
+  // bill PDF downloads.
+  async function downloadApiFile(path: string, filename: string) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+
+      if (!res.ok) {
+        throw new Error("Gagal mengunduh file. Pastikan sesi Anda masih aktif.");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh file.");
+    }
+  }
+
   async function handleImportTariff(e: React.FormEvent) {
     e.preventDefault();
     if (!importFile) {
@@ -431,16 +530,14 @@ export default function FeeRatesPage() {
     return true;
   });
 
-  if (!isCentral) {
-    return (
-      <Card className="p-6 text-sm text-muted-foreground">
-        Tarif hanya dikelola admin pusat — perubahan nominal tarif berlaku untuk penagihan seluruh unit sekolah.
-      </Card>
-    );
-  }
-
   return (
     <div className="space-y-6">
+      {!isCentral && (
+        <Card className="p-4 text-sm text-muted-foreground">
+          Tarif dikelola admin pusat — satu-satunya yang bisa Anda atur di sini adalah nominal{" "}
+          <strong className="text-foreground">Cambridge</strong> untuk unit {myUnit?.label ?? "Anda"} sendiri.
+        </Card>
+      )}
       {/* Header section */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -451,32 +548,45 @@ export default function FeeRatesPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            onClick={() => setShowYearModal(true)}
-            variant="outline"
-            size="sm"
-            className="gap-1.5 font-semibold text-xs h-9"
-          >
-            <Calendar className="size-4 text-primary" />
-            <span>Kelola Tahun Ajaran</span>
-          </Button>
+          {isCentral && (
+            <>
+              <Button
+                onClick={() => {
+                  setShowYearModal(true);
+                  loadTerms().catch(() => toast.error("Gagal memuat daftar semester."));
+                }}
+                variant="outline"
+                size="sm"
+                className="gap-1.5 font-semibold text-xs h-9"
+              >
+                <Calendar className="size-4 text-primary" />
+                <span>Kelola Tahun Ajaran</span>
+              </Button>
 
-          <Button
-            onClick={() => {
-              setImportFile(null);
-              setImportResult(null);
-              setShowImportModal(true);
-            }}
-            variant="outline"
-            size="sm"
-            className="gap-1.5 font-semibold text-xs h-9"
-          >
-            <UploadCloud className="size-4 text-primary" />
-            <span>Import Tarif SPP (CSV)</span>
-          </Button>
+              <Button
+                onClick={() => {
+                  setImportFile(null);
+                  setImportResult(null);
+                  setShowImportModal(true);
+                }}
+                variant="outline"
+                size="sm"
+                className="gap-1.5 font-semibold text-xs h-9"
+              >
+                <UploadCloud className="size-4 text-primary" />
+                <span>Import Tarif SPP (CSV)</span>
+              </Button>
+            </>
+          )}
 
           {activeTab === "rates" ? (
-            <Button onClick={() => setShowRateModal(true)} size="sm" className="gap-1.5 font-bold text-xs h-9 shadow-xs">
+            <Button
+              onClick={() => setShowRateModal(true)}
+              size="sm"
+              className="gap-1.5 font-bold text-xs h-9 shadow-xs"
+              disabled={!isCentral && !cambridgeType}
+              title={!isCentral && !cambridgeType ? "Jenis biaya Cambridge belum tersedia." : undefined}
+            >
               <Plus className="size-4" />
               <span>Tambah Tarif Baru</span>
             </Button>
@@ -496,7 +606,7 @@ export default function FeeRatesPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Tarif Terpasang</span>
             <Building2 className="size-5 text-primary" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{rates?.length ?? <Skeleton className="h-8 w-16" />}</p>
+          <div className="mt-2 text-2xl font-bold">{rates?.length ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Kombinasi unit, kelas & tahun ajaran</p>
         </Card>
 
@@ -505,7 +615,7 @@ export default function FeeRatesPage() {
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Master Jenis Biaya</span>
             <Layers className="size-5 text-indigo-600" />
           </div>
-          <p className="mt-2 text-2xl font-bold">{feeTypes?.length ?? <Skeleton className="h-8 w-16" />}</p>
+          <div className="mt-2 text-2xl font-bold">{feeTypes?.length ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Kategori tagihan (SPP, Gedung, Seragam, dll)</p>
         </Card>
 
@@ -533,16 +643,18 @@ export default function FeeRatesPage() {
         >
           Daftar Tarif Berlaku ({rates?.length ?? 0})
         </button>
-        <button
-          onClick={() => setActiveTab("types")}
-          className={`pb-3 text-sm font-semibold border-b-2 transition-all ${
-            activeTab === "types"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Master Jenis Biaya ({feeTypes?.length ?? 0})
-        </button>
+        {isCentral && (
+          <button
+            onClick={() => setActiveTab("types")}
+            className={`pb-3 text-sm font-semibold border-b-2 transition-all ${
+              activeTab === "types"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Master Jenis Biaya ({feeTypes?.length ?? 0})
+          </button>
+        )}
       </div>
 
       {/* TAB 1: TARIF BERLAKU */}
@@ -568,16 +680,18 @@ export default function FeeRatesPage() {
               ))}
             </select>
 
-            <select
-              value={filterUnit}
-              onChange={(e) => setFilterUnit(e.target.value)}
-              className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-2xs"
-            >
-              <option value="">Semua Unit Sekolah</option>
-              {units.map((u) => (
-                <option key={u.ulid} value={u.code}>{u.label}</option>
-              ))}
-            </select>
+            {isCentral && (
+              <select
+                value={filterUnit}
+                onChange={(e) => setFilterUnit(e.target.value)}
+                className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-2xs"
+              >
+                <option value="">Semua Unit Sekolah</option>
+                {units.map((u) => (
+                  <option key={u.ulid} value={u.code}>{u.label}</option>
+                ))}
+              </select>
+            )}
 
             <select
               value={filterType}
@@ -602,20 +716,20 @@ export default function FeeRatesPage() {
                     <th className="px-5 py-3.5">Tahun Ajaran</th>
                     <th className="px-5 py-3.5">Jatuh Tempo</th>
                     <th className="px-5 py-3.5 text-right">Nominal Tagihan</th>
-                    {isCentral && <th className="px-5 py-3.5 text-right">Aksi</th>}
+                    <th className="px-5 py-3.5 text-right">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {rates === null && (
                     <tr>
-                      <td colSpan={isCentral ? 7 : 6} className="p-6 text-center text-muted-foreground">
+                      <td colSpan={7} className="p-6 text-center text-muted-foreground">
                         Memuat data tarif...
                       </td>
                     </tr>
                   )}
                   {filteredRates?.length === 0 && (
                     <tr>
-                      <td colSpan={isCentral ? 7 : 6} className="p-8 text-center text-muted-foreground">
+                      <td colSpan={7} className="p-8 text-center text-muted-foreground">
                         Tidak ada tarif yang sesuai filter.
                       </td>
                     </tr>
@@ -639,8 +753,8 @@ export default function FeeRatesPage() {
                       <td className="px-5 py-4 text-right">
                         <span className="font-bold text-primary text-sm font-mono">{rupiah(r.amount)}</span>
                       </td>
-                      {isCentral && (
-                        <td className="px-5 py-4 text-right">
+                      <td className="px-5 py-4 text-right">
+                        {canManageType(r.fee_type.code) ? (
                           <div className="flex items-center justify-end gap-1.5">
                             <Button
                               size="sm"
@@ -656,12 +770,16 @@ export default function FeeRatesPage() {
                               <Edit2 className="size-3.5" />
                               <span>Edit</span>
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={() => { setDeletingRate(r); setDeleteConfirmInput(""); }} className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
-                              <Trash2 className="size-3.5" />
-                            </Button>
+                            {isCentral && (
+                              <Button size="sm" variant="ghost" onClick={() => { setDeletingRate(r); setDeleteConfirmInput(""); }} className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
+                                <Trash2 className="size-3.5" />
+                              </Button>
+                            )}
                           </div>
-                        </td>
-                      )}
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground">Admin pusat</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -838,6 +956,95 @@ export default function FeeRatesPage() {
                 </Button>
               </div>
             </form>
+
+            {/* KELOLA SEMESTER - pergantian semester (Desember/Juli) tanpa menyentuh database */}
+            <div className="border-t border-border pt-4 space-y-3 text-xs">
+              <p className="font-bold text-foreground">Kelola Semester:</p>
+              <p className="text-[11px] text-muted-foreground -mt-2">
+                Hanya satu semester boleh aktif — mengaktifkan satu otomatis menonaktifkan lainnya. Semua input nilai,
+                poin, dan presensi tercatat di semester aktif.
+              </p>
+
+              <div className="space-y-2 max-h-56 overflow-y-auto">
+                {terms.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground italic">Belum ada semester terdaftar.</p>
+                )}
+                {terms.map((t) => (
+                  <div
+                    key={t.ulid}
+                    className={`flex items-center justify-between p-3 rounded-xl border transition-colors ${
+                      t.is_active ? "border-primary bg-primary/10" : "border-border bg-card"
+                    }`}
+                  >
+                    <div>
+                      <p className="font-bold text-sm text-foreground flex items-center gap-2">
+                        <span>{t.label}</span>
+                        {t.is_active && <Badge variant="primary" className="text-[10px]">Aktif</Badge>}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {t.starts_on || "?"} s/d {t.ends_on || "?"}
+                      </p>
+                    </div>
+
+                    {!t.is_active && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleActivateTerm(t.ulid, t.label)}
+                        className="text-xs font-semibold h-8"
+                      >
+                        Jadikan Aktif
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <form onSubmit={handleCreateTerm} className="space-y-3 pt-1">
+                <p className="font-semibold text-foreground">Tambah Semester Baru:</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Tahun Ajaran</Label>
+                    <select
+                      value={newTermYear}
+                      onChange={(e) => setNewTermYear(e.target.value)}
+                      required
+                      className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Pilih tahun ajaran…</option>
+                      {years.map((y) => (
+                        <option key={y.ulid} value={y.ulid}>TA {y.year}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Nama Semester</Label>
+                    <Input
+                      value={newTermName}
+                      onChange={(e) => setNewTermName(e.target.value)}
+                      placeholder="ganjil / genap"
+                      required
+                      className="mt-1"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Tanggal Mulai</Label>
+                    <Input type="date" value={newTermStarts} onChange={(e) => setNewTermStarts(e.target.value)} required className="mt-1" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Tanggal Selesai</Label>
+                    <Input type="date" value={newTermEnds} onChange={(e) => setNewTermEnds(e.target.value)} required className="mt-1" />
+                  </div>
+                </div>
+                <div className="flex justify-end pt-1">
+                  <Button type="submit" disabled={submitting} className="font-bold shadow-xs">
+                    {submitting ? "Menyimpan…" : "Simpan Semester"}
+                  </Button>
+                </div>
+              </form>
+            </div>
           </Card>
         </div>
       )}
@@ -858,13 +1065,21 @@ export default function FeeRatesPage() {
                   id="rate_fee_type"
                   value={rateForm.fee_type_ulid}
                   onChange={(e) => setRateForm({ ...rateForm, fee_type_ulid: e.target.value })}
+                  disabled={!isCentral}
                   required
-                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-xs"
+                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-xs disabled:opacity-70"
                 >
-                  {feeTypes?.map((t) => (
-                    <option key={t.ulid} value={t.ulid}>{t.name} ({t.code})</option>
-                  ))}
+                  {!isCentral
+                    ? cambridgeType && <option value={cambridgeType.ulid}>{cambridgeType.name} ({cambridgeType.code})</option>
+                    : feeTypes?.map((t) => (
+                        <option key={t.ulid} value={t.ulid}>{t.name} ({t.code})</option>
+                      ))}
                 </select>
+                {!isCentral && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Admin unit hanya bisa mengatur jenis biaya Cambridge untuk unitnya sendiri.
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -874,12 +1089,15 @@ export default function FeeRatesPage() {
                     id="rate_unit"
                     value={rateForm.school_unit_ulid}
                     onChange={(e) => setRateForm({ ...rateForm, school_unit_ulid: e.target.value })}
+                    disabled={!isCentral}
                     required
-                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-xs"
+                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-semibold shadow-xs disabled:opacity-70"
                   >
-                    {units.map((u) => (
-                      <option key={u.ulid} value={u.ulid}>{u.label}</option>
-                    ))}
+                    {units
+                      .filter((u) => isCentral || u.ulid === myUnit?.ulid)
+                      .map((u) => (
+                        <option key={u.ulid} value={u.ulid}>{u.label}</option>
+                      ))}
                   </select>
                 </div>
                 <div>
@@ -1180,16 +1398,16 @@ export default function FeeRatesPage() {
             <div className="bg-primary/5 border border-primary/20 rounded-xl p-3.5 text-xs text-muted-foreground space-y-2">
               <p className="font-semibold text-foreground">Format Spreadsheet yang Didukung:</p>
               <p>
-                File .CSV dengan kolom: <code>fee_type_code</code> (contoh: <code>spp</code>, <code>uang_gedung</code>), <code>unit_code</code> (contoh: <code>sd</code>, <code>smp</code>), <code>tingkat</code> (1-12 atau kosong untuk semua tingkat), <code>academic_year</code> (contoh: <code>2027/2028</code>), <code>amount</code> (nominal angka), <code>due_day</code> (tgl jatuh tempo).
+                File .CSV dengan kolom: <code>fee_type_code</code> (contoh: <code>spp</code>, <code>uang_gedung</code>), <code>unit_code</code> (kode satu unit spesifik, bukan jenjang — valid: {units.filter((u) => u.code).map((u) => u.code).join(", ")}), <code>tingkat</code> (1-12 atau kosong untuk semua tingkat), <code>academic_year</code> (contoh: <code>2027/2028</code>), <code>amount</code> (nominal angka), <code>due_day</code> (tgl jatuh tempo).
               </p>
-              <a
-                href="/api/admin/import/fee-rates/template"
-                download
+              <button
+                type="button"
+                onClick={() => downloadApiFile("/api/admin/import/fee-rates/template", "template_import_tarif_siakad.csv")}
                 className="inline-flex items-center gap-1.5 font-bold text-primary hover:underline pt-1"
               >
                 <Download className="size-3.5" />
                 <span>Unduh Format Template CSV Tarif SPP</span>
-              </a>
+              </button>
             </div>
 
             <form onSubmit={handleImportTariff} className="space-y-4 text-xs">

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,12 +96,77 @@ function NewRuleForm({ units, isCentral, onCreated }: { units: Unit[]; isCentral
   );
 }
 
+function EditRuleForm({ rule, onSaved, onCancel }: { rule: Rule; onSaved: () => void; onCancel: () => void }) {
+  const [name, setName] = useState(rule.name);
+  const [category, setCategory] = useState(rule.category);
+  const [points, setPoints] = useState(String(rule.points));
+  const [requiresEvidence, setRequiresEvidence] = useState(rule.requires_evidence);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      await api.patch(`/api/admin/point-rules/${rule.ulid}`, {
+        name, category, points: Number(points), requires_evidence: requiresEvidence,
+      });
+      toast.success("Aturan diperbarui.");
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Gagal menyimpan perubahan.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex w-full flex-wrap items-end gap-3">
+      {/* Kode & jenis stay fixed: the code is the catalogue key, and the type's
+          sign was copied into every ledger row that ever used this rule (D6). */}
+      <div className="flex flex-col gap-1.5">
+        <Label>Kode</Label>
+        <Input value={rule.code} disabled className="w-28" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label>Jenis</Label>
+        <select value={rule.type} disabled className="h-10 rounded-lg border border-input bg-card px-3 text-sm">
+          <option value="violation">Pelanggaran</option>
+          <option value="merit">Penghargaan</option>
+        </select>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label>Nama</Label>
+        <Input value={name} onChange={(e) => setName(e.target.value)} required className="w-56" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label>Kategori</Label>
+        <Input value={category} onChange={(e) => setCategory(e.target.value)} required className="w-36" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label>Poin</Label>
+        <Input value={points} onChange={(e) => setPoints(e.target.value)} type="number" min={1} max={200} required className="w-24" />
+      </div>
+      <label className="flex items-center gap-2 pb-2.5 text-sm">
+        <input type="checkbox" checked={requiresEvidence} onChange={(e) => setRequiresEvidence(e.target.checked)} />
+        Wajib bukti
+      </label>
+      <Button type="submit" disabled={submitting}>{submitting ? "Menyimpan…" : "Simpan"}</Button>
+      <Button type="button" variant="ghost" onClick={onCancel}>Batal</Button>
+      {error && <p className="w-full rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">{error}</p>}
+    </form>
+  );
+}
+
 export default function PointRulesPage() {
   const { user } = useAuth();
   const isCentral = user?.role === "admin";
 
   const [rules, setRules] = useState<Rule[] | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
+  const [editingUlid, setEditingUlid] = useState<string | null>(null);
 
   function load() {
     api
@@ -159,24 +224,46 @@ export default function PointRulesPage() {
         {rules === null && <Skeleton className="h-40 w-full" />}
         {rules?.map((rule) => (
           <Card key={rule.ulid} className={`flex flex-wrap items-center justify-between gap-3 p-4 ${!rule.is_active ? "opacity-50" : ""}`}>
-            <div>
-              <p className="font-medium">{rule.name} <span className="text-xs text-muted-foreground">{rule.code}</span></p>
-              <p className="text-sm text-muted-foreground">
-                {rule.category} · {rule.school_unit ?? "Seluruh sekolah"}
-                {rule.requires_evidence && " · wajib bukti"}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant={rule.type === "violation" ? "bad" : "good"}>
-                {rule.type === "violation" ? "−" : "+"}{rule.points}
-              </Badge>
-              <Button size="sm" variant="ghost" onClick={() => toggleActive(rule)}>
-                {rule.is_active ? "Nonaktifkan" : "Aktifkan"}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => remove(rule)}>
-                <Trash2 className="size-4" />
-              </Button>
-            </div>
+            {editingUlid === rule.ulid ? (
+              <EditRuleForm
+                rule={rule}
+                onSaved={() => { setEditingUlid(null); load(); }}
+                onCancel={() => setEditingUlid(null)}
+              />
+            ) : (
+              <>
+                <div>
+                  <p className="font-medium">{rule.name} <span className="text-xs text-muted-foreground">{rule.code}</span></p>
+                  <p className="text-sm text-muted-foreground">
+                    {rule.category} · {rule.school_unit ?? "Seluruh sekolah"}
+                    {rule.requires_evidence && " · wajib bukti"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={rule.type === "violation" ? "bad" : "good"}>
+                    {rule.type === "violation" ? "−" : "+"}{rule.points}
+                  </Badge>
+                  {isCentral || rule.school_unit !== null ? (
+                    <>
+                      <Button size="sm" variant="ghost" onClick={() => setEditingUlid(rule.ulid)}>
+                        <Pencil className="size-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => toggleActive(rule)}>
+                        {rule.is_active ? "Nonaktifkan" : "Aktifkan"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => remove(rule)}>
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </>
+                  ) : (
+                    // School-wide rules are readable by every unit (their
+                    // teachers record with them) but only the central admin
+                    // may change them - the API answers 404 for unit admins.
+                    <span className="text-xs text-muted-foreground">Dikelola admin pusat</span>
+                  )}
+                </div>
+              </>
+            )}
           </Card>
         ))}
       </div>

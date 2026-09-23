@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Services\Billing\BillGenerator;
 use App\Services\Billing\CheckoutService;
 use App\Services\Billing\PaymentAllocator;
+use App\Services\Payment\BillingApiGateway;
 use App\Services\Payment\PaymentGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
@@ -429,16 +430,26 @@ class BillingTest extends TestCase
     public function test_a_part_payment_leaves_the_bill_partial(): void
     {
         $this->rate();
-        $this->student();
+        $student = $this->student();
+        $user = $this->guardianFor($student);
         $this->generator()->run($this->spp, $this->year, $this->unit, 8);
 
         $bill = Bill::first();
-        $admin = User::create([
-            'name' => 'Admin', 'email' => 'a@yapinet.id',
-            'role' => 'admin', 'is_active' => true, 'activated_at' => now(),
-        ]);
 
-        app(CheckoutService::class)->recordManual($bill, 200000, 'cash', $admin);
+        // Same pin as AdminBillingTest: the subject is the part payment's
+        // arithmetic, so the bill stays inside its due window no matter when
+        // the suite runs - a past-due partly-paid bill is 'overdue' now.
+        $bill->forceFill(['due_date' => now()->addDays(7)->startOfDay()])->save();
+
+        // Payment is VA-only now, so a part payment is a custom-amount VA
+        // checkout the bank then reports settled.
+        $payment = app(CheckoutService::class)->start(
+            $user,
+            [$bill->ulid],
+            'virtual_account',
+            [$bill->ulid => 200000],
+        );
+        app(PaymentAllocator::class)->settle($payment);
 
         $bill->refresh();
         $this->assertSame('partial', $bill->status);
@@ -460,9 +471,81 @@ class BillingTest extends TestCase
         $allocator->settle($payment);
         $allocator->settle($payment->fresh());
 
-        // Xendit retries; the balance must not move on the second delivery.
+        // The gateway retries; the balance must not move on the second delivery.
         $this->assertEquals(650000.0, (float) $bill->fresh()->paid_amount);
         $this->assertDatabaseCount('payment_allocations', 1);
+    }
+
+    public function test_a_settled_payment_receipts_the_family_exactly_once(): void
+    {
+        $this->rate();
+        $student = $this->student();
+        $user = $this->guardianFor($student);
+        $this->generator()->run($this->spp, $this->year, $this->unit, 8);
+
+        $bill = Bill::first();
+        $payment = app(CheckoutService::class)->start($user, [$bill->ulid], 'virtual_account');
+
+        // The gateway's callback can arrive twice - settle runs twice, the
+        // family is still receipted once (the guard is the NotificationLog
+        // row itself, not settle()'s own idempotency).
+        $allocator = app(PaymentAllocator::class);
+        $allocator->settle($payment, 'tx_retry_1');
+        $allocator->settle($payment->fresh(), 'tx_retry_2');
+
+        $this->assertSame('paid', $bill->fresh()->status);
+        $this->assertSame(
+            1,
+            \App\Models\NotificationLog::where('template', 'payment_receipt')->count(),
+            'a double-delivered callback must not receipt the family twice',
+        );
+        $this->assertDatabaseHas('notification_logs', [
+            'template' => 'payment_receipt',
+            'notifiable_type' => Payment::class,
+            'notifiable_id' => $payment->id,
+            'recipient' => $user->guardian->email,
+            'status' => 'sent',
+        ]);
+    }
+
+    public function test_checkout_with_an_unconfigured_billing_api_falls_back_to_a_simulated_va(): void
+    {
+        // The real gateway over setUp()'s network-free fake: with credentials
+        // unset this exact path crashed with "Too few arguments to
+        // BillingApiException::__construct()" (the credentials-missing throw
+        // passed no status code) instead of reaching the local-dev simulated
+        // VA fallback, so every checkout on a laptop without e-SPP keys 500'd.
+        config([
+            'services.billing_api.client_id' => null,
+            'services.billing_api.client_secret' => null,
+            'services.billing_api.username' => null,
+            'services.billing_api.password' => null,
+        ]);
+        $this->app->bind(PaymentGateway::class, fn () => app(BillingApiGateway::class));
+
+        $this->rate();
+        $student = $this->student();
+        $user = $this->guardianFor($student);
+        $this->generator()->run($this->spp, $this->year, $this->unit, 8);
+
+        $bill = Bill::first();
+
+        $response = $this->actingAs($user)->postJson('/api/wali/checkout', [
+            'bill_ulids' => [$bill->ulid],
+            'method' => 'virtual_account',
+            'bank' => 'bsi',
+        ]);
+
+        $response->assertCreated();
+        $payment = Payment::first();
+        $this->assertSame('processing', $payment->status);
+
+        $gateway = $payment->gateway_response;
+        $this->assertTrue((bool) $gateway['simulated']);
+        $this->assertSame('bank_bsi', $gateway['provider']);
+        // SPP @ BSI: prefix 365601 + academic year 2627 + 6-digit student id.
+        $this->assertMatchesRegularExpression('/^3656012627\d{6}$/', $gateway['va_number']);
+        $this->assertEquals(650000.0, (float) $gateway['amount']);
     }
 
     public function test_a_second_checkout_on_the_same_bill_supersedes_the_first(): void
@@ -485,7 +568,7 @@ class BillingTest extends TestCase
         $this->assertSame('processing', $second->fresh()->status);
 
         // If the family (or a late gateway callback) somehow settles both -
-        // two Xendit invoices, two transfers - the bill must not end up
+        // two bank invoices, two transfers - the bill must not end up
         // marked paid for more than it was ever owed.
         $allocator->settle($first->fresh());
         $allocator->settle($second->fresh());

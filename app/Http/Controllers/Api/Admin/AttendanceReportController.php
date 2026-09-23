@@ -3,34 +3,39 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\AttendanceRecord;
+use App\Http\Requests\Admin\DateRangeRequest;
+use App\Models\DailyRecord;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 
 class AttendanceReportController extends Controller
 {
-    /** H/S/I/A tallies over a date range, grouped by class and by subject - same shape as ReportController::collections(). */
-    public function summary(Request $request): JsonResponse
+    /**
+     * H/S/I/A tallies in DAYS over a date range, grouped by class and by
+     * unit - same shape as ReportController::collections(). The daily layer
+     * is the official source (§8), so these are the same numbers the rapor
+     * and the watchlist quote; per-lesson detail stays on the teacher's
+     * session screens and has no place in a cross-unit report. Masuk windows
+     * only - a pulang row is the same day told twice.
+     */
+    public function summary(DateRangeRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'from' => 'nullable|date',
-            'to' => 'nullable|date|after_or_equal:from',
-        ]);
+        $validated = $request->validated();
 
         $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : now()->startOfMonth();
         $to = isset($validated['to']) ? Carbon::parse($validated['to'])->endOfDay() : now()->endOfDay();
 
-        $records = AttendanceRecord::query()
+        $records = DailyRecord::query()
             ->visibleTo($request->user())
             ->active()
-            // occurred_on is stored with a time component even though it's
-            // conceptually date-only (Eloquent's `date` cast writes a full
-            // datetime string) - bound the range with real timestamps, not
-            // date-only strings, or a record on the last day of the range
-            // would sort after it and get silently excluded.
-            ->whereBetween('occurred_on', [$from, $to])
-            ->with(['classroom', 'attendanceSession.classSchedule.subject'])
+            ->whereHas('dailySession', fn ($q) => $q->where('type', 'masuk'))
+            // date may store a midnight time component depending on the
+            // driver (the occurred_on lesson the per-lesson report learned);
+            // bound with full start/end-of-day timestamps, never bare date
+            // strings, or the range's last day falls out.
+            ->whereBetween('date', [$from, $to])
+            ->with(['classroom', 'dailySession.schoolUnit'])
             ->get();
 
         $tally = fn ($group) => [
@@ -41,14 +46,14 @@ class AttendanceReportController extends Controller
         ];
 
         $byClass = $records
-            ->groupBy(fn (AttendanceRecord $r) => $r->classroom->name ?? 'Tanpa kelas')
+            ->groupBy(fn (DailyRecord $r) => $r->classroom?->name ?? 'Tanpa kelas')
             ->map(fn ($group, $kelas) => ['kelas' => $kelas, ...$tally($group)])
             ->sortByDesc('alpa')
             ->values();
 
-        $bySubject = $records
-            ->groupBy(fn (AttendanceRecord $r) => $r->attendanceSession?->classSchedule?->subject?->name ?? 'Tanpa mata pelajaran')
-            ->map(fn ($group, $mapel) => ['mata_pelajaran' => $mapel, ...$tally($group)])
+        $byUnit = $records
+            ->groupBy(fn (DailyRecord $r) => $r->dailySession?->schoolUnit?->label ?? 'Tanpa unit')
+            ->map(fn ($group, $unit) => ['unit' => $unit, ...$tally($group)])
             ->sortByDesc('alpa')
             ->values();
 
@@ -56,7 +61,7 @@ class AttendanceReportController extends Controller
             'period' => ['from' => $from->toDateString(), 'to' => $to->toDateString()],
             'summary' => ['total_records' => $records->count(), ...$tally($records)],
             'by_class' => $byClass,
-            'by_subject' => $bySubject,
+            'by_unit' => $byUnit,
         ]);
     }
 }

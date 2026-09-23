@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StorePointRuleRequest;
+use App\Http\Requests\Admin\UpdatePointRuleRequest;
 use App\Models\ActivityLog;
 use App\Models\PointRule;
 use App\Models\SchoolUnit;
@@ -42,18 +44,9 @@ class PointRuleController extends Controller
         ]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StorePointRuleRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'school_unit_code' => 'nullable|exists:school_units,code',
-            'code' => 'required|string|max:32|alpha_dash',
-            'name' => 'required|string|max:120',
-            'type' => 'required|in:violation,merit',
-            'category' => 'required|string|max:60',
-            'points' => 'required|integer|min:1|max:200',
-            'requires_evidence' => 'boolean',
-            'sort_order' => 'integer',
-        ]);
+        $validated = $request->validated();
 
         $unit = $this->resolveUnit($request, $validated['school_unit_code'] ?? null);
 
@@ -86,18 +79,11 @@ class PointRuleController extends Controller
         return response()->json(['rule' => $rule], 201);
     }
 
-    public function update(Request $request, PointRule $pointRule): JsonResponse
+    public function update(UpdatePointRuleRequest $request, PointRule $pointRule): JsonResponse
     {
         $this->authoriseScope($request, $pointRule);
 
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:120',
-            'category' => 'sometimes|string|max:60',
-            'points' => 'sometimes|integer|min:1|max:200',
-            'requires_evidence' => 'boolean',
-            'is_active' => 'boolean',
-            'sort_order' => 'integer',
-        ]);
+        $validated = $request->validated();
 
         $pointRule->update($validated);
 

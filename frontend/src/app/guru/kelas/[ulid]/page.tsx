@@ -1,9 +1,9 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, ChevronDown, ChevronUp, Sparkles, UserCheck, Users } from "lucide-react";
+import { ArrowLeft, CalendarCheck, Check, ChevronDown, ChevronUp, ClipboardList, FileText, Loader2, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,13 +11,239 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError } from "@/lib/api";
+import { API_BASE, api, ApiError } from "@/lib/api";
 import { tanggal, todayJakarta } from "@/lib/format";
 import type { PointRecord } from "@/lib/types/kesiswaan";
 
 type StudentRow = { ulid: string; nama_lengkap: string; nis: string | null; point_balance: number | null };
 type Rule = { ulid: string; code: string; name: string; type: "violation" | "merit"; category: string; points: number; requires_evidence: boolean };
-type TodaySchedule = { ulid: string; subject: string; teacher: string | null; start_time: string; end_time: string };
+type TodaySchedule = {
+  ulid: string;
+  subject: string;
+  teacher: string | null;
+  is_mine: boolean;
+  status: "upcoming" | "ongoing" | "done";
+  start_time: string;
+  end_time: string;
+};
+
+const PERIOD_STATUS: Record<TodaySchedule["status"], { label: string; className: string }> = {
+  ongoing: { label: "Berlangsung", className: "bg-good/10 text-good" },
+  upcoming: { label: "Akan datang", className: "bg-muted text-muted-foreground" },
+  done: { label: "Selesai", className: "bg-muted/60 text-muted-foreground" },
+};
+type RecapRow = { ulid: string; nama_lengkap: string; nis: string | null; hadir: number; sakit: number; izin: number; alpa: number };
+type GradeSubject = { ulid: string; name: string };
+type GradeScore = { tugas: number | null; uts: number | null; uas: number | null; final: number | null };
+type GradeRow = { ulid: string; nama_lengkap: string; nis: string | null; scores: Record<string, GradeScore> };
+
+/**
+ * Class-wide H/S/I/A over a date range (the running term by default) - the
+ * "who keeps missing school" view the live session roster can never give,
+ * since that only ever shows one lesson period. Collapsed by default: this
+ * page's main job is recording, the recap is the occasional look back.
+ */
+function AttendanceRecapPanel({ classroomUlid }: { classroomUlid: string }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<{ period: { from: string; to: string }; students: RecapRow[] } | null>(null);
+  const [draftFrom, setDraftFrom] = useState("");
+  const [draftTo, setDraftTo] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  const load = useCallback(() => {
+    const params = new URLSearchParams();
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+
+    api
+      .get<{ period: { from: string; to: string }; students: RecapRow[] }>(
+        `/api/guru/classrooms/${classroomUlid}/attendance?${params}`
+      )
+      .then(setData)
+      .catch(() => setData({ period: { from: "", to: "" }, students: [] }));
+  }, [classroomUlid, from, to]);
+
+  useEffect(() => {
+    if (open) load();
+  }, [open, load]);
+
+  return (
+    <Card className="p-4">
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-2">
+        <h2 className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+          <CalendarCheck className="size-4" />
+          Rekap Presensi Kelas
+        </h2>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          {data && open && `${tanggal(data.period.from)} – ${tanggal(data.period.to)}`}
+          {open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-2 flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input value={draftFrom} onChange={(e) => setDraftFrom(e.target.value)} type="date" className="h-9 w-36 text-xs" aria-label="Dari tanggal" />
+            <Input value={draftTo} onChange={(e) => setDraftTo(e.target.value)} type="date" className="h-9 w-36 text-xs" aria-label="Sampai tanggal" />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 text-xs"
+              onClick={() => {
+                setFrom(draftFrom);
+                setTo(draftTo);
+              }}
+            >
+              Terapkan
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-9 text-xs"
+              onClick={() => {
+                setDraftFrom(""); setDraftTo(""); setFrom(""); setTo("");
+              }}
+            >
+              Reset
+            </Button>
+          </div>
+
+          {data === null && <Skeleton className="h-16 w-full rounded-xl" />}
+          {data?.students.length === 0 && (
+            <p className="text-xs text-muted-foreground">Belum ada siswa aktif di kelas ini.</p>
+          )}
+          {data?.students.map((s) => (
+            <div key={s.ulid} className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 p-2.5 text-xs">
+              <p className="min-w-0 truncate font-semibold text-foreground">{s.nama_lengkap}</p>
+              <p className="shrink-0 tabular text-muted-foreground">
+                H <span className="font-bold text-foreground">{s.hadir}</span>
+                {" · "}S {s.sakit}
+                {" · "}I {s.izin}
+                {" · "}A <span className={s.alpa > 0 ? "font-bold text-bad" : ""}>{s.alpa}</span>
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+const NO_SCORE: GradeScore = { tugas: null, uts: null, uas: null, final: null };
+
+/** 78,5 — Indonesian decimals, trailing zeros dropped, "—" for not entered yet. */
+function angka(n: number | null): string {
+  return n === null ? "—" : new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 }).format(n);
+}
+
+/**
+ * The whole-class grade matrix for the running term - every subject x every
+ * student, Tugas/UTS/UAS side by side with the weighted final (20/30/50, an
+ * assumption pending school confirmation). The entry screen only ever shows
+ * one category of one subject at a time, so without this panel there is no
+ * way to spot who still owes a UAS. A null "Akhir" is exactly that signal,
+ * never averaged over; the class average counts entered values only.
+ * Collapsed by default, same deal as the attendance recap above.
+ */
+function GradeRecapPanel({ classroomUlid }: { classroomUlid: string }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<{ subjects: GradeSubject[]; students: GradeRow[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [subject, setSubject] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    api
+      .get<{ classroom: { ulid: string; name: string }; subjects: GradeSubject[]; students: GradeRow[] }>(
+        `/api/guru/classrooms/${classroomUlid}/grades`
+      )
+      .then((d) => {
+        setData(d);
+        // Keep the chosen subject across reopens; only fall back to the
+        // first when it disappeared from the schedule.
+        if (!d.subjects.some((s) => s.ulid === subject)) setSubject(d.subjects[0]?.ulid ?? "");
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Gagal memuat rekap nilai."));
+  }, [open, classroomUlid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rows = data?.students ?? [];
+  const average = (pick: (s: GradeScore) => number | null): number | null => {
+    const nums = rows.map((r) => pick(r.scores[subject] ?? NO_SCORE)).filter((v): v is number => v !== null);
+    return nums.length === 0 ? null : nums.reduce((a, b) => a + b, 0) / nums.length;
+  };
+
+  return (
+    <Card className="p-4">
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-2">
+        <h2 className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+          <ClipboardList className="size-4" />
+          Rekap Nilai Kelas
+        </h2>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          {data && open && data.subjects.length > 0 && `${data.subjects.length} mapel · semester berjalan`}
+          {open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-2 flex flex-col gap-2">
+          {error && <p className="text-xs text-destructive">{error}</p>}
+
+          {data === null && !error && <Skeleton className="h-16 w-full rounded-xl" />}
+
+          {data && data.subjects.length === 0 && (
+            <p className="text-xs text-muted-foreground">Belum ada mata pelajaran terjadwal di kelas ini.</p>
+          )}
+
+          {data && data.subjects.length > 0 && (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {data.subjects.map((s) => (
+                  <button
+                    key={s.ulid}
+                    type="button"
+                    onClick={() => setSubject(s.ulid)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      subject === s.ulid ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+
+              {rows.length === 0 && <p className="text-xs text-muted-foreground">Belum ada siswa aktif di kelas ini.</p>}
+
+              {rows.map((r) => {
+                const s = r.scores[subject] ?? NO_SCORE;
+                return (
+                  <div key={r.ulid} className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 p-2.5 text-xs">
+                    <p className="min-w-0 truncate font-semibold text-foreground">{r.nama_lengkap}</p>
+                    <p className="shrink-0 tabular text-muted-foreground">
+                      T <span className="font-bold text-foreground">{angka(s.tugas)}</span>
+                      {" · "}UTS {angka(s.uts)}
+                      {" · "}UAS {angka(s.uas)}
+                      {" · "}<span className={s.final !== null ? "font-bold text-foreground" : ""}>Akhir {angka(s.final)}</span>
+                    </p>
+                  </div>
+                );
+              })}
+
+              {rows.length > 0 && (
+                <p className="rounded-lg border border-dashed border-border/70 p-2.5 text-xs text-muted-foreground">
+                  Rata-rata kelas: T {angka(average((s) => s.tugas))} · UTS {angka(average((s) => s.uts))} · UAS{" "}
+                  {angka(average((s) => s.uas))} · Akhir {angka(average((s) => s.final))}
+                  <span className="text-[10px]"> (dari nilai yang sudah diisi)</span>
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
   const router = useRouter();
@@ -25,10 +251,31 @@ function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
   const [opening, setOpening] = useState<string | null>(null);
 
   useEffect(() => {
-    api
-      .get<{ schedules: TodaySchedule[] }>(`/api/guru/classrooms/${classroomUlid}/schedules/today`)
-      .then((d) => setSchedules(d.schedules))
-      .catch(() => setSchedules([]));
+    let cancelled = false;
+
+    // Status chips are computed server-side at fetch time - without this
+    // refresh, a panel left open all morning keeps calling a 07:00 period
+    // "Akan datang" halfway through it. A minute is plenty: chips only ever
+    // move at bell times. A failed refresh keeps the previous list; only the
+    // initial load may land on the empty state.
+    const load = (initial: boolean) => {
+      api
+        .get<{ schedules: TodaySchedule[] }>(`/api/guru/classrooms/${classroomUlid}/schedules/today`)
+        .then((d) => {
+          if (!cancelled) setSchedules(d.schedules);
+        })
+        .catch(() => {
+          if (initial && !cancelled) setSchedules([]);
+        });
+    };
+
+    load(true);
+    const interval = setInterval(() => load(false), 60_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [classroomUlid]);
 
   async function openAttendance(scheduleUlid: string) {
@@ -43,7 +290,6 @@ function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
   }
 
   if (schedules === null) return <Skeleton className="h-14 w-full rounded-xl" />;
-  if (schedules.length === 0) return null;
 
   return (
     <Card className="p-4">
@@ -51,21 +297,60 @@ function TodaySchedulePanel({ classroomUlid }: { classroomUlid: string }) {
         <UserCheck className="size-4" />
         Jadwal Hari Ini
       </h2>
-      <div className="flex flex-col gap-2">
-        {schedules.map((s) => (
+      {/* Presensi per mapel dibuka dari sini - a panel that vanishes on
+          schedule-less days reads as "the feature is gone", not "no lessons
+          today" (a confusion the first field walkthrough hit for real). */}
+      {schedules.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Tidak ada jam pelajaran terjadwal untuk kelas ini hari ini — presensi mapel dibuka dari daftar jadwal di
+          panel ini.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+        {schedules.map((s) => {
+          const status = PERIOD_STATUS[s.status] ?? PERIOD_STATUS.upcoming;
+
+          return (
           <div key={s.ulid} className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 p-2.5">
             <div>
-              <p className="text-sm font-semibold">{s.subject}</p>
+              <p className="flex items-center gap-1.5 text-sm font-semibold">
+                {s.subject}
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${status.className}`}>
+                  {status.label}
+                </span>
+              </p>
               <p className="text-xs text-muted-foreground">
-                {s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)}{s.teacher ? ` · ${s.teacher}` : ""}
+                {s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)}{s.teacher ? ` · ${s.teacher}` : " · belum ada guru"}
               </p>
             </div>
-            <Button size="sm" onClick={() => openAttendance(s.ulid)} disabled={opening === s.ulid} className="text-xs">
-              {opening === s.ulid ? "Membuka…" : "Buka Presensi"}
-            </Button>
+            {s.is_mine ? (
+              // A finished period still opens - but as the manual-completion
+              // lane (mark the roster, no scan can land: the window is past),
+              // so it must not present itself as the primary action.
+              s.status === "done" ? (
+                <Button variant="outline" size="sm" onClick={() => openAttendance(s.ulid)} disabled={opening === s.ulid} className="text-xs">
+                  {opening === s.ulid ? "Membuka…" : "Lengkapi"}
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => openAttendance(s.ulid)} disabled={opening === s.ulid} className="text-xs">
+                  {opening === s.ulid ? "Membuka…" : "Buka Presensi"}
+                </Button>
+              )
+            ) : (
+              // Opening roll call is restricted to the assigned teacher
+              // (the API would reject anyone else with a 404), so periods
+              // taught by colleagues are listed for awareness only - and an
+              // UNASSIGNED period says so, because "bukan jadwal Anda" over
+              // a period nobody owns reads like a bug when it is a data gap.
+              <span className="shrink-0 text-[11px] text-muted-foreground">
+                {s.teacher ? "Bukan jadwal Anda" : "Belum ada guru"}
+              </span>
+            )}
           </div>
-        ))}
-      </div>
+          );
+        })}
+        </div>
+      )}
     </Card>
   );
 }
@@ -249,6 +534,34 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
   const [bulkDate, setBulkDate] = useState(todayJakarta());
   const [bulkDescription, setBulkDescription] = useState("");
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [raporLoading, setRaporLoading] = useState<string | null>(null);
+
+  /**
+   * The report card exactly as the guardian will receive it, for the running
+   * term - the "check before it reaches the family" the B.2 audit found
+   * missing. On-demand PDF, nothing is stored on either side.
+   */
+  async function downloadRapor(student: StudentRow) {
+    setRaporLoading(student.ulid);
+    try {
+      const res = await fetch(`${API_BASE}/api/guru/students/${student.ulid}/rapor`, { credentials: "include" });
+      if (!res.ok) throw new Error("Gagal mengunduh rapor.");
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Rapor-${student.nama_lengkap.replace(/\s+/g, "-")}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Gagal mengunduh rapor - mungkin belum ada semester aktif.");
+    } finally {
+      setRaporLoading(null);
+    }
+  }
 
   function load() {
     api
@@ -282,8 +595,6 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
       setSelected(new Set(students.map((s) => s.ulid)));
     }
   }
-
-  const bulkRuleData = rules.find((r) => r.ulid === bulkRule);
 
   async function submitBulk() {
     setBulkSubmitting(true);
@@ -345,6 +656,10 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
 
       <TodaySchedulePanel classroomUlid={ulid} />
 
+      <AttendanceRecapPanel classroomUlid={ulid} />
+
+      <GradeRecapPanel classroomUlid={ulid} />
+
       {students === null && (
         <div className="space-y-3">
           <Skeleton className="h-16 w-full rounded-xl" />
@@ -397,6 +712,15 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
                   >
                     Catat Poin
                   </Button>
+                  <button
+                    onClick={() => downloadRapor(student)}
+                    disabled={raporLoading === student.ulid}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    aria-label="Unduh rapor"
+                    title="Unduh rapor (semester berjalan)"
+                  >
+                    {raporLoading === student.ulid ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
+                  </button>
                   <button
                     onClick={() => {
                       setOpenLedger(openLedger === student.ulid ? null : student.ulid);

@@ -42,17 +42,17 @@ export const ATTENDANCE_STATUS_LABEL: Record<AttendanceStatus, string> = {
   alpa: "Alpa",
 };
 
+/** One row of the DAILY layer (T14): "was my child at school" per day, masuk/pulang windows. */
 export type AttendanceRecord = {
   ulid: string;
+  date: string;
+  type: "masuk" | "pulang" | null;
   attendance_status: AttendanceStatus;
-  occurred_on: string;
+  is_late: boolean;
   description: string | null;
-  source: "self" | "guru";
-  recorded_by: string | null;
+  checked_in_at: string | null;
   record_status: "recorded" | "revoked";
-  revoked_at: string | null;
   revoke_reason: string | null;
-  created_at: string;
 };
 
 export type AttendanceSummary = {
@@ -74,6 +74,7 @@ export type Subject = {
   school_unit: string | null;
   code: string;
   name: string;
+  is_active?: boolean;
 };
 
 export type ClassSchedule = {

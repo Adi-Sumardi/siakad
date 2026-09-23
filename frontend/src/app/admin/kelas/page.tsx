@@ -79,7 +79,7 @@ function NewClassroomForm({
       </div>
       <div className="flex flex-col gap-1.5">
         <Label>Tingkat</Label>
-        <Input type="number" min={1} max={12} value={tingkat} onChange={(e) => setTingkat(e.target.value)} required className="w-20" />
+        <Input type="number" min={0} max={12} value={tingkat} onChange={(e) => setTingkat(e.target.value)} required className="w-20" />
       </div>
       {isCentral && (
         <div className="flex flex-col gap-1.5">
@@ -140,8 +140,11 @@ export default function KelasPage() {
     api.get<{ users: { data: TeacherOption[] } }>("/api/admin/users?role=guru&per_page=200").then((d) => setTeachers(d.users.data));
   }, []);
 
+  // No reset-to-null before the fetch: `classrooms === null` IS the first
+  // load, so changing the year filter keeps the previous rows on screen
+  // instead of flashing a skeleton - and nothing ever calls setState
+  // synchronously in the effect below.
   function loadClassrooms(yearUlid: string) {
-    setClassrooms(null);
     const query = yearUlid ? `?academic_year_ulid=${yearUlid}` : "";
     api.get<{ classrooms: ClassroomRow[] }>(`/api/admin/classrooms${query}`)
       .then((d) => setClassrooms(d.classrooms))
@@ -314,7 +317,7 @@ export default function KelasPage() {
                 </div>
                 <div>
                   <Label className="text-xs">Tingkat</Label>
-                  <Input type="number" min={1} max={12} value={editForm.tingkat} onChange={(e) => setEditForm((f) => ({ ...f, tingkat: e.target.value }))} required className="mt-1" />
+                  <Input type="number" min={0} max={12} value={editForm.tingkat} onChange={(e) => setEditForm((f) => ({ ...f, tingkat: e.target.value }))} required className="mt-1" />
                 </div>
               </div>
               <div>
