@@ -8,6 +8,8 @@ use App\Models\Guardian;
 use App\Models\NotificationLog;
 use App\Models\Payment;
 use App\Models\PaymentAllocation;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -18,10 +20,12 @@ use Throwable;
  * as BillReminderSender::queueSppReminderTemplate() (every other fee type
  * has no approved template yet).
  *
- * One message per bill, not per payment: a single payment can settle several
- * bills at once (a parent paying two months of SPP together), and each gets
- * its own "bulan {{2}}" line - sending one combined message would need a
- * template this app doesn't have.
+ * One message per student, not per bill: a single payment can settle several
+ * months of SPP at once (a parent catching up on back payments), and
+ * periodLabel() collapses those into one "bulan {{2}}" line - either the one
+ * month it actually is, or a range/list when there's more than one - rather
+ * than firing a separate WhatsApp message per bill, which read as spam for
+ * what the parent experienced as a single payment.
  */
 class PaymentReceiptSender
 {
@@ -33,39 +37,44 @@ class PaymentReceiptSender
             return;
         }
 
-        $allocations = PaymentAllocation::where('payment_id', $payment->id)
+        $sppAllocations = PaymentAllocation::where('payment_id', $payment->id)
             ->with(['bill.feeType', 'bill.student.guardians'])
-            ->get();
+            ->get()
+            ->filter(fn (PaymentAllocation $allocation) => $allocation->bill && $allocation->bill->feeType?->code === 'spp');
 
-        foreach ($allocations as $allocation) {
-            $bill = $allocation->bill;
+        // Bills for different students can in principle share one payment on
+        // non-VA channels (VA-based checkouts are already restricted to a
+        // single student - see CheckoutService::assertSingleVaGroupInBasket()) -
+        // grouped so one sibling's months never leak into another's receipt.
+        $byStudent = $sppAllocations->groupBy(fn (PaymentAllocation $allocation) => $allocation->bill->student_id);
 
-            if (! $bill || $bill->feeType?->code !== 'spp') {
-                continue;
-            }
-
+        foreach ($byStudent as $studentAllocations) {
             try {
-                $this->sendForBill($payment, $bill, (float) $allocation->amount, $templateId);
+                $this->sendForStudent($payment, $studentAllocations, $templateId);
             } catch (Throwable $e) {
                 // A receipt that fails to send must never undo the payment it
                 // is confirming - settle() has already recorded the money.
                 Log::warning('[PaymentReceiptSender] Failed to send receipt', [
                     'payment' => $payment->payment_number,
-                    'bill' => $bill->bill_number,
                     'error' => $e->getMessage(),
                 ]);
             }
         }
     }
 
-    private function sendForBill(Payment $payment, Bill $bill, float $amount, string $templateId): void
+    /** @param  Collection<int, PaymentAllocation>  $allocations  All of one student's SPP allocations from this payment. */
+    private function sendForStudent(Payment $payment, Collection $allocations, string $templateId): void
     {
+        $bills = $allocations->map(fn (PaymentAllocation $a) => $a->bill);
+        $bill = $bills->first();
+        $amount = (float) $allocations->sum('amount');
+
         $guardian = $this->billingContactFor($bill);
         $phone = $guardian?->no_hp;
 
         if (! $guardian || ! $phone) {
             Log::warning('[PaymentReceiptSender] No WhatsApp-reachable billing contact for receipt', [
-                'bill' => $bill->bill_number,
+                'bill_ids' => $bills->pluck('id')->all(),
             ]);
 
             return;
@@ -74,7 +83,7 @@ class PaymentReceiptSender
         $qontakPhone = '62'.substr((string) $phone, 1);
         $bankName = $payment->gateway_response['bank_name'] ?? null;
         $method = $bankName ? "VA {$bankName}" : ucfirst(str_replace('_', ' ', (string) $payment->method));
-        $period = $bill->issued_at?->translatedFormat('F Y') ?? $bill->due_date->translatedFormat('F Y');
+        $period = $this->periodLabel($bills);
         $paidAt = $payment->paid_at?->translatedFormat('d F Y, H.i') ?? now()->translatedFormat('d F Y, H.i');
 
         NotificationLog::create([
@@ -88,6 +97,7 @@ class PaymentReceiptSender
                 'paid_at' => $paidAt,
                 'method' => $method,
                 'reference' => $payment->payment_number,
+                'bill_ids' => $bills->pluck('id')->all(),
             ],
             'status' => 'queued',
             'notifiable_type' => Bill::class,
@@ -107,6 +117,48 @@ class PaymentReceiptSender
                 $payment->payment_number,
             ],
         );
+    }
+
+    /**
+     * One month: "Agustus 2026". Several consecutive months (the common
+     * back-payment case): "Agustus - Oktober 2026". Anything with a gap in
+     * between (paid August and November but skipped the months between,
+     * unusual but not impossible): every month named, so nothing paid goes
+     * unmentioned.
+     *
+     * @param  Collection<int, Bill>  $bills
+     */
+    private function periodLabel(Collection $bills): string
+    {
+        $months = $bills
+            ->map(fn (Bill $bill) => ($bill->issued_at ?? $bill->due_date)->copy()->startOfMonth())
+            ->unique(fn (Carbon $date) => $date->format('Y-m'))
+            ->sortBy(fn (Carbon $date) => $date->format('Y-m'))
+            ->values();
+
+        if ($months->count() === 1) {
+            return $months->first()->translatedFormat('F Y');
+        }
+
+        $contiguous = true;
+
+        for ($i = 1; $i < $months->count(); $i++) {
+            if (! $months[$i]->isSameMonth($months[$i - 1]->copy()->addMonthNoOverflow())) {
+                $contiguous = false;
+                break;
+            }
+        }
+
+        $first = $months->first();
+        $last = $months->last();
+
+        if ($contiguous) {
+            return $first->year === $last->year
+                ? $first->translatedFormat('F').' - '.$last->translatedFormat('F Y')
+                : $first->translatedFormat('F Y').' - '.$last->translatedFormat('F Y');
+        }
+
+        return $months->map(fn (Carbon $date) => $date->translatedFormat('F Y'))->implode(', ');
     }
 
     /** Same fallback chain as BillReminderSender::billingContactFor(). */

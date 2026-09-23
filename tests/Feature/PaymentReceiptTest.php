@@ -15,6 +15,7 @@ use App\Services\Billing\PaymentAllocator;
 use App\Services\Notification\NotificationResult;
 use App\Services\Notification\QontakWhatsAppGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 /**
@@ -66,7 +67,7 @@ class PaymentReceiptTest extends TestCase
         ]);
     }
 
-    private function billFor(Student $student, string $description = 'SPP Agustus 2026', float $amount = 650000): Bill
+    private function billFor(Student $student, string $description = 'SPP Agustus 2026', float $amount = 650000, ?Carbon $issuedAt = null): Bill
     {
         $bill = Bill::create([
             'bill_number' => 'SPP/'.uniqid(),
@@ -84,7 +85,7 @@ class PaymentReceiptTest extends TestCase
             'status' => 'unpaid',
             'due_date' => now()->addDays(10),
             'allow_installment' => false,
-            'issued_at' => now(),
+            'issued_at' => $issuedAt ?? now(),
         ]);
 
         $student->guardians()->syncWithoutDetaching([
@@ -134,6 +135,7 @@ class PaymentReceiptTest extends TestCase
         $this->assertSame('6281234567890', $sent['phone']);
         $this->assertSame('receipt-template-uuid', $sent['templateId']);
         $this->assertSame('Aisyah Nur Ramadhani', $sent['bodyValues'][0]);
+        $this->assertSame($bill->fresh()->issued_at->translatedFormat('F Y'), $sent['bodyValues'][1]);
         $this->assertSame('650.000', $sent['bodyValues'][2]);
         $this->assertSame('VA Bank Muamalat', $sent['bodyValues'][4]);
         $this->assertSame('PAY/20260821/ABCDEF', $sent['bodyValues'][5]);
@@ -144,18 +146,19 @@ class PaymentReceiptTest extends TestCase
         $this->assertSame($bill->id, $log->notifiable_id);
     }
 
-    public function test_a_payment_covering_two_bills_sends_one_receipt_per_bill(): void
+    public function test_a_payment_covering_several_consecutive_months_sends_one_consolidated_receipt(): void
     {
         config(['services.qontak.spp_receipt_template_id' => 'receipt-template-uuid']);
 
         $student = $this->studentNamed('Fulan Abdurrahman');
-        $august = $this->billFor($student, 'SPP Agustus 2026', 650000);
-        $september = $this->billFor($student, 'SPP September 2026', 650000);
+        $august = $this->billFor($student, 'SPP Agustus 2026', 650000, Carbon::create(2026, 8, 15));
+        $september = $this->billFor($student, 'SPP September 2026', 650000, Carbon::create(2026, 9, 15));
+        $october = $this->billFor($student, 'SPP Oktober 2026', 650000, Carbon::create(2026, 10, 15));
 
         $payment = Payment::create([
             'payment_number' => 'PAY/20260822/GHIJKL',
             'payer_guardian_id' => $this->guardian->id,
-            'amount' => 1300000,
+            'amount' => 1950000,
             'method' => 'virtual_account',
             'channel' => 'billing_api',
             'status' => 'pending',
@@ -164,11 +167,73 @@ class PaymentReceiptTest extends TestCase
 
         PaymentAllocation::create(['payment_id' => $payment->id, 'bill_id' => $august->id, 'amount' => 650000]);
         PaymentAllocation::create(['payment_id' => $payment->id, 'bill_id' => $september->id, 'amount' => 650000]);
+        PaymentAllocation::create(['payment_id' => $payment->id, 'bill_id' => $october->id, 'amount' => 650000]);
 
         app(PaymentAllocator::class)->settle($payment, 'tx_test_2');
 
-        $this->assertCount(2, $this->sentQontakTemplates);
-        $this->assertSame(2, NotificationLog::where('template', 'receipt_spp_school')->count());
+        // One WhatsApp message for the whole payment, not three - a parent
+        // catching up on three months of SPP at once should not get three
+        // back-to-back notifications for what was, to them, one payment.
+        $this->assertCount(1, $this->sentQontakTemplates);
+        $this->assertSame(1, NotificationLog::where('template', 'receipt_spp_school')->count());
+
+        $sent = $this->sentQontakTemplates[0];
+        $this->assertSame('Agustus - Oktober 2026', $sent['bodyValues'][1]);
+        $this->assertSame('1.950.000', $sent['bodyValues'][2]);
+
+        $log = NotificationLog::where('template', 'receipt_spp_school')->first();
+        $this->assertSame([$august->id, $september->id, $october->id], $log->payload['bill_ids']);
+    }
+
+    public function test_a_single_month_payment_shows_just_that_month_not_a_range(): void
+    {
+        config(['services.qontak.spp_receipt_template_id' => 'receipt-template-uuid']);
+
+        $student = $this->studentNamed('Satu Bulan Saja');
+        $bill = $this->billFor($student, 'SPP September 2026', 650000, Carbon::create(2026, 9, 15));
+
+        $payment = Payment::create([
+            'payment_number' => 'PAY/20260826/EFGHIJ',
+            'payer_guardian_id' => $this->guardian->id,
+            'amount' => 650000,
+            'method' => 'virtual_account',
+            'channel' => 'billing_api',
+            'status' => 'pending',
+            'gateway_response' => ['bank_name' => 'Bank Muamalat'],
+        ]);
+
+        PaymentAllocation::create(['payment_id' => $payment->id, 'bill_id' => $bill->id, 'amount' => 650000]);
+
+        app(PaymentAllocator::class)->settle($payment, 'tx_test_6');
+
+        $this->assertCount(1, $this->sentQontakTemplates);
+        $this->assertSame('September 2026', $this->sentQontakTemplates[0]['bodyValues'][1]);
+    }
+
+    public function test_non_consecutive_months_are_listed_instead_of_ranged(): void
+    {
+        config(['services.qontak.spp_receipt_template_id' => 'receipt-template-uuid']);
+
+        $student = $this->studentNamed('Bayar Loncat Bulan');
+        $august = $this->billFor($student, 'SPP Agustus 2026', 650000, Carbon::create(2026, 8, 15));
+        // September is deliberately skipped - a gap, not a range.
+        $november = $this->billFor($student, 'SPP November 2026', 650000, Carbon::create(2026, 11, 15));
+
+        $payment = Payment::create([
+            'payment_number' => 'PAY/20260827/KLMNOP',
+            'payer_guardian_id' => $this->guardian->id,
+            'amount' => 1300000,
+            'method' => 'virtual_account',
+            'channel' => 'billing_api',
+            'status' => 'pending',
+        ]);
+
+        PaymentAllocation::create(['payment_id' => $payment->id, 'bill_id' => $august->id, 'amount' => 650000]);
+        PaymentAllocation::create(['payment_id' => $payment->id, 'bill_id' => $november->id, 'amount' => 650000]);
+
+        app(PaymentAllocator::class)->settle($payment, 'tx_test_7');
+
+        $this->assertSame('Agustus 2026, November 2026', $this->sentQontakTemplates[0]['bodyValues'][1]);
     }
 
     public function test_a_non_spp_bill_gets_no_receipt(): void
