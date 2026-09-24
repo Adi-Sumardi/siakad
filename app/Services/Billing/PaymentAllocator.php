@@ -79,11 +79,17 @@ class PaymentAllocator
         }
 
         DB::transaction(function () use ($payment, $externalId, $gatewayResponse) {
+            // Merged, never replaced (audit T38-b): the webhook and poller
+            // payloads carry verification data but not va_number/bank_name,
+            // and a wholesale overwrite dropped those keys - every receipt
+            // surface then fell back to the internal payment_number instead
+            // of the VA, the exact drift ad095e closed. Passing keys win,
+            // everything already recorded survives.
             $payment->forceFill([
                 'status' => 'completed',
                 'paid_at' => $payment->paid_at ?? now(),
                 'external_transaction_id' => $externalId ?? $payment->external_transaction_id,
-                'gateway_response' => $gatewayResponse ?: $payment->gateway_response,
+                'gateway_response' => array_merge($payment->gateway_response ?? [], $gatewayResponse),
             ])->save();
         });
 

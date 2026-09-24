@@ -17,7 +17,9 @@ use Illuminate\Support\Facades\Schedule;
 Schedule::command('bills:generate --type=spp')
     ->monthlyOn(1, '00:30')
     ->name('generate-monthly-spp')
-    ->withoutOverlapping()
+    // Bounded, not the 24h default (audit T38-e): a run killed mid-flight
+    // would otherwise park its mutex for a full day.
+    ->withoutOverlapping(10)
     ->description('Terbitkan SPP bulan berjalan untuk siswa aktif');
 
 // After the generator, so a bill issued today is never marked late on the same
@@ -33,7 +35,10 @@ Schedule::command('bills:mark-overdue')
 Schedule::command('bills:send-reminders')
     ->dailyAt('07:00')
     ->name('send-bill-reminders')
-    ->withoutOverlapping()
+    // Bounded (audit T38-e): a run killed at 07:05 used to hold the mutex
+    // until 07:05 the NEXT day - and an H-1 beat that fires daily can never
+    // catch up, that reminder is simply lost forever.
+    ->withoutOverlapping(10)
     ->description('Pengingat jatuh tempo H-7, H-1, dan H+3');
 
 // Keeps the unit master in step with PMB. Daily is often enough: units change
@@ -42,7 +47,8 @@ Schedule::command('bills:send-reminders')
 Schedule::command('units:sync')
     ->dailyAt('03:00')
     ->name('sync-school-units')
-    ->withoutOverlapping()
+    // Bounded (audit T38-e), same reason as the two above.
+    ->withoutOverlapping(10)
     ->description('Sinkronkan master unit dari PMB');
 
 // Polling status Virtual Account Bank Muamalat (e-SPP)

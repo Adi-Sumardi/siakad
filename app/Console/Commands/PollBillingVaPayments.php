@@ -114,7 +114,11 @@ class PollBillingVaPayments extends Command
                     ->orWhereNotNull('gateway_response->va_number');
             })
             ->where('expires_at', '>', now()->subDays(7))
-            ->limit((int) $this->option('limit'))
+            // Same guard as the pending query above (audit T38-a): the
+            // default --limit=0 means "unbounded", and a bare ->limit(0)
+            // compiles to LIMIT 0 - which returned nothing and silently kept
+            // this safety net from ever running on the scheduler.
+            ->when($limit > 0, fn ($q) => $q->limit($limit))
             ->get();
 
         foreach ($superseded as $payment) {

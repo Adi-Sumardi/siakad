@@ -79,8 +79,15 @@ class BillingApiClient
      * config key (va_prefixes.{fee_code}) is the escape hatch once e-SPP
      * confirms a real prefix.
      */
-    /** Fee types whose e-SPP VA ranges PMB issues; Siakad never mints them. */
-    public const PMB_OWNED_FEE_TYPES = ['uang_pangkal', 'pendaftaran', 'registration_fee'];
+    /**
+     * Fee-type fragments whose e-SPP VA ranges PMB issues; Siakad never
+     * mints them. Fragments, not exact codes (audit T38-c): the fallback
+     * mapping in resolvePrefix() matches by str_contains, so a code like
+     * "uang-pangkal", "biaya_pendaftaran" or a plain "formulir" slipped
+     * straight past the old exact-match list and minted a VA inside PMB's
+     * live ranges.
+     */
+    public const PMB_OWNED_FEE_FRAGMENTS = ['pangkal', 'pendaftaran', 'formulir', 'registr'];
 
     public static function resolvePrefix(string $feeTypeCode, ?SchoolUnit $unit = null, string $bank = 'muamalat'): ?string
     {
@@ -91,8 +98,12 @@ class BillingApiClient
         // and a VA is prefix + year + the app's own student id - two id
         // spaces. A Siakad bill under PMB's prefix could mint the very number
         // a different PMB child is paying uang pangkal / formulir into.
-        if (in_array($normalizedFee, self::PMB_OWNED_FEE_TYPES, true)) {
-            return null;
+        // Substring refusal so no admin-invented spelling of the same fee
+        // can sneak under PMB's prefixes (audit T38-c).
+        foreach (self::PMB_OWNED_FEE_FRAGMENTS as $fragment) {
+            if (str_contains($normalizedFee, $fragment)) {
+                return null;
+            }
         }
 
         $explicit = (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.{$normalizedFee}", '');

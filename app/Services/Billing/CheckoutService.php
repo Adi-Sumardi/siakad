@@ -90,16 +90,22 @@ class CheckoutService
         // the SPP prefix) silently collided with the student's SPP VA.
         $this->assertVaPrefixAvailable($bills, $selectedBank);
 
-        // Compute per-bill charge amount (either custom amount or remaining balance)
+        // Compute per-bill charge amount (either custom amount or remaining balance).
+        // Whole rupiah end to end (audit T38-d): Indonesian VA rails carry no
+        // cents, and the webhook compares e-SPP's registered amount against
+        // ours with a 0.01 tolerance - a cents-bearing charge (percentage
+        // discounts can produce one) permanently tripped "Amount mismatch"
+        // and deferred every such settlement to the poller. The charge is
+        // rounded, not just the registration, so all three sides agree.
         $allocations = [];
         $amount = 0.0;
 
         foreach ($bills as $bill) {
-            $remaining = (float) $bill->remaining_amount;
+            $remaining = round((float) $bill->remaining_amount);
             $charge = $remaining;
 
             if (isset($customAmounts[$bill->ulid])) {
-                $custom = round((float) $customAmounts[$bill->ulid], 2);
+                $custom = round((float) $customAmounts[$bill->ulid]);
                 if ($custom <= 0) {
                     throw new RuntimeException("Nominal kustom untuk tagihan '{$bill->description}' harus lebih dari 0.");
                 }

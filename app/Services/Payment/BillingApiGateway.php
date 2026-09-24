@@ -91,7 +91,12 @@ class BillingApiGateway implements PaymentGateway
                     'customer_name' => $customerName,
                     'va_desc' => BillingApiClient::sanitizeDescription($description),
                     'va_desc1' => BillingApiClient::sanitizeDescription($student->schoolUnit?->label ?? '', 255),
-                    'jumlah_tagihan' => (int) $payment->amount,
+                    // Whole rupiah, properly rounded (audit T38-d): (int)
+                    // truncated 500.99 down to 500, which itself disagrees
+                    // with payment->amount; the checkout now rounds charges,
+                    // this keeps registrations honest for payments created
+                    // before that or by other lanes.
+                    'jumlah_tagihan' => (int) round((float) $payment->amount),
                     'date_start' => now()->toDateString(),
                     'date_end' => $dueDate->toDateString(),
                     'priority' => '1',
