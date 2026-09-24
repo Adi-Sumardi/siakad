@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\AccountInvitation;
 use App\Models\ActivityLog;
+use App\Models\LoginOtp;
 use App\Models\StaffProfile;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -100,12 +101,55 @@ class InvitationController extends Controller
                     $user->phone = $invitation->sent_to;
                 }
 
+                // THE PROMISE, DELIVERED (audit T50): the invitation told the
+                // guardian this new contact "menjadi satu-satunya cara masuk
+                // akun Anda" - four leftovers used to break that, all revoked
+                // here in the same transaction:
+                //
+                // 1. The OTHER channel stops resolving for login. A phone
+                //    stolen then reset via a new email must never receive an
+                //    OTP for this account again. The hash column is nulled
+                //    explicitly - setAttribute() skips hash-sync on null, so
+                //    a stale blind index would keep matching lookups.
+                if ($invitation->channel === 'email') {
+                    $user->phone = null;
+                    $user->phone_hash = null;
+                } else {
+                    $user->email = null;
+                    $user->email_verified_at = null;
+                }
+
+                // 2. Every other live invitation (either purpose) dies with
+                //    this one - an activation link mailed earlier to the OLD
+                //    contact was a still-working login credential for up to
+                //    its 7-day TTL. (This invitation is already claimed
+                //    above, so whereNull('used_at') excludes it.)
+                AccountInvitation::query()
+                    ->where('user_id', $user->id)
+                    ->whereNull('used_at')
+                    ->update(['used_at' => now()]);
+
+                // 3. Codes already issued to the old identifiers are spent.
+                LoginOtp::query()
+                    ->where('user_id', $user->id)
+                    ->whereNull('consumed_at')
+                    ->update(['consumed_at' => now()]);
+
+                // 4. Open sessions die: a thief holding the stolen device
+                //    kept a live remember-me session straight through the
+                //    reset otherwise. (The login below then starts a FRESH
+                //    session for the legitimate holder.) The remember token
+                //    itself is cleared in the forceFill further down.
+                DB::table('sessions')->where('user_id', $user->id)->delete();
+
                 // The one-field-two-homes mirrors every other contact write
                 // (UserController::store): parents carry theirs on Guardian,
-                // staff on StaffProfile.
+                // staff on StaffProfile - and the revoked channel's mirror is
+                // cleared too, so reminders stop reaching the dead contact.
                 if ($user->role === 'orangtua' && $user->guardian) {
                     $user->guardian->forceFill([
-                        $invitation->channel === 'email' ? 'email' : 'no_hp' => $invitation->sent_to,
+                        ($invitation->channel === 'email' ? 'email' : 'no_hp') => $invitation->sent_to,
+                        ($invitation->channel === 'email' ? 'no_hp' : 'email') => null,
                     ])->save();
                 }
             }
@@ -114,6 +158,8 @@ class InvitationController extends Controller
                 'activated_at' => now(),
                 'email_verified_at' => $user->email ? ($user->email_verified_at ?? now()) : null,
                 'last_login_at' => now(),
+                // T50: the remember token belongs to the pre-reset world.
+                'remember_token' => null,
             ])->save();
 
             if ($invitation->purpose === 'reset' && $user->role === 'guru') {
