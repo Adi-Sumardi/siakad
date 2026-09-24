@@ -8,6 +8,7 @@ use App\Models\IntegrationEvent;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\User;
+use App\Services\Notification\PhoneNumberFormatter;
 use App\Services\Security\FieldEncrypter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -145,6 +146,20 @@ class PmbHandoffProcessor
         $billingAssigned = false;
 
         foreach ($guardians as $data) {
+            // Normalised once, at the door (audit T52): PMB sends whatever
+            // the registration form captured - "+62…", "62…", mixed-case
+            // email. Every lookup below rides the blind-index hash of the
+            // normalised form, so a raw value missed the existing
+            // guardian/user and minted duplicates (then died on
+            // guardians.user_id), and reminders later dialled "6262812…".
+            if (! empty($data['no_hp'])) {
+                $data['no_hp'] = PhoneNumberFormatter::toWhatsAppFormat($data['no_hp']) ?? $data['no_hp'];
+            }
+
+            if (! empty($data['email'])) {
+                $data['email'] = mb_strtolower(trim($data['email']));
+            }
+
             $guardian = $this->findGuardian($data) ?? new Guardian;
 
             $guardian->fill([

@@ -12,6 +12,7 @@ use App\Models\SchoolUnit;
 use App\Models\StaffProfile;
 use App\Models\User;
 use App\Services\Handoff\AccountInvitationSender;
+use App\Services\Notification\PhoneNumberFormatter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -116,6 +117,34 @@ class UserController extends Controller
             return response()->json(['message' => 'Email atau Nomor HP/WhatsApp harus diisi untuk proses autentikasi OTP.'], 422);
         }
 
+        // Normalised once, at the door (audit T52): login and reset hash the
+        // normalised identifier, so an account stored as "+62 812…" or
+        // "Budi@X.com" can never be found again - locked out with no visible
+        // error anywhere. Same treatment importUsers() already gives its rows.
+        if (! empty($validated['email'])) {
+            $validated['email'] = mb_strtolower(trim($validated['email']));
+        }
+
+        if (! empty($validated['phone'])) {
+            $normalised = PhoneNumberFormatter::toWhatsAppFormat($validated['phone']);
+
+            if (! $normalised) {
+                return response()->json(['message' => 'Nomor HP tidak dikenali - isi dengan format 08xxxxxxxxxx.'], 422);
+            }
+
+            $validated['phone'] = $normalised;
+        }
+
+        // Duplicate guard on the phone (audit T52): without it an admin could
+        // mint a second account with a number another account already owns -
+        // one identifier then resolves to two accounts and the OTP lane's
+        // latest() quietly decides who logs in. Phone is ciphertext, so the
+        // blind index is the only lookup; email uniqueness is already the
+        // request's unique rule.
+        if (! empty($validated['phone']) && User::findByEncrypted('phone', $validated['phone'])) {
+            return response()->json(['message' => 'Nomor HP sudah dipakai akun lain - satu nomor hanya boleh satu akun.'], 422);
+        }
+
         $unit = ! empty($validated['school_unit_ulid'])
             ? SchoolUnit::where('ulid', $validated['school_unit_ulid'])->first()
             : null;
@@ -160,6 +189,30 @@ class UserController extends Controller
     {
         $validated = $request->validated();
 
+        // Same normalisation as store() (audit T52): an edited contact that
+        // skips it diverges from the form OTP hashes and becomes unreachable.
+        if (! empty($validated['email'])) {
+            $validated['email'] = mb_strtolower(trim($validated['email']));
+        }
+
+        if (! empty($validated['phone'])) {
+            $normalised = PhoneNumberFormatter::toWhatsAppFormat($validated['phone']);
+
+            if (! $normalised) {
+                return response()->json(['message' => 'Nomor HP tidak dikenali - isi dengan format 08xxxxxxxxxx.'], 422);
+            }
+
+            $validated['phone'] = $normalised;
+        }
+
+        if (! empty($validated['phone'])) {
+            $existing = User::findByEncrypted('phone', $validated['phone']);
+
+            if ($existing && $existing->id !== $user->id) {
+                return response()->json(['message' => 'Nomor HP sudah dipakai akun lain - satu nomor hanya boleh satu akun.'], 422);
+            }
+        }
+
         if (array_key_exists('school_unit_ulid', $validated)) {
             $unit = ! empty($validated['school_unit_ulid'])
                 ? SchoolUnit::where('ulid', $validated['school_unit_ulid'])->first()
@@ -181,6 +234,15 @@ class UserController extends Controller
         // "untouched", not "cleared".
         if (array_key_exists('phone', $validated)) {
             StaffProfile::mirrorUserPhone($user);
+        }
+
+        // The guardian's email mirror too (audit T52-d): users.email and
+        // guardians.email are one fact in two homes, and a stale mirror made
+        // the next PMB handoff miss the existing guardian, mint a second one,
+        // then die on the guardians.user_id unique index after five retries.
+        // The encrypted cast keeps email_hash in step on write.
+        if (array_key_exists('email', $validated) && $user->role === 'orangtua' && $user->guardian) {
+            $user->guardian->forceFill(['email' => $user->email])->save();
         }
 
         ActivityLog::record($request->user(), 'user.updated', $user, $validated);

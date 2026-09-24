@@ -42,10 +42,6 @@ class AchievementController extends Controller
 
         $achievement = Achievement::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
-        if (! $achievement->isPending()) {
-            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
-        }
-
         // Term::current() depends on an admin-managed is_active flag, not a
         // date range - right after a semester ends this is routinely null
         // until someone activates the next term. Silently verifying without
@@ -62,22 +58,38 @@ class AchievementController extends Controller
         // One transaction: a point-award failure must not leave the
         // achievement marked verified with nothing to show for it - the
         // admin would see an error, retry, and be told "sudah diputuskan
-        // sebelumnya" for a request that never actually succeeded.
+        // sebelumnya" for a request that never actually succeeded. The
+        // status flip inside is an ATOMIC CLAIM (audit T52): two admins
+        // clicking verify at the same moment must not both award points -
+        // only the update that still finds status='pending' proceeds.
         try {
-            DB::transaction(function () use ($achievement, $validated, $request, $ledger) {
-                $achievement->forceFill([
-                    'status' => 'verified',
-                    'verified_by' => $request->user()->id,
-                    'verified_at' => now(),
-                ])->save();
+            $decided = DB::transaction(function () use ($achievement, $validated, $request, $ledger) {
+                $claimed = Achievement::query()
+                    ->whereKey($achievement->id)
+                    ->where('status', 'pending')
+                    ->update([
+                        'status' => 'verified',
+                        'verified_by' => $request->user()->id,
+                        'verified_at' => now(),
+                    ]);
+
+                if ($claimed === 0) {
+                    return false;
+                }
 
                 if (! empty($validated['points_awarded'])) {
                     $ledger->awardForAchievement($achievement, Term::current(), $request->user(), (int) $validated['points_awarded']);
                     $achievement->forceFill(['point_awarded' => $validated['points_awarded']])->save();
                 }
+
+                return true;
             });
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        if (($decided ?? true) === false) {
+            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
         }
 
         ActivityLog::record($request->user(), 'achievement.verified', $achievement, [
@@ -93,16 +105,20 @@ class AchievementController extends Controller
 
         $achievement = Achievement::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
-        if (! $achievement->isPending()) {
+        // Atomic claim, same shape as verify() (audit T52).
+        $claimed = Achievement::query()
+            ->whereKey($achievement->id)
+            ->where('status', 'pending')
+            ->update([
+                'status' => 'rejected',
+                'verified_by' => $request->user()->id,
+                'verified_at' => now(),
+                'rejection_reason' => $validated['reason'],
+            ]);
+
+        if ($claimed === 0) {
             return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
         }
-
-        $achievement->forceFill([
-            'status' => 'rejected',
-            'verified_by' => $request->user()->id,
-            'verified_at' => now(),
-            'rejection_reason' => $validated['reason'],
-        ])->save();
 
         ActivityLog::record($request->user(), 'achievement.rejected', $achievement, ['reason' => $validated['reason']]);
 

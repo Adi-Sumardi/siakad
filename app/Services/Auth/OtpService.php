@@ -105,9 +105,17 @@ class OtpService
             return null;
         }
 
-        $otp->forceFill(['consumed_at' => now()])->save();
+        // Atomic consume (audit T52): two concurrent verifies of one correct
+        // code must not both log in - only the request that flips
+        // consumed_at (while the code is still unexpired) wins; the loser
+        // is told the code is no longer usable, exactly like a replay.
+        $claimed = LoginOtp::query()
+            ->whereKey($otp->id)
+            ->whereNull('consumed_at')
+            ->where('expires_at', '>', now())
+            ->update(['consumed_at' => now()]);
 
-        return $otp->user;
+        return $claimed === 1 ? $otp->user : null;
     }
 
     /** Finds the account an identifier belongs to; phone goes through the blind index. */

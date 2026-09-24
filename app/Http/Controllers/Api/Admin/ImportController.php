@@ -218,8 +218,11 @@ class ImportController extends Controller
 
                 // Handle Guardian
                 $waliNama = $data['wali_nama'] ?? '';
-                $waliPhone = $data['wali_phone'] ?? '';
-                $waliEmail = $data['wali_email'] ?? '';
+                // Same normalisation importUsers() applies (audit T52): a
+                // +62/62-format phone or mixed-case email here created an
+                // account the OTP lane could never find again.
+                $waliPhone = PhoneNumberFormatter::toWhatsAppFormat($data['wali_phone'] ?? null) ?? '';
+                $waliEmail = isset($data['wali_email']) && $data['wali_email'] !== '' ? mb_strtolower(trim($data['wali_email'])) : '';
 
                 if (! empty($waliNama) || ! empty($waliPhone)) {
                     $guardianUser = null;

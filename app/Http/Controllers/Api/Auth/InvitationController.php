@@ -73,7 +73,23 @@ class InvitationController extends Controller
 
         $user = $invitation->user;
 
-        DB::transaction(function () use ($invitation, $user) {
+        $activated = DB::transaction(function () use ($invitation, $user) {
+            // Atomic claim, not check-then-act (audit T52): two requests
+            // holding the same token - two tabs, or the rightful holder
+            // racing someone who intercepted the link - can both pass
+            // isUsable() above before either writes. Only the request that
+            // flips used_at here proceeds; the loser gets the same "link
+            // not valid" answer a spent link already gives, instead of a
+            // second session.
+            $claimed = AccountInvitation::query()
+                ->whereKey($invitation->id)
+                ->whereNull('used_at')
+                ->update(['used_at' => now()]);
+
+            if ($claimed === 0) {
+                return false;
+            }
+
             if ($invitation->purpose === 'reset') {
                 // The encrypted cast keeps phone_hash (blind index) in step on
                 // write, which is exactly what OTP lookup reads later.
@@ -104,12 +120,18 @@ class InvitationController extends Controller
                 StaffProfile::mirrorUserPhone($user);
             }
 
-            $invitation->markUsed();
-
             ActivityLog::record($user, $invitation->purpose === 'reset' ? 'account.contact_reset' : 'account.activated', $user, [
                 'channel' => $invitation->channel,
             ]);
+
+            return true;
         });
+
+        if ($activated === false) {
+            return response()->json([
+                'message' => 'Tautan aktivasi tidak berlaku atau sudah kedaluwarsa.',
+            ], 404);
+        }
 
         // Explicit session guard: an earlier auth:sanctum-authenticated
         // request in the same process leaves the ambient default pointing at
