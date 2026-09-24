@@ -160,7 +160,7 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
                 </div>
                 <div>
                   <h3 className="font-extrabold text-sm text-foreground">YAYASAN ASRAMA PELAJAR ISLAM (YAPI)</h3>
-                  <p className="text-xs text-primary font-bold">{bill.student?.schoolUnit?.label ?? "Unit Sekolah Rawamangun"}</p>
+                  <p className="text-xs text-primary font-bold">{bill.student?.school_unit?.label ?? "—"}</p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">Kompleks Pendidikan Rawamangun, Jakarta Timur</p>
                 </div>
               </div>
@@ -168,7 +168,7 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
               <div className="pt-2 text-xs text-muted-foreground space-y-1 bg-muted/30 p-3 rounded-xl">
                 <div className="flex justify-between">
                   <span>Tahun Ajaran:</span>
-                  <strong className="text-foreground">{bill.academicYear?.year ?? "2026/2027"}</strong>
+                  <strong className="text-foreground">{bill.academic_year?.year ?? "—"}</strong>
                 </div>
                 <div className="flex justify-between">
                   <span>Jatuh Tempo:</span>

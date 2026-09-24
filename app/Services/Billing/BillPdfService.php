@@ -37,13 +37,14 @@ class BillPdfService
             'schoolName' => config('app.name'),
             'logoBase64' => $logoBase64,
             'logoYpiaBase64' => $ypiaLogoBase64,
-            // A deterministic, real VA number - not one of the three
-            // unverified bank accounts this used to print (never confirmed
-            // as YAPI's real accounts, and stale since the gateway moved to
-            // Bank Muamalat VA). Pure local formatting, no gateway call.
-            // Fee types without a registered VA prefix get no VA block at
-            // all (null) rather than a number borrowed from another fee type.
-            'vaNumber' => $this->vaNumberFor($bill),
+            // Only a VA the bank actually knows about (audit T40-c): the
+            // number printed is the live checkout's own registration, never
+            // a deterministically-computed one for a bill that was never
+            // checked out - that number was never registered at e-SPP, and
+            // printing it sent parents to a counter that could reject it
+            // (or take money for a different basket's registration).
+            'vaNumber' => $this->vaFor($bill)['number'] ?? null,
+            'vaBankName' => $this->vaFor($bill)['bank_name'] ?? null,
             'money' => fn (float $amount) => 'Rp '.number_format($amount, 0, ',', '.'),
         ])->setPaper('a4');
     }
@@ -56,21 +57,36 @@ class BillPdfService
     }
 
     /**
-     * The VA to print on an unpaid bill, or null when there is none to print
-     * (paid bills, and fee types the bank has no VA prefix for - the blade
-     * skips the whole VA block for null either way).
+     * The VA block to print on an unpaid bill, or null when there is none to
+     * print (paid bills, bills with no live checkout, or a checkout whose
+     * registration carried no VA - the blade skips the whole block either
+     * way). Comes from the live payment's own gateway_response so the paper
+     * can never advertise a number the bank doesn't know (audit T40-c).
+     *
+     * @return array{number: string, bank_name: string}|null
      */
-    private function vaNumberFor(Bill $bill): ?string
+    private function vaFor(Bill $bill): ?array
     {
         if ($bill->status === 'paid') {
             return null;
         }
 
-        try {
-            return BillingApiClient::generateVaNumber($bill->student, $bill, $this->bankChannelFor($bill));
-        } catch (BillingApiException) {
+        $payment = $bill->allocations
+            ->pluck('payment')
+            ->filter(fn ($p) => $p && in_array($p->status, ['pending', 'processing'], true))
+            ->sortByDesc('id')
+            ->first();
+
+        $va = $payment->gateway_response['va_number'] ?? null;
+
+        if (! $va) {
             return null;
         }
+
+        return [
+            'number' => $va,
+            'bank_name' => (string) ($payment->gateway_response['bank_name'] ?? 'Bank Muamalat'),
+        ];
     }
 
     /**

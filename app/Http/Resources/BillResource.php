@@ -21,8 +21,27 @@ class BillResource extends JsonResource
                 'ulid' => $this->student->ulid,
                 'nama_lengkap' => $this->student->nama_lengkap,
                 'nama_panggilan' => $this->student->nama_panggilan,
+                // The wali bill-detail screen prints these for
+                // reimbursement paperwork (audit T40-b) - they ride the same
+                // whenLoaded contract: present only when the caller
+                // eager-loaded them, never a lazy query per row.
+                'nis' => $this->student->nis,
+                'school_unit' => $this->when($this->student->relationLoaded('schoolUnit'), fn () => [
+                    'ulid' => $this->student->schoolUnit->ulid,
+                    'code' => $this->student->schoolUnit->code,
+                    'label' => $this->student->schoolUnit->label,
+                ]),
+            ]),
+            // The installment gate: the wali "Bayar Cicilan / Custom" button
+            // keys on this, and it was never emitted - a fully-built backend
+            // lane sat dead in the UI (audit T40-a).
+            'allow_installment' => (bool) $this->allow_installment,
+            'academic_year' => $this->whenLoaded('academicYear', fn () => [
+                'ulid' => $this->academicYear->ulid,
+                'year' => $this->academicYear->year,
             ]),
             'period_month' => $this->period_month,
+            'issued_at' => $this->issued_at?->toDateString(),
             'subtotal' => (float) $this->subtotal,
             'discount_amount' => (float) $this->discount_amount,
             'late_fee' => (float) $this->late_fee,

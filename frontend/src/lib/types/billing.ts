@@ -11,9 +11,9 @@ export type Bill = {
     nama_lengkap: string;
     nama_panggilan: string | null;
     nis?: string | null;
-    schoolUnit?: { label: string; code: string };
+    school_unit?: { ulid: string; code: string; label: string };
   };
-  academicYear?: { year: string };
+  academic_year?: { ulid: string; year: string };
   period_month: number | null;
   subtotal: number;
   discount_amount: number;

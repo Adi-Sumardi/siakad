@@ -211,7 +211,7 @@
         <h4>Cara Pembayaran:</h4>
         @if ($vaNumber)
             <div class="bank-item">
-                <strong>Virtual Account Bank Muamalat (BMI)</strong> — khusus untuk {{ $bill->student->nama_lengkap }},
+                <strong>Virtual Account {{ $vaBankName ?? 'Bank Muamalat' }}</strong> — khusus untuk {{ $bill->student->nama_lengkap }},
                 berlaku untuk semua tagihan {{ $bill->feeType?->name ?? 'jenis biaya ini' }} tahun ajaran
                 {{ $bill->academicYear?->year }}:
             </div>
