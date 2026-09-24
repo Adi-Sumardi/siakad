@@ -131,14 +131,14 @@ class BillingApiVirtualAccountTest extends TestCase
         $this->assertEquals('802003'.'2627'.$studentCode, $jamiyyahVa);
         $this->assertEquals(16, strlen($jamiyyahVa));
 
-        // SPP BSI: 365601 + 2627 + student id
+        // SPP BSI: 789501 + 2627 + student id
         $sppVaBsi = BillingApiClient::generateVaNumber($student, $sppBill, 'bsi');
-        $this->assertEquals('365601'.'2627'.$studentCode, $sppVaBsi);
+        $this->assertEquals('789501'.'2627'.$studentCode, $sppVaBsi);
         $this->assertEquals(16, strlen($sppVaBsi));
 
-        // Jamiyyah BSI: 365603 + 2627 + student id
+        // Jamiyyah BSI: 789503 + 2627 + student id
         $jamiyyahVaBsi = BillingApiClient::generateVaNumber($student, $jamiyyahBill, 'bsi');
-        $this->assertEquals('365603'.'2627'.$studentCode, $jamiyyahVaBsi);
+        $this->assertEquals('789503'.'2627'.$studentCode, $jamiyyahVaBsi);
         $this->assertEquals(16, strlen($jamiyyahVaBsi));
     }
 
@@ -146,7 +146,7 @@ class BillingApiVirtualAccountTest extends TestCase
     {
         $ekskulType = FeeType::create(['code' => 'ekskul', 'name' => 'Ekstrakurikuler', 'recurrence' => 'per_term']);
 
-        // 1. TK Unit -> 802005 (Muamalat) & 365605 (BSI)
+        // 1. TK Unit -> 802005 (Muamalat) & 789505 (BSI)
         $studentTk = Student::create([
             'nama_lengkap' => 'Ananda TK',
             'jenis_kelamin' => 'P',
@@ -157,9 +157,9 @@ class BillingApiVirtualAccountTest extends TestCase
         $vaTk = BillingApiClient::generateVaNumber($studentTk, $ekskulType, 'muamalat');
         $this->assertEquals('802005'.'2627'.str_pad((string) $studentTk->id, 6, '0', STR_PAD_LEFT), $vaTk);
         $vaTkBsi = BillingApiClient::generateVaNumber($studentTk, $ekskulType, 'bsi');
-        $this->assertEquals('365605'.'2627'.str_pad((string) $studentTk->id, 6, '0', STR_PAD_LEFT), $vaTkBsi);
+        $this->assertEquals('789505'.'2627'.str_pad((string) $studentTk->id, 6, '0', STR_PAD_LEFT), $vaTkBsi);
 
-        // 2. SD Unit -> 802006 (Muamalat) & 365606 (BSI)
+        // 2. SD Unit -> 802006 (Muamalat) & 789506 (BSI)
         $studentSd = Student::create([
             'nama_lengkap' => 'Ananda SD',
             'jenis_kelamin' => 'L',
@@ -170,9 +170,9 @@ class BillingApiVirtualAccountTest extends TestCase
         $vaSd = BillingApiClient::generateVaNumber($studentSd, $ekskulType, 'muamalat');
         $this->assertEquals('802006'.'2627'.str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSd);
         $vaSdBsi = BillingApiClient::generateVaNumber($studentSd, $ekskulType, 'bsi');
-        $this->assertEquals('365606'.'2627'.str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSdBsi);
+        $this->assertEquals('789506'.'2627'.str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSdBsi);
 
-        // 3. SMP-12 Unit -> 802007 (Muamalat) & 365607 (BSI)
+        // 3. SMP-12 Unit -> 802007 (Muamalat) & 789507 (BSI)
         $studentSmp12 = Student::create([
             'nama_lengkap' => 'Ananda SMP 12',
             'jenis_kelamin' => 'L',
@@ -183,9 +183,9 @@ class BillingApiVirtualAccountTest extends TestCase
         $vaSmp12 = BillingApiClient::generateVaNumber($studentSmp12, $ekskulType, 'muamalat');
         $this->assertEquals('802007'.'2627'.str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12);
         $vaSmp12Bsi = BillingApiClient::generateVaNumber($studentSmp12, $ekskulType, 'bsi');
-        $this->assertEquals('365607'.'2627'.str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12Bsi);
+        $this->assertEquals('789507'.'2627'.str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12Bsi);
 
-        // 4. SMP-55 Unit -> 802008 (Muamalat) & 365608 (BSI)
+        // 4. SMP-55 Unit -> 802008 (Muamalat) & 789508 (BSI)
         $studentSmp55 = Student::create([
             'nama_lengkap' => 'Ananda SMP 55',
             'jenis_kelamin' => 'P',
@@ -196,7 +196,7 @@ class BillingApiVirtualAccountTest extends TestCase
         $vaSmp55 = BillingApiClient::generateVaNumber($studentSmp55, $ekskulType, 'muamalat');
         $this->assertEquals('802008'.'2627'.str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55);
         $vaSmp55Bsi = BillingApiClient::generateVaNumber($studentSmp55, $ekskulType, 'bsi');
-        $this->assertEquals('365608'.'2627'.str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55Bsi);
+        $this->assertEquals('789508'.'2627'.str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55Bsi);
     }
 
     /**
@@ -208,7 +208,7 @@ class BillingApiVirtualAccountTest extends TestCase
     {
         $cambridgeType = FeeType::create(['code' => 'cambridge', 'name' => 'Cambridge', 'recurrence' => 'once']);
 
-        // SD Unit -> 802009 (Muamalat) & 365609 (BSI)
+        // SD Unit -> 802009 (Muamalat) & 789509 (BSI)
         $studentSd = Student::create([
             'nama_lengkap' => 'Cambridge SD',
             'jenis_kelamin' => 'L',
@@ -220,9 +220,9 @@ class BillingApiVirtualAccountTest extends TestCase
         $this->assertEquals('802009'.'2627'.str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSd);
         $this->assertEquals(16, strlen($vaSd));
         $vaSdBsi = BillingApiClient::generateVaNumber($studentSd, $cambridgeType, 'bsi');
-        $this->assertEquals('365609'.'2627'.str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSdBsi);
+        $this->assertEquals('789509'.'2627'.str_pad((string) $studentSd->id, 6, '0', STR_PAD_LEFT), $vaSdBsi);
 
-        // SMP-12 Unit -> 802010 (Muamalat) & 365610 (BSI)
+        // SMP-12 Unit -> 802010 (Muamalat) & 789510 (BSI)
         $studentSmp12 = Student::create([
             'nama_lengkap' => 'Cambridge SMP 12',
             'jenis_kelamin' => 'L',
@@ -233,9 +233,9 @@ class BillingApiVirtualAccountTest extends TestCase
         $vaSmp12 = BillingApiClient::generateVaNumber($studentSmp12, $cambridgeType, 'muamalat');
         $this->assertEquals('802010'.'2627'.str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12);
         $vaSmp12Bsi = BillingApiClient::generateVaNumber($studentSmp12, $cambridgeType, 'bsi');
-        $this->assertEquals('365610'.'2627'.str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12Bsi);
+        $this->assertEquals('789510'.'2627'.str_pad((string) $studentSmp12->id, 6, '0', STR_PAD_LEFT), $vaSmp12Bsi);
 
-        // SMP-55 Unit -> 802011 (Muamalat) & 365611 (BSI)
+        // SMP-55 Unit -> 802011 (Muamalat) & 789511 (BSI)
         $studentSmp55 = Student::create([
             'nama_lengkap' => 'Cambridge SMP 55',
             'jenis_kelamin' => 'P',
@@ -246,7 +246,7 @@ class BillingApiVirtualAccountTest extends TestCase
         $vaSmp55 = BillingApiClient::generateVaNumber($studentSmp55, $cambridgeType, 'muamalat');
         $this->assertEquals('802011'.'2627'.str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55);
         $vaSmp55Bsi = BillingApiClient::generateVaNumber($studentSmp55, $cambridgeType, 'bsi');
-        $this->assertEquals('365611'.'2627'.str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55Bsi);
+        $this->assertEquals('789511'.'2627'.str_pad((string) $studentSmp55->id, 6, '0', STR_PAD_LEFT), $vaSmp55Bsi);
     }
 
     public function test_cambridge_has_no_prefix_outside_the_participating_units(): void
@@ -263,7 +263,7 @@ class BillingApiVirtualAccountTest extends TestCase
         // Without a unit the SD prefix stands in - the catalogue listing only
         // asks "can this type mint a VA at all", never for one student.
         $this->assertSame('802009', BillingApiClient::resolvePrefix('cambridge'));
-        $this->assertSame('365609', BillingApiClient::resolvePrefix('cambridge', null, 'bsi'));
+        $this->assertSame('789509', BillingApiClient::resolvePrefix('cambridge', null, 'bsi'));
 
         $studentTk = Student::create([
             'nama_lengkap' => 'Cambridge TK',
@@ -479,7 +479,7 @@ class BillingApiVirtualAccountTest extends TestCase
         $paymentData = $response->json('payment');
 
         $expectedStudentCode = str_pad((string) $student->id, 6, '0', STR_PAD_LEFT);
-        $this->assertEquals('3656012627'.$expectedStudentCode, $paymentData['virtual_account']['va_number']);
+        $this->assertEquals('7895012627'.$expectedStudentCode, $paymentData['virtual_account']['va_number']);
         $this->assertEquals('Bank Syariah Indonesia (BSI)', $paymentData['virtual_account']['bank_name']);
         $this->assertEquals('451', $paymentData['virtual_account']['bank_code']);
         $this->assertEquals(650000, $paymentData['amount']);
@@ -783,7 +783,7 @@ class BillingApiVirtualAccountTest extends TestCase
             'gateway_response' => [
                 'provider' => 'bank_bsi',
                 'bank_key' => 'bsi',
-                'va_number' => '3656012627000602',
+                'va_number' => '7895012627000602',
                 'billing_uuid' => 'bill-uuid-602',
             ],
         ]);
@@ -795,7 +795,7 @@ class BillingApiVirtualAccountTest extends TestCase
         // prior bug always checked regardless of which bank was chosen.
         $mockClient = Mockery::mock(BillingApiClient::class);
         $mockClient->shouldReceive('getByVaNumber')
-            ->with('3656012627000602')
+            ->with('7895012627000602')
             ->andReturn(['sisa' => 0]);
         $this->app->instance(BillingApiClient::class, $mockClient);
 
@@ -806,7 +806,7 @@ class BillingApiVirtualAccountTest extends TestCase
             'customer_name' => 'Budi BSI',
             'payment_type' => 'PAYMENT',
             'jumlah_tagihan' => 700000,
-            'reference_no' => '3656012627000602',
+            'reference_no' => '7895012627000602',
         ]);
 
         $response->assertOk()->assertJson(['success' => true]);
@@ -927,7 +927,7 @@ class BillingApiVirtualAccountTest extends TestCase
         ]);
 
         $studentCode = str_pad((string) $student->id, 6, '0', STR_PAD_LEFT);
-        $vaBsi = '3656012627'.$studentCode;
+        $vaBsi = '7895012627'.$studentCode;
 
         $mockClient = Mockery::mock(BillingApiClient::class);
         $mockClient->shouldReceive('createBilling')

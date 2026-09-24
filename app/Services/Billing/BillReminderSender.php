@@ -280,8 +280,8 @@ class BillReminderSender
      * Registers both banks' VA for this bill (idempotent - see
      * BillingApiGateway::ensureReminderVaPair()) and queues the approved
      * template with both numbers. Body variables, in order: nama anak, bulan
-     * tagihan, jumlah, VA Muamalat, kode bayar BSI (the VA minus its fixed
-     * "3656" institution-code prefix).
+     * tagihan, jumlah, VA Muamalat, kode bayar BSI (the VA minus its
+     * 4-digit institution code - 7895 for SPP).
      */
     private function queueSppReminderTemplate(Bill $bill, Guardian $guardian, string $phone): NotificationResult
     {

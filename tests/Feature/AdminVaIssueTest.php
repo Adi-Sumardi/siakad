@@ -283,7 +283,7 @@ class AdminVaIssueTest extends TestCase
         $response->assertCreated()
             ->assertJsonPath(
                 'payment.virtual_account.va_number',
-                '365609'.'2627'.str_pad((string) $this->student->id, 6, '0', STR_PAD_LEFT),
+                '789509'.'2627'.str_pad((string) $this->student->id, 6, '0', STR_PAD_LEFT),
             )
             ->assertJsonPath('payment.virtual_account.bank_code', '451');
     }

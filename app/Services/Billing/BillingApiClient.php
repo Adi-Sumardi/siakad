@@ -41,28 +41,29 @@ class BillingApiClient
 
     public const PREFIX_CAMBRIDGE_SMP55 = '802011';
 
-    // Default Virtual Account 6-digit Prefixes for Bank Syariah Indonesia (BSI - Kode Bank 451)
-    public const PREFIX_BSI_SPP = '365601';
+    // Default Virtual Account 6-digit Prefixes for Bank Syariah Indonesia (BSI - Kode Bank 451).
+    // Institution 3656 is uang pangkal only; 7895 is SPP and every other fee.
+    public const PREFIX_BSI_SPP = '789501';
 
     public const PREFIX_BSI_UANG_PANGKAL = '365602';
 
-    public const PREFIX_BSI_JAMIYYAH = '365603';
+    public const PREFIX_BSI_JAMIYYAH = '789503';
 
     public const PREFIX_BSI_PENDAFTARAN = '365604';
 
-    public const PREFIX_BSI_EKSKUL_TK = '365605';
+    public const PREFIX_BSI_EKSKUL_TK = '789505';
 
-    public const PREFIX_BSI_EKSKUL_SD = '365606';
+    public const PREFIX_BSI_EKSKUL_SD = '789506';
 
-    public const PREFIX_BSI_EKSKUL_SMP12 = '365607';
+    public const PREFIX_BSI_EKSKUL_SMP12 = '789507';
 
-    public const PREFIX_BSI_EKSKUL_SMP55 = '365608';
+    public const PREFIX_BSI_EKSKUL_SMP55 = '789508';
 
-    public const PREFIX_BSI_CAMBRIDGE_SD = '365609';
+    public const PREFIX_BSI_CAMBRIDGE_SD = '789509';
 
-    public const PREFIX_BSI_CAMBRIDGE_SMP12 = '365610';
+    public const PREFIX_BSI_CAMBRIDGE_SMP12 = '789510';
 
-    public const PREFIX_BSI_CAMBRIDGE_SMP55 = '365611';
+    public const PREFIX_BSI_CAMBRIDGE_SMP55 = '789511';
 
     private const TOKEN_CACHE_KEY = 'billing_api:access_token';
 

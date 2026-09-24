@@ -543,8 +543,8 @@ class BillingTest extends TestCase
         $gateway = $payment->gateway_response;
         $this->assertTrue((bool) $gateway['simulated']);
         $this->assertSame('bank_bsi', $gateway['provider']);
-        // SPP @ BSI: prefix 365601 + academic year 2627 + 6-digit student id.
-        $this->assertMatchesRegularExpression('/^3656012627\d{6}$/', $gateway['va_number']);
+        // SPP @ BSI: prefix 789501 (institution 7895 - 3656 is uang pangkal only) + academic year 2627 + 6-digit student id.
+        $this->assertMatchesRegularExpression('/^7895012627\d{6}$/', $gateway['va_number']);
         $this->assertEquals(650000.0, (float) $gateway['amount']);
     }
 
