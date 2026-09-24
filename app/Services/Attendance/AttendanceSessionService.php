@@ -43,7 +43,8 @@ class AttendanceSessionService
             ->first();
 
         if ($existing) {
-            if ($existing->status !== 'open' || $existing->expires_at <= now()) {
+            // Jakarta wall-clock (audit T45) - see AttendanceSession::isOpen().
+            if ($existing->status !== 'open' || $existing->expires_at <= Carbon::now('Asia/Jakarta')) {
                 $existing->forceFill([
                     'status' => 'open',
                     'closed_at' => null,

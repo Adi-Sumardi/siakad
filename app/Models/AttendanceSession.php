@@ -6,6 +6,7 @@ use App\Concerns\HasUlidKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
 class AttendanceSession extends Model
 {
@@ -41,6 +42,10 @@ class AttendanceSession extends Model
     /** A session only accepts check-ins while it is still open and its lesson period hasn't ended. */
     public function isOpen(): bool
     {
-        return $this->status === 'open' && now()->lt($this->expires_at);
+        // Explicit Jakarta (audit T45): expires_at stores the Jakarta
+        // wall-clock end time, and a bare now() silently flips to UTC the
+        // moment APP_TIMEZONE is lost on any container - sessions would
+        // then stay "open" seven hours past their period.
+        return $this->status === 'open' && Carbon::now('Asia/Jakarta')->lt($this->expires_at);
     }
 }

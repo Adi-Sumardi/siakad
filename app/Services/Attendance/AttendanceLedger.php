@@ -60,7 +60,14 @@ class AttendanceLedger
 
         try {
             return DB::transaction(function () use ($session, $student, $deviceHash) {
-                AttendanceSession::whereKey($session->id)->lockForUpdate()->first();
+                $fresh = AttendanceSession::whereKey($session->id)->lockForUpdate()->first();
+
+                // Re-validate on the locked row (audit T45): the caller read
+                // the model BEFORE this lock - a session completed, closed or
+                // expired in between must not still accept a scan.
+                if (! $fresh || $fresh->status !== 'open' || Carbon::now('Asia/Jakarta')->gte($fresh->expires_at)) {
+                    throw new RuntimeException('Sesi presensi sudah ditutup atau kedaluwarsa.');
+                }
 
                 if ($this->hasCheckedIn($session, $student)) {
                     throw new RuntimeException('Sudah tercatat hadir sebelumnya.');
@@ -145,6 +152,13 @@ class AttendanceLedger
         }
 
         return DB::transaction(function () use ($entries, $session, $schedule, $term, $recordedBy) {
+            // The same session lock checkIn() takes (audit T45): without it,
+            // a scan landing while "Selesaikan Presensi" writes could pass
+            // both pre-checks and leave two live rows for one student. The
+            // partial unique added with this fix is the DB-level backstop;
+            // the lock keeps the happy path from tripping it.
+            AttendanceSession::whereKey($session->id)->lockForUpdate()->first();
+
             return $entries->map(function (array $entry) use ($session, $schedule, $term, $recordedBy) {
                 /** @var Student $student */
                 $student = $entry['student'];

@@ -23,8 +23,10 @@ class AttendanceReportController extends Controller
     {
         $validated = $request->validated();
 
-        $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : now()->startOfMonth();
-        $to = isset($validated['to']) ? Carbon::parse($validated['to'])->endOfDay() : now()->endOfDay();
+        // Jakarta wall-clock defaults (audit T45): the report's month window
+        // is a school-calendar question, not a server-timezone one.
+        $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : Carbon::now('Asia/Jakarta')->startOfMonth();
+        $to = isset($validated['to']) ? Carbon::parse($validated['to'])->endOfDay() : Carbon::now('Asia/Jakarta')->endOfDay();
 
         $records = DailyRecord::query()
             ->visibleTo($request->user())
