@@ -1,36 +1,47 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useMemo, useState } from "react";
 import { Menu, ShieldCheck, X } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { UserMenu } from "@/components/layout/user-menu";
+import { SidebarNav, useNavGroups, type StaffNavSection } from "@/components/layout/sidebar-nav";
 import { useAuth } from "@/lib/auth/auth-context";
 import { cn } from "@/lib/utils";
 
-export type StaffNavItem = {
-  href: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  centralOnly?: boolean;
-};
+export type { StaffNavItem, StaffNavGroup, StaffNavSection } from "./sidebar-nav";
 
 export function StaffShell({
   nav,
   unitLabel,
   children,
 }: {
-  nav: StaffNavItem[];
+  nav: StaffNavSection[];
   unitLabel?: string;
   children: React.ReactNode;
 }) {
   const { user } = useAuth();
-  const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const identitySubtitle = unitLabel ?? (user?.role === "admin" ? "Admin Pusat" : user?.role);
 
-  const visibleNav = nav.filter((item) => !item.centralOnly || user?.role === "admin");
+  // nav is a module-level const in both layouts, so this memo holds steady
+  // and the pathname effect inside useNavGroups never re-runs from churn.
+  // centralOnly filtering happens before any group logic so hidden items can
+  // never open a group on their own; a group emptied by the filter (none
+  // today — Sistem keeps Manajemen Pengguna) is dropped entirely.
+  const visibleSections = useMemo(() => {
+    const isCentral = user?.role === "admin";
+    return nav
+      .map((section) =>
+        "items" in section
+          ? { ...section, items: section.items.filter((item) => !item.centralOnly || isCentral) }
+          : section,
+      )
+      .filter((section) => !("items" in section) || section.items.length > 0);
+  }, [nav, user?.role]);
+
+  // Lifted here rather than inside SidebarNav: the drawer and the desktop
+  // aside are both mounted and must read one truth.
+  const { openGroups, toggleGroup } = useNavGroups(visibleSections);
 
   return (
     <div className="min-h-dvh bg-canvas md:flex">
@@ -64,29 +75,12 @@ export function StaffShell({
           <div className="mb-3 px-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Menu Utama</p>
           </div>
-          <nav className="flex flex-col gap-1">
-            {visibleNav.map((item) => {
-              const active = pathname === item.href || (item.href !== "/admin" && item.href !== "/guru" && pathname.startsWith(`${item.href}/`));
-              const Icon = item.icon;
-
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setMobileOpen(false)}
-                  className={cn(
-                    "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all",
-                    active
-                      ? "bg-primary text-primary-foreground shadow-sm font-semibold"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                >
-                  <Icon className="size-4.5 shrink-0" />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
+          <SidebarNav
+            sections={visibleSections}
+            openGroups={openGroups}
+            onToggleGroup={toggleGroup}
+            onNavigate={() => setMobileOpen(false)}
+          />
         </div>
 
         <div className="border-t border-border bg-card/60 p-4">
@@ -115,28 +109,7 @@ export function StaffShell({
           <div className="mb-2 px-3">
             <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Menu Navigasi</p>
           </div>
-          <nav className="flex flex-col gap-1">
-            {visibleNav.map((item) => {
-              const active = pathname === item.href || (item.href !== "/admin" && item.href !== "/guru" && pathname.startsWith(`${item.href}/`));
-              const Icon = item.icon;
-
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all",
-                    active
-                      ? "bg-primary text-primary-foreground shadow-sm font-semibold"
-                      : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
-                  )}
-                >
-                  <Icon className="size-4.5 shrink-0" />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
+          <SidebarNav sections={visibleSections} openGroups={openGroups} onToggleGroup={toggleGroup} />
         </div>
 
         {/* User Card in Desktop Sidebar - identity only; Profil/Keluar live
