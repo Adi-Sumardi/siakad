@@ -3,9 +3,13 @@
 namespace Tests\Feature;
 
 use App\Models\AcademicYear;
+use App\Models\AccountInvitation;
 use App\Models\Bill;
+use App\Models\Classroom;
+use App\Models\Enrollment;
 use App\Models\FeeType;
 use App\Models\Guardian;
+use App\Models\LoginOtp;
 use App\Models\Payment;
 use App\Models\SchoolUnit;
 use App\Models\Student;
@@ -17,6 +21,7 @@ use App\Services\Billing\PaymentAllocator;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -301,6 +306,159 @@ class AuditPostMergeQuickFixesTest extends TestCase
         // A stale mirror made the next PMB handoff miss this guardian, mint a
         // second one, and die on the guardians.user_id unique index.
         $this->assertSame('baru@yapinet.id', $user->guardian->fresh()->email);
+    }
+
+    // --------------------------------------------------------------- T40
+
+    public function test_the_wali_bill_detail_contract_carries_the_fields_the_screen_prints(): void
+    {
+        [$user, $bill] = $this->waliWithOpenBill(300000);
+        $bill->forceFill(['allow_installment' => true])->save();
+
+        $this->actingAs($user)
+            ->getJson("/api/wali/bills/{$bill->ulid}")
+            ->assertOk()
+            ->assertJsonPath('bill.allow_installment', true)
+            ->assertJsonPath('bill.issued_at', $bill->issued_at->toDateString())
+            ->assertJsonPath('bill.academic_year.year', '2026/2027')
+            ->assertJsonPath('bill.student.nis', '009999')
+            ->assertJsonPath('bill.student.school_unit.label', 'SD Islam Al Azhar 13');
+    }
+
+    // --------------------------------------------------------------- T50
+
+    public function test_opening_a_reset_link_revokes_every_old_way_in(): void
+    {
+        $user = User::create([
+            'name' => 'Wali Direvoke',
+            'email' => 'lama@yapinet.id',
+            'phone' => '081200000099',
+            'role' => 'orangtua',
+            'is_active' => true,
+        ]);
+        $user->forceFill(['remember_token' => 'stolen-device-token'])->save();
+
+        Guardian::create([
+            'user_id' => $user->id,
+            'nama' => $user->name,
+            'hubungan' => 'wali',
+            'no_hp' => '081200000099',
+            'email' => 'lama@yapinet.id',
+        ]);
+
+        // An activation invitation still live in the OLD email's inbox...
+        AccountInvitation::create([
+            'user_id' => $user->id,
+            'token_hash' => AccountInvitation::hashToken(AccountInvitation::generateToken()),
+            'channel' => 'email',
+            'sent_to' => 'lama@yapinet.id',
+            'purpose' => 'activation',
+            'expires_at' => now()->addDays(7),
+        ]);
+
+        // ...a code already issued to the OLD phone...
+        LoginOtp::create([
+            'user_id' => $user->id,
+            'identifier' => '081200000099',
+            'channel' => 'whatsapp',
+            'code_hash' => LoginOtp::hashCode('123456'),
+            'expires_at' => now()->addMinutes(10),
+        ]);
+
+        // ...and a session the stolen device is holding open.
+        DB::table('sessions')->insert([
+            'id' => 'stolen-device-session',
+            'user_id' => $user->id,
+            'ip_address' => '127.0.0.1',
+            'user_agent' => 'test',
+            'payload' => 'x',
+            'last_activity' => time(),
+        ]);
+
+        $token = AccountInvitation::generateToken();
+
+        AccountInvitation::create([
+            'user_id' => $user->id,
+            'token_hash' => AccountInvitation::hashToken($token),
+            'channel' => 'whatsapp',
+            'sent_to' => '081999000111',
+            'purpose' => 'reset',
+            'expires_at' => now()->addDays(7),
+        ]);
+
+        $this->postJson("/api/invitations/{$token}/activate")->assertOk();
+
+        $fresh = $user->fresh();
+
+        // The new contact is the ONLY way in now - the promise the message
+        // always made and the code never delivered.
+        $this->assertSame('081999000111', $fresh->phone);
+        $this->assertNull($fresh->email);
+        $this->assertNull($fresh->email_verified_at);
+        // The re-login below issues a FRESH remember token - the stolen
+        // device's cookie dies against the new one, which is the point.
+        $this->assertNotSame('stolen-device-token', $fresh->remember_token);
+        $this->assertSame(0, DB::table('sessions')->where('user_id', $user->id)->count());
+        $this->assertSame(
+            0,
+            LoginOtp::where('user_id', $user->id)->whereNull('consumed_at')->count(),
+            'OTP yang sudah terbit ke kontak lama harus ikut terkonsumsi'
+        );
+        $this->assertSame(
+            0,
+            AccountInvitation::where('user_id', $user->id)->whereNull('used_at')->count(),
+            'semua undangan harus ikut terkonsumsi'
+        );
+
+        // The mirrors follow: new phone on the guardian row, dead email gone.
+        $guardian = $fresh->guardian->fresh();
+        $this->assertSame('081999000111', $guardian->no_hp);
+        $this->assertNull($guardian->email);
+    }
+
+    // --------------------------------------------------------------- T41
+
+    public function test_a_cross_unit_promotion_moves_the_students_unit_with_them(): void
+    {
+        $smp = SchoolUnit::create(['code' => 'SMP-12', 'label' => 'SMP Islam Al Azhar 12', 'jenjang_group' => 'smp']);
+
+        $source = Classroom::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $this->year->id,
+            'tingkat' => 6, 'name' => '6-A', 'is_active' => true,
+        ]);
+
+        $nextYear = AcademicYear::firstOrCreate(
+            ['year' => '2027/2028'],
+            ['starts_on' => '2027-07-01', 'ends_on' => '2028-06-30'],
+        );
+
+        $target = Classroom::create([
+            'school_unit_id' => $smp->id, 'academic_year_id' => $nextYear->id,
+            'tingkat' => 7, 'name' => '7-A', 'is_active' => true,
+        ]);
+
+        $student = Student::create([
+            'nama_lengkap' => 'Siswa Promosi', 'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->sdUnit->id, 'status' => 'active',
+        ]);
+
+        Enrollment::create([
+            'student_id' => $student->id, 'classroom_id' => $source->id,
+            'academic_year_id' => $this->year->id, 'status' => 'active',
+            'joined_on' => $this->year->starts_on,
+        ]);
+
+        app(\App\Services\Academic\PromotionService::class)->promoteBatch(
+            $source,
+            $nextYear,
+            collect([['student' => $student, 'outcome' => 'promoted', 'target_classroom' => $target]]),
+            $this->admin,
+        );
+
+        // The enrollment moved - and the STUDENT ROW must follow it, or the
+        // new unit's scoping, rosters, sweeps and fee rates all keep reading
+        // the old unit (audit T41).
+        $this->assertSame($smp->id, $student->fresh()->school_unit_id);
     }
 
     // -------------------------------------------------------------------

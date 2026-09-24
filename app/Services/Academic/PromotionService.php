@@ -135,13 +135,28 @@ class PromotionService
                     return $current;
                 }
 
-                return Enrollment::create([
+                $enrollment = Enrollment::create([
                     'student_id' => $student->id,
                     'classroom_id' => $target->id,
                     'academic_year_id' => $newYear->id,
                     'status' => 'active',
                     'joined_on' => $newYear->starts_on,
                 ]);
+
+                // The student ROW follows the move (audit T41): every
+                // downstream system keys on students.school_unit_id - guru
+                // scoping (visibleTo), the daily-attendance roster and
+                // auto-alpa sweep, FeeRate::resolve's unit rate table,
+                // dashboards and student lists. Leaving it on the source
+                // unit made a promoted RA->TK student invisible to the TK
+                // side while the RA side kept counting them (and billed RA
+                // rates). Same transaction as the enrollment swap, so the
+                // two can never disagree.
+                if ((int) $target->school_unit_id !== (int) $student->school_unit_id) {
+                    $student->forceFill(['school_unit_id' => $target->school_unit_id])->save();
+                }
+
+                return $enrollment;
             });
         });
     }

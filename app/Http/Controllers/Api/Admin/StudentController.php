@@ -268,17 +268,19 @@ class StudentController extends Controller
             // don't. The official lane for crossing units is promotion into
             // the next academic year (PromotionService), so refuse here and
             // point there rather than silently splitting the records.
+            // Checked on the LATEST active enrollment, not just the current
+            // academic year (audit T41): in the rollover-to-promotion window
+            // the new year is active but old-year enrollments are still
+            // 'active' too - a year-scoped query there found nothing and let
+            // the exact split this guard exists for slip through.
             $movingUnits = $unit->id !== (int) $student->school_unit_id;
 
-            if ($movingUnits && $student->enrollments()
-                ->where('status', 'active')
-                ->where('academic_year_id', AcademicYear::current()?->id ?? 0)
-                ->exists()) {
-                $classroom = $student->enrollments()
-                    ->where('status', 'active')
-                    ->where('academic_year_id', AcademicYear::current()?->id ?? 0)
-                    ->first()
-                    ?->classroom?->name;
+            $activeEnrollment = $movingUnits
+                ? $student->enrollments()->where('status', 'active')->latest('id')->first()
+                : null;
+
+            if ($activeEnrollment) {
+                $classroom = $activeEnrollment->classroom?->name;
 
                 return response()->json([
                     'message' => "Siswa masih terdaftar aktif di kelas {$classroom} tahun ajaran berjalan. Pindah unit harus lewat alur kenaikan kelas antar tahun ajaran (menu Kenaikan Kelas), atau kosongkan kelasnya dulu.",
