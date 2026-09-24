@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\NotificationLog;
 use App\Services\Notification\QontakWhatsAppGateway;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -25,9 +26,16 @@ class SendQontakTemplateMessage implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
+    // $tries=0 + retryUntil (audit T42-a), same reason as the other WhatsApp
+    // jobs: rate-limit releases must not burn the job's attempts.
+    public int $tries = 0;
 
-    public array $backoff = [10, 30];
+    public array $backoff = [10, 30, 60, 120];
+
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addHour();
+    }
 
     /**
      * @param  string[]  $bodyValues
@@ -39,6 +47,13 @@ class SendQontakTemplateMessage implements ShouldQueue
         public string $templateId,
         public array $bodyValues,
         public array $buttonValues = [],
+        /**
+         * The NotificationLog row the caller created for this send (audit
+         * T43): without it the row stayed 'queued' forever on every outcome
+         * - success included - invisible to the retry sweep, the manual
+         * resend lane and the failure dashboard alike.
+         */
+        public ?string $notificationLogUlid = null,
     ) {}
 
     public function middleware(): array
@@ -48,7 +63,21 @@ class SendQontakTemplateMessage implements ShouldQueue
 
     public function handle(QontakWhatsAppGateway $gateway): void
     {
+        if ($this->alreadyDelivered()) {
+            return;
+        }
+
         $result = $gateway->sendTemplate($this->phone, $this->toName, $this->templateId, $this->bodyValues, $this->buttonValues);
+
+        if ($this->notificationLogUlid) {
+            NotificationLog::where('ulid', $this->notificationLogUlid)->update([
+                'status' => $result->success ? 'sent' : 'failed',
+                'error' => $result->success ? null : $result->message,
+                'sent_at' => $result->success ? now() : null,
+                // See SendWhatsAppMessage::handle(): retries only (audit T44).
+                ...(($this->attempts ?? 1) > 1 ? ['attempts' => NotificationLog::rawAttemptIncrement()] : []),
+            ]);
+        }
 
         if (! $result->success) {
             Log::warning('[SendQontakTemplateMessage] Send failed', [
@@ -59,5 +88,29 @@ class SendQontakTemplateMessage implements ShouldQueue
 
             throw new RuntimeException($result->message ?? 'Gagal mengirim pesan template WhatsApp.');
         }
+    }
+
+    /** See SendWhatsAppMessage::failed() - the 'queued'-forever row is the failure nobody sees. */
+    public function failed(?\Throwable $e): void
+    {
+        if ($this->notificationLogUlid) {
+            NotificationLog::where('ulid', $this->notificationLogUlid)->update([
+                'status' => 'failed',
+                'error' => $e?->getMessage() ?? 'Pengiriman gagal setelah seluruh percobaan.',
+                'sent_at' => null,
+            ]);
+        }
+    }
+
+    /**
+     * A previous attempt of this job - or the retry sweep, or a manual
+     * resend - may have delivered this very row while this attempt waited
+     * in backoff (audit T44). A row already 'sent' must never be sent again
+     * by a stale attempt; whoever lands 'sent' first wins.
+     */
+    private function alreadyDelivered(): bool
+    {
+        return $this->notificationLogUlid !== null
+            && NotificationLog::where('ulid', $this->notificationLogUlid)->value('status') === 'sent';
     }
 }

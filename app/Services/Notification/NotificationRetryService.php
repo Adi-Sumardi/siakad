@@ -5,6 +5,7 @@ namespace App\Services\Notification;
 use App\Models\NotificationLog;
 use App\Services\Billing\BillReminderSender;
 use App\Services\Billing\PaymentReceiptNotifier;
+use App\Services\Billing\PaymentReceiptSender;
 use App\Services\Billing\VaIssuedNotifier;
 use App\Services\Handoff\AccountInvitationSender;
 use Illuminate\Support\Collection;
@@ -47,6 +48,7 @@ class NotificationRetryService
         private AccountInvitationSender $invitations,
         private BillReminderSender $billReminders,
         private PaymentReceiptNotifier $paymentReceipts,
+        private PaymentReceiptSender $whatsappReceipts,
         private VaIssuedNotifier $vaIssued,
     ) {}
 
@@ -171,6 +173,16 @@ class NotificationRetryService
      */
     private function applyResult(NotificationLog $log, NotificationResult $result): int
     {
+        // A resend that re-QUEUED the send (the Qontak template lanes, audit
+        // T43) hands the row back to the job: the job makes the physical
+        // attempt, owns the outcome, and counts its own attempt - counting
+        // it here too would double-increment for one send.
+        if ($result->success && ($result->data['mode'] ?? null) === 'queued') {
+            $log->update(['status' => 'queued', 'error' => null]);
+
+            return $log->attempts;
+        }
+
         $attempts = $log->attempts + 1;
 
         $log->update([
@@ -197,6 +209,12 @@ class NotificationRetryService
             'bill_reminder' => fn (NotificationLog $log) => $this->billReminders->resend($log),
             'payment_receipt' => fn (NotificationLog $log) => $this->paymentReceipts->resend($log),
             'va_issued' => fn (NotificationLog $log) => $this->vaIssued->resend($log),
+            // The Qontak template lanes (audit T43): rows the job flips to
+            // 'failed' are re-queued through the same throttled job - before
+            // these mappings a failed template row was unresendable by every
+            // lane (sweep skipped it, the manual button 422'd).
+            'reminder_spp' => fn (NotificationLog $log) => $this->billReminders->resend($log),
+            'receipt_spp_school' => fn (NotificationLog $log) => $this->whatsappReceipts->resend($log),
             default => null,
         };
     }

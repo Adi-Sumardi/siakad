@@ -52,8 +52,12 @@ type JobRow = {
 
 const TEMPLATE_LABEL: Record<string, string> = {
   school_account_invite: "Undangan akun",
+  school_account_reset: "Reset akses akun",
   bill_reminder: "Pengingat tagihan",
+  reminder_spp: "Pengingat SPP (template)",
   payment_receipt: "Kuitansi pembayaran",
+  receipt_spp_school: "Kuitansi SPP (WhatsApp)",
+  va_issued: "VA diterbitkan",
   login_otp: "OTP login",
 };
 

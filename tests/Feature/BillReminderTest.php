@@ -251,11 +251,11 @@ class BillReminderTest extends TestCase
 
         // SPP goes through Qontak's approved 'reminder_spp' template
         // (QontakWhatsAppGateway::sendTemplate()), not the free-text Sendago
-        // path - international 62xxx phone form, both banks' VA numbers as
-        // separate body values.
+        // path - callers hand the app-stored 08xxx form; the gateway owns
+        // the 62-prefix conversion (audit T42-b).
         $this->assertCount(1, $this->sentQontakTemplates);
         $sent0 = $this->sentQontakTemplates[0];
-        $this->assertSame('6281234567890', $sent0['phone']);
+        $this->assertSame('081234567890', $sent0['phone']);
         $this->assertSame('Aisyah Nur Ramadhani', $sent0['bodyValues'][0]);
         $this->assertSame('8020012627000001', $sent0['bodyValues'][3]);
         // BSI's fixed 4-digit institution code (3656) is stripped before
@@ -264,7 +264,10 @@ class BillReminderTest extends TestCase
 
         $log = \App\Models\NotificationLog::where('channel', 'whatsapp')->where('template', 'reminder_spp')->first();
         $this->assertNotNull($log);
-        $this->assertSame('queued', $log->status);
+        // T43: the job carries the log ulid, so the row now reflects the real
+        // outcome (sync queue = already attempted; the fake gateway succeeds)
+        // instead of being stuck 'queued' on every outcome.
+        $this->assertSame('sent', $log->status);
     }
 
     public function test_a_bill_with_no_reachable_guardian_is_skipped_not_failed(): void

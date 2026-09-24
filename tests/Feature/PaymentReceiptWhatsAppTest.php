@@ -130,9 +130,10 @@ class PaymentReceiptWhatsAppTest extends TestCase
 
         $this->assertSame('paid', $bill->fresh()->status);
 
+        // The app-stored 08xxx form - the gateway converts to 62 (audit T42-b).
         $this->assertCount(1, $this->sentQontakTemplates);
         $sent = $this->sentQontakTemplates[0];
-        $this->assertSame('6281234567890', $sent['phone']);
+        $this->assertSame('081234567890', $sent['phone']);
         $this->assertSame('receipt-template-uuid', $sent['templateId']);
         $this->assertSame('Aisyah Nur Ramadhani', $sent['bodyValues'][0]);
         $this->assertSame($bill->fresh()->issued_at->translatedFormat('F Y'), $sent['bodyValues'][1]);
@@ -143,7 +144,8 @@ class PaymentReceiptWhatsAppTest extends TestCase
 
         $log = NotificationLog::where('channel', 'whatsapp')->where('template', 'receipt_spp_school')->first();
         $this->assertNotNull($log);
-        $this->assertSame('queued', $log->status);
+        // T43: the row rides the job and lands on its real outcome.
+        $this->assertSame('sent', $log->status);
         $this->assertSame($bill->id, $log->notifiable_id);
     }
 

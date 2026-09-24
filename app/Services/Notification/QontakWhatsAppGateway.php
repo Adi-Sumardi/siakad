@@ -64,6 +64,15 @@ class QontakWhatsAppGateway
      */
     public function sendTemplate(string $phone, string $toName, string $templateId, array $bodyValues, array $buttonValues = []): NotificationResult
     {
+        // Mekari's to_number contract is the 62-prefixed form (audit T42-b):
+        // the reminder/receipt lanes used to convert at their call sites
+        // while the OTP lane passed the local 08xx form straight through -
+        // two formats to one endpoint meant one of them could never be
+        // delivered. The conversion lives HERE now, so no caller can
+        // disagree; callers keep handing in whatever the app stores
+        // (PhoneNumberFormatter's 08xx form).
+        $phone = self::toQontakNumber($phone);
+
         $baseUrl = config('services.qontak.base_url');
         $channelIntegrationId = config('services.qontak.channel_integration_id');
         $clientId = config('services.qontak.client_id');
@@ -104,6 +113,18 @@ class QontakWhatsAppGateway
         $path = rtrim(parse_url($baseUrl, PHP_URL_PATH), '/').'/broadcasts/whatsapp/direct';
 
         return $this->post($baseUrl.'/broadcasts/whatsapp/direct', $path, $clientId, $clientSecret, $body, $phone, $templateId);
+    }
+
+    /** 08xxxxxxxxxx (the app's stored form) -> 62xxxxxxxxxx; already-62 passes through; bare digits get the country code. */
+    public static function toQontakNumber(string $phone): string
+    {
+        $digits = preg_replace('/[^0-9]/', '', $phone) ?: '';
+
+        if (str_starts_with($digits, '62')) {
+            return $digits;
+        }
+
+        return '62'.(str_starts_with($digits, '0') ? substr($digits, 1) : $digits);
     }
 
     private function post(string $url, string $path, string $clientId, string $clientSecret, array $body, string $phone, string $templateId): NotificationResult

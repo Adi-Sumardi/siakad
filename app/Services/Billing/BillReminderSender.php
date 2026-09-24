@@ -154,6 +154,34 @@ class BillReminderSender
      */
     public function resend(NotificationLog $log): NotificationResult
     {
+        // The Qontak template lane rebuilds straight from the row's own
+        // payload (audit T43): every body value the template needs was
+        // stored at queue time, so a failed reminder_spp row is re-queued
+        // through the same throttled job instead of dying unresendable.
+        if ($log->template === 'reminder_spp') {
+            $templateId = config('services.qontak.spp_reminder_template_id');
+
+            if (blank($templateId) || ! $log->recipient) {
+                return NotificationResult::fail('Template reminder SPP belum dikonfigurasi atau penerima kosong.');
+            }
+
+            SendQontakTemplateMessage::dispatch(
+                phone: $log->recipient,
+                toName: 'Orang Tua/Wali',
+                templateId: (string) $templateId,
+                bodyValues: [
+                    (string) ($log->payload['student_name'] ?? ''),
+                    (string) ($log->payload['period'] ?? ''),
+                    (string) ($log->payload['amount'] ?? ''),
+                    (string) ($log->payload['va_muamalat'] ?? ''),
+                    (string) ($log->payload['va_bsi_payment_code'] ?? ''),
+                ],
+                notificationLogUlid: $log->ulid,
+            );
+
+            return NotificationResult::ok(['mode' => 'queued']);
+        }
+
         $bill = $log->notifiable;
         $kind = $log->payload['kind'] ?? null;
 
@@ -255,7 +283,13 @@ class BillReminderSender
             'notifiable_id' => $bill->id,
         ]);
 
-        SendWhatsAppMessage::dispatch($phone, $this->whatsappMessage($data), $log->ulid);
+        // A jittered head start instead of a thundering herd: the H-7 beat
+        // queues one job per student at once, and dumping all of them on the
+        // worker in the same second is what makes the limiter hold (and, pre-
+        // T42, kill) the tail of the burst. Five minutes of spread matches
+        // the 60/min limiter for bursts up to ~300 messages.
+        SendWhatsAppMessage::dispatch($phone, $this->whatsappMessage($data), $log->ulid)
+            ->delay(now()->addSeconds(random_int(0, 300)));
 
         return NotificationResult::ok(['mode' => 'queued']);
     }
@@ -302,10 +336,11 @@ class BillReminderSender
         $period = $bill->issued_at?->translatedFormat('F Y') ?? $bill->due_date->translatedFormat('F Y');
         $amount = number_format((float) $bill->remaining_amount, 0, ',', '.');
 
-        // Not updated to 'sent'/'failed' by the job (SendQontakTemplateMessage
-        // takes no log ulid) - the job's own retries and log line carry the
-        // outcome; this row keeps the per-bill send history consistent.
-        NotificationLog::create([
+        // The row rides the job (audit T43): SendQontakTemplateMessage now
+        // takes the log ulid and flips this row to sent/failed itself - a
+        // Qontak outage no longer leaves reminders 'queued' forever where
+        // no screen could see them.
+        $log = NotificationLog::create([
             'channel' => 'whatsapp',
             'template' => 'reminder_spp',
             'recipient' => $phone,
@@ -322,11 +357,14 @@ class BillReminderSender
         ]);
 
         SendQontakTemplateMessage::dispatch(
-            phone: '62'.substr($phone, 1),
+            // The gateway owns the 62-prefix conversion now (audit T42-b) -
+            // callers pass the app's stored 08xx form.
+            phone: $phone,
             toName: $guardian->nama ?: 'Orang Tua/Wali',
             templateId: config('services.qontak.spp_reminder_template_id'),
             bodyValues: [$bill->student->nama_lengkap, $period, $amount, $muamalatVa, $bsiPaymentCode],
-        );
+            notificationLogUlid: $log->ulid,
+        )->delay(now()->addSeconds(random_int(0, 300)));
 
         return NotificationResult::ok(['mode' => 'queued']);
     }

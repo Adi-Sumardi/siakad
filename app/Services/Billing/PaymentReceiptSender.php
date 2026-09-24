@@ -80,13 +80,16 @@ class PaymentReceiptSender
             return;
         }
 
-        $qontakPhone = '62'.substr((string) $phone, 1);
+        // The gateway owns the 62-prefix conversion now (audit T42-b).
         $bankName = $payment->gateway_response['bank_name'] ?? null;
         $method = $bankName ? "VA {$bankName}" : ucfirst(str_replace('_', ' ', (string) $payment->method));
         $period = $this->periodLabel($bills);
         $paidAt = $payment->paid_at?->translatedFormat('d F Y, H.i') ?? now()->translatedFormat('d F Y, H.i');
 
-        NotificationLog::create([
+        // The row rides the job (audit T43): sent/failed updates land on this
+        // exact row, so a dropped receipt is visible and resendable instead
+        // of 'queued' forever.
+        $log = NotificationLog::create([
             'channel' => 'whatsapp',
             'template' => 'receipt_spp_school',
             'recipient' => $phone,
@@ -105,7 +108,7 @@ class PaymentReceiptSender
         ]);
 
         SendQontakTemplateMessage::dispatch(
-            phone: $qontakPhone,
+            phone: $phone,
             toName: $guardian->nama ?: 'Orang Tua/Wali',
             templateId: $templateId,
             bodyValues: [
@@ -117,7 +120,39 @@ class PaymentReceiptSender
                 // {{6}} "No. Referensi" - the VA, same as e-SPP's list shows.
                 $payment->referenceNumber(),
             ],
+            notificationLogUlid: $log->ulid,
         );
+    }
+
+    /**
+     * Re-queues a failed/queued receipt row through the same throttled job
+     * (audit T43): all six body values were stored on the row at send time,
+     * so nothing needs to be rebuilt from the (long-settled) payment.
+     */
+    public function resend(NotificationLog $log): NotificationResult
+    {
+        $templateId = config('services.qontak.spp_receipt_template_id');
+
+        if (blank($templateId) || ! $log->recipient) {
+            return NotificationResult::fail('Template kuitansi SPP belum dikonfigurasi atau penerima kosong.');
+        }
+
+        SendQontakTemplateMessage::dispatch(
+            phone: $log->recipient,
+            toName: 'Orang Tua/Wali',
+            templateId: (string) $templateId,
+            bodyValues: [
+                (string) ($log->payload['student_name'] ?? ''),
+                (string) ($log->payload['period'] ?? ''),
+                (string) ($log->payload['amount'] ?? ''),
+                (string) ($log->payload['paid_at'] ?? ''),
+                (string) ($log->payload['method'] ?? ''),
+                (string) ($log->payload['reference'] ?? ''),
+            ],
+            notificationLogUlid: $log->ulid,
+        );
+
+        return NotificationResult::ok(['mode' => 'queued']);
     }
 
     /**

@@ -29,9 +29,20 @@ class SendWhatsAppMessage implements ShouldQueue
 {
     use Queueable;
 
-    public int $tries = 3;
+    // $tries=0 + retryUntil (audit T42-a): a rate-limit release counts as an
+    // attempt, so the old tries=3 meant a burst bigger than ~3x the
+    // per-minute limit killed its tail with MaxAttemptsExceeded - handle()
+    // never ran, the NotificationLog row stayed 'queued' forever, and no
+    // screen ever showed why. With retryUntil the job simply waits out the
+    // limiter; genuine send failures still back off and die at the horizon.
+    public int $tries = 0;
 
-    public array $backoff = [10, 30];
+    public array $backoff = [10, 30, 60, 120];
+
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addHour();
+    }
 
     public function __construct(
         public string $phone,
@@ -53,6 +64,14 @@ class SendWhatsAppMessage implements ShouldQueue
 
     public function handle(WhatsAppGateway $gateway): void
     {
+        // A previous attempt - or the retry sweep racing this job's backoff -
+        // may already have delivered this row (audit T44); a stale attempt
+        // must not send it twice.
+        if ($this->notificationLogUlid
+            && NotificationLog::where('ulid', $this->notificationLogUlid)->value('status') === 'sent') {
+            return;
+        }
+
         $result = $gateway->sendMessage($this->phone, $this->message);
 
         if ($this->notificationLogUlid) {
@@ -60,6 +79,10 @@ class SendWhatsAppMessage implements ShouldQueue
                 'status' => $result->success ? 'sent' : 'failed',
                 'error' => $result->message,
                 'sent_at' => $result->success ? now() : null,
+                // The row's attempts already counts the send that created
+                // it (column default 1) - only the job's own retries add to
+                // it (audit T44).
+                ...(($this->attempts ?? 1) > 1 ? ['attempts' => NotificationLog::rawAttemptIncrement()] : []),
             ]);
         }
 
@@ -70,6 +93,23 @@ class SendWhatsAppMessage implements ShouldQueue
             ]);
 
             throw new RuntimeException($result->message ?? 'Sendago gagal mengirim pesan.');
+        }
+    }
+
+    /**
+     * The safety net for deaths that never reach handle() (audit T42-a):
+     * without this, a MaxAttemptsExceeded job left its NotificationLog row
+     * 'queued' forever - invisible to the retry sweep (failed-only) and to
+     * the failure dashboard alike.
+     */
+    public function failed(?\Throwable $e): void
+    {
+        if ($this->notificationLogUlid) {
+            NotificationLog::where('ulid', $this->notificationLogUlid)->update([
+                'status' => 'failed',
+                'error' => $e?->getMessage() ?? 'Pengiriman gagal setelah seluruh percobaan.',
+                'sent_at' => null,
+            ]);
         }
     }
 }

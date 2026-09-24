@@ -28,9 +28,19 @@ class SendOtpWhatsAppMessage implements ShouldQueue
 {
     use Queueable;
 
-    public int $tries = 3;
+    // $tries=0 + retryUntil (audit T42-a): a rate-limit release counts as an
+    // attempt, so the old tries=3 let a reminder burst starve login OTPs to
+    // death - handle() never ran and nobody could sign in. The horizon is
+    // the OTP's own TTL plus margin: delivering a 10-minute code after 15
+    // minutes is guaranteed-useless noise.
+    public int $tries = 0;
 
-    public array $backoff = [10, 30];
+    public array $backoff = [10, 30, 60];
+
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addMinutes(15);
+    }
 
     public function __construct(
         public string $phone,
@@ -45,6 +55,13 @@ class SendOtpWhatsAppMessage implements ShouldQueue
 
     public function handle(QontakWhatsAppGateway $gateway): void
     {
+        // See SendWhatsAppMessage::handle() (audit T44): never re-send a row
+        // another lane already delivered.
+        if ($this->notificationLogUlid
+            && NotificationLog::where('ulid', $this->notificationLogUlid)->value('status') === 'sent') {
+            return;
+        }
+
         $result = $gateway->sendOtp($this->phone, $this->code);
 
         if ($this->notificationLogUlid) {
@@ -52,6 +69,9 @@ class SendOtpWhatsAppMessage implements ShouldQueue
                 'status' => $result->success ? 'sent' : 'failed',
                 'error' => $result->message,
                 'sent_at' => $result->success ? now() : null,
+                // See SendWhatsAppMessage::handle(): retries only - the row's
+                // default-1 already counts the creating send (audit T44).
+                ...(($this->attempts ?? 1) > 1 ? ['attempts' => NotificationLog::rawAttemptIncrement()] : []),
             ]);
         }
 
@@ -62,6 +82,18 @@ class SendOtpWhatsAppMessage implements ShouldQueue
             ]);
 
             throw new RuntimeException($result->message ?? 'Gagal mengirim kode OTP.');
+        }
+    }
+
+    /** See SendWhatsAppMessage::failed() - the 'queued'-forever row is the failure nobody sees. */
+    public function failed(?\Throwable $e): void
+    {
+        if ($this->notificationLogUlid) {
+            NotificationLog::where('ulid', $this->notificationLogUlid)->update([
+                'status' => 'failed',
+                'error' => $e?->getMessage() ?? 'Pengiriman OTP gagal setelah seluruh percobaan.',
+                'sent_at' => null,
+            ]);
         }
     }
 }
