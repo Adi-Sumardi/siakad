@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -126,6 +126,31 @@ type SummaryResponse = {
 
 const num = (n: number) => new Intl.NumberFormat("id-ID").format(n);
 
+// ---------------------------------------------------------------------------
+// Launcher cards (dashboard minimalis): the four heavy cards open one at a
+// time from a row of app-like buttons. "akademik" resolves per role —
+// central gets the per-unit loop, admin_unit their own unit card — so both
+// share one launcher slot, the same way the grafik title already varies.
+const LAUNCHER_CARD_IDS = ["perhatian", "akademik", "rekap", "grafik"] as const;
+type LauncherCardId = (typeof LAUNCHER_CARD_IDS)[number];
+
+// Last launcher choice per browser; JSON "null" means the user closed the
+// panel (distinct from never-visited, though both render closed).
+const LAUNCHER_KEY = "admin-home-open-card";
+
+function readStoredLauncherCard(): LauncherCardId | null {
+  try {
+    const raw = window.localStorage.getItem(LAUNCHER_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "string" && LAUNCHER_CARD_IDS.includes(parsed as LauncherCardId)
+      ? (parsed as LauncherCardId)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function AdminHomePage() {
   const { user } = useAuth();
   const [data, setData] = useState<SummaryResponse | null>(null);
@@ -134,6 +159,34 @@ export default function AdminHomePage() {
   // and every billing tile/grafik/alert follows it (T23).
   const [billingPeriod, setBillingPeriod] = useState<"year" | "all">("year");
   const [switching, setSwitching] = useState(false);
+  // Launcher: one card visible at a time. Initial null keeps SSR and first
+  // client render identical (no hydration mismatch); the stored choice
+  // merges in after mount. Deliberately NOT folded into the data effect —
+  // that one re-runs on billingPeriod change and would fight the ref guard.
+  const [selectedCard, setSelectedCard] = useState<LauncherCardId | null>(null);
+  const restoredCardRef = useRef(false);
+
+  useEffect(() => {
+    setSelectedCard((prev) => {
+      if (restoredCardRef.current) return prev;
+      restoredCardRef.current = true;
+      const stored = readStoredLauncherCard();
+      return stored === prev ? prev : stored;
+    });
+  }, []);
+
+  const togglePanel = useCallback(
+    (id: LauncherCardId) => {
+      const next = selectedCard === id ? null : id;
+      setSelectedCard(next);
+      try {
+        window.localStorage.setItem(LAUNCHER_KEY, JSON.stringify(next));
+      } catch {
+        // Private mode / quota exhausted — the UI state still updates.
+      }
+    },
+    [selectedCard],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -170,6 +223,39 @@ export default function AdminHomePage() {
     () => (data?.units.length ? Math.max(...data.units.map((u) => u.billed), 1) : 1),
     [data],
   );
+
+  // Which launcher buttons exist mirrors exactly what renders today: the
+  // same role and data guards the cards themselves use. Every body gate
+  // below reads activeCard (not raw selectedCard), so a stored choice that
+  // no longer fits (role switch, guard failing, mid-load) simply renders
+  // closed instead of opening an empty panel.
+  const alertTotal = data ? data.alerts.reduce((sum, a) => sum + a.count, 0) : 0;
+  // Typed separately from the .filter so the literal's ids stay the union
+  // instead of widening to string.
+  const panelDefs: Array<{
+    id: LauncherCardId;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    badge?: number;
+  }> = [
+    // Labels stay one word on purpose (permintaan user): the full card titles
+    // live inside the revealed cards, the buttons only need to be scannable.
+    { id: "perhatian", label: "Perhatian", icon: AlertTriangle, badge: alertTotal },
+    { id: "akademik", label: "Akademik", icon: GraduationCap },
+    { id: "rekap", label: "Rekap", icon: Building2 },
+    { id: "grafik", label: "Grafik", icon: BarChart3 },
+  ];
+  const panels = panelDefs.filter((panel) => {
+    if (panel.id === "akademik") {
+      return isCentral ? (data?.units.length ?? 0) > 0 : Boolean(data && kpi && data.units[0]);
+    }
+    if (panel.id === "rekap") {
+      return isCentral && (data?.units.length ?? 0) > 1;
+    }
+    return true;
+  });
+  const activeCard =
+    selectedCard !== null && panels.some((panel) => panel.id === selectedCard) ? selectedCard : null;
 
   return (
     <div className="space-y-8">
@@ -280,13 +366,6 @@ export default function AdminHomePage() {
       )}
 
       {/* =================================================================== */}
-      {/* Ringkasan Akademik - khusus admin_unit (terpisah dari keuangan SPP) */}
-      {/* =================================================================== */}
-      {!isCentral && data && kpi && data.units[0] && (
-        <RingkasanAkademikCard unit={data.units[0]} kpi={kpi} thresholds={data.thresholds} />
-      )}
-
-      {/* =================================================================== */}
       {/* Notifikasi gagal - alerting retry sweep, khusus admin pusat */}
       {/* =================================================================== */}
       {/* Strict === true (bukan default ?? true seperti isCentral di atas):
@@ -295,8 +374,55 @@ export default function AdminHomePage() {
       {data?.scope.is_central === true && <NotificationFailureAlert />}
 
       {/* =================================================================== */}
+      {/* Launcher - satu card aktif dalam satu waktu; pilihan diingat       */}
+      {/* per browser. BillingPeriodToggle ikut pindah ke sini karena ia    */}
+      {/* menggerakkan seluruh payload (KPI uang, rekap, grafik, href alert) */}
+      {/* dan tak boleh kehilangan tempat saat card grafik tertutup.        */}
+      {/* =================================================================== */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:flex-1">
+          {panels.map((panel) => {
+            const Icon = panel.icon;
+            const isActive = activeCard === panel.id;
+            return (
+              <button
+                key={panel.id}
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => togglePanel(panel.id)}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl border p-4 text-left transition-all",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  isActive
+                    ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                    : "border-border/80 bg-card shadow-xs hover:border-primary/50 hover:bg-accent/40",
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex size-10 shrink-0 items-center justify-center rounded-xl",
+                    isActive ? "bg-white/15 text-primary-foreground" : "bg-accent/60 text-primary",
+                  )}
+                >
+                  <Icon className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-bold">{panel.label}</span>
+                {typeof panel.badge === "number" && panel.badge > 0 && (
+                  <Badge variant="warn" className="shrink-0 text-[11px] font-bold">
+                    {num(panel.badge)}
+                  </Badge>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <BillingPeriodToggle value={billingPeriod} disabled={switching || loading} onChange={switchBillingPeriod} />
+      </div>
+
+      {/* =================================================================== */}
       {/* Alert / Watchlist - Perlu Perhatian */}
       {/* =================================================================== */}
+      {activeCard === "perhatian" && (
       <Card className="p-6 border-border/80 shadow-md">
         <div className="flex items-center justify-between gap-4 border-b border-border/70 pb-4">
           <div>
@@ -334,16 +460,16 @@ export default function AdminHomePage() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="font-bold text-sm text-foreground leading-snug">{alert.label}</p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{alert.detail}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{alert.detail}</p>
                     {isCentral && alert.units.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {alert.units.slice(0, 4).map((u) => (
-                          <Badge key={u.code} variant="default" className="text-[10px] font-bold">
+                          <Badge key={u.code} variant="default" className="text-[11px] font-bold">
                             {u.code} · {num(u.count)}
                           </Badge>
                         ))}
                         {alert.units.length > 4 && (
-                          <Badge variant="default" className="text-[10px]">
+                          <Badge variant="default" className="text-[11px]">
                             +{alert.units.length - 4} unit lagi
                           </Badge>
                         )}
@@ -355,7 +481,7 @@ export default function AdminHomePage() {
                       {num(alert.count)}
                     </span>
                     {alert.count > 0 && alert.href && (
-                      <span className="text-[10px] font-semibold text-primary inline-flex items-center gap-0.5">
+                      <span className="text-xs font-semibold text-primary inline-flex items-center gap-0.5">
                         Cek <ChevronRight className="size-3" />
                       </span>
                     )}
@@ -376,11 +502,22 @@ export default function AdminHomePage() {
           </div>
         )}
       </Card>
+      )}
+
+      {/* =================================================================== */}
+      {/* Ringkasan Akademik - khusus admin_unit (terpisah dari keuangan SPP). */}
+      {/* Slot "akademik" yang sama dengan card per-unit milik admin pusat -  */}
+      {/* sengaja ditempatkan di area reveal SETELAH baris launcher supaya    */}
+      {/* card-nya muncul di bawah tombol, konsisten dengan card lain.        */}
+      {/* =================================================================== */}
+      {!isCentral && activeCard === "akademik" && data && kpi && data.units[0] && (
+        <RingkasanAkademikCard unit={data.units[0]} kpi={kpi} thresholds={data.thresholds} />
+      )}
 
       {/* =================================================================== */}
       {/* Ringkasan Akademik per Unit Sekolah (central admin) */}
       {/* =================================================================== */}
-      {isCentral && data && data.units.length > 0 && (
+      {isCentral && activeCard === "akademik" && data && data.units.length > 0 && (
         <Card className="p-6 border-border/80 shadow-md space-y-5">
           <div className="flex items-center gap-2 border-b border-border/70 pb-4">
             <GraduationCap className="size-5 text-primary" />
@@ -411,7 +548,7 @@ export default function AdminHomePage() {
       {/* =================================================================== */}
       {/* Rekap per Unit (central admin) */}
       {/* =================================================================== */}
-      {isCentral && data && data.units.length > 1 && (
+      {isCentral && activeCard === "rekap" && data && data.units.length > 1 && (
         <Card className="p-6 border-border/80 shadow-md">
           <div className="flex items-center gap-2 border-b border-border/70 pb-4">
             <Building2 className="size-5 text-primary" />
@@ -469,16 +606,14 @@ export default function AdminHomePage() {
       {/* =================================================================== */}
       {/* Grafik Arus Tagihan & Piutang per Unit */}
       {/* =================================================================== */}
+      {activeCard === "grafik" && (
       <Card className="p-6 border-border/80 shadow-md">
         <div className="border-b border-border/70 pb-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="size-5 text-primary" />
-              <h2 className="text-lg font-bold text-foreground">
-                {isCentral ? "Grafik Arus Tagihan & Piutang per Unit Sekolah" : "Arus Tagihan & Piutang Unit Anda"}
-              </h2>
-            </div>
-            <BillingPeriodToggle value={billingPeriod} disabled={switching || loading} onChange={switchBillingPeriod} />
+          <div className="flex items-center gap-2">
+            <BarChart3 className="size-5 text-primary" />
+            <h2 className="text-lg font-bold text-foreground">
+              {isCentral ? "Grafik Arus Tagihan & Piutang per Unit Sekolah" : "Arus Tagihan & Piutang Unit Anda"}
+            </h2>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
             Perbandingan tagihan terbit, kas masuk, dan sisa piutang pada {billingLabel} - KPI kas dan piutang di atas mengikuti pilihan ini.
@@ -533,6 +668,7 @@ export default function AdminHomePage() {
           </div>
         )}
       </Card>
+      )}
 
       {/* =================================================================== */}
       {/* Quick shortcuts */}
@@ -581,6 +717,8 @@ function KpiCard({
  * Switches which period the dashboard's money numbers cover (T23): the
  * running academic year (default) or every bill ever. KPI kas/piutang,
  * rekap per unit, grafik, dan alert keuangan semuanya mengikuti pilihan ini.
+ * Duduk di baris launcher (bukan header card grafik) supaya tetap terjangkau
+ * meski card grafik sedang tertutup.
  */
 function BillingPeriodToggle({
   value,
