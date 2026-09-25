@@ -287,6 +287,26 @@ class StudentController extends Controller
                 ], 422);
             }
 
+            // A same-day move splits today's official attendance across two
+            // units (audit T65-a): the record already live in the old unit
+            // stays, the new unit's sweep sees "no record yet" and writes a
+            // second one - one day, two marks, and the rollup counts both.
+            // The move waits for a day with nothing recorded yet.
+            $hasLiveMarkToday = \App\Models\DailyRecord::query()
+                ->active()
+                ->where('student_id', $student->id)
+                ->whereHas('dailySession', fn ($q) => $q->whereDate(
+                    'date',
+                    \Illuminate\Support\Carbon::now('Asia/Jakarta')->toDateString(),
+                ))
+                ->exists();
+
+            if ($hasLiveMarkToday) {
+                return response()->json([
+                    'message' => 'Siswa sudah punya catatan presensi hari ini di unit lama. Pindahkan unit besok, atau batalkan (revoke) catatan presensinya hari ini dulu supaya tidak ada dua catatan di hari yang sama.',
+                ], 422);
+            }
+
             $student->school_unit_id = $unit->id;
         }
 

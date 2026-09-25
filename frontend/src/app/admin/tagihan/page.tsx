@@ -232,13 +232,25 @@ function AdminBillsContent() {
     }
   }
 
+  // The typed query settles for 300ms before it hits the API (audit
+  // T67-a): one request per keystroke hammered the endpoint and let a
+  // slow "ahm" response overwrite a fresh "ahma" one - the list showed a
+  // query the input no longer held. Same debounce shape as the
+  // manual-bill picker's student search below.
+  const [debouncedQ, setDebouncedQ] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQ(q), 300);
+    return () => clearTimeout(timer);
+  }, [q]);
+
   // .then() chains (not async/await) so setState only ever runs in an async
   // callback - the effect below calls this synchronously, and awaiting first
   // still trips react-hooks/set-state-in-effect's analysis.
   const load = useCallback(() => {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
-    if (q) params.set("q", q);
+    if (debouncedQ) params.set("q", debouncedQ);
     if (unitCode) params.set("unit", unitCode);
     if (academicYear) params.set("year", academicYear);
     if (feeTypeCode) params.set("type", feeTypeCode);
@@ -250,7 +262,7 @@ function AdminBillsContent() {
       .get<{ bills: Paginated<Bill> }>(`/api/admin/bills?${params}`)
       .then((d) => setBills(d.bills))
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan."));
-  }, [status, q, unitCode, academicYear, feeTypeCode, month, page]);
+  }, [status, debouncedQ, unitCode, academicYear, feeTypeCode, month, page]);
 
   useEffect(() => {
     load();

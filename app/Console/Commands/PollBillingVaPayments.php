@@ -98,7 +98,11 @@ class PollBillingVaPayments extends Command
         // for; past that e-SPP's own date_end should have closed it
         // regardless of our side.
         $superseded = Payment::query()
-            ->whereIn('status', ['failed', 'cancelled'])
+            // 'expired' included (audit T67-e): the poller itself stamps it,
+            // and e-SPP's date_end has already proven unreliable at closing
+            // a VA on its own - money landing on an expired VA vanishes
+            // from watching exactly like one on a failed VA does.
+            ->whereIn('status', ['failed', 'cancelled', 'expired'])
             ->where(function ($q) {
                 $q->whereIn('gateway_response->provider', ['bank_muamalat', 'bank_bsi'])
                     ->orWhereNotNull('gateway_response->va_number');

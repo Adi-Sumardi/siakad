@@ -78,7 +78,11 @@ class BillingApiClient
      * identical to the student's SPP VA for the same year - one payment
      * could then settle the other's bill at the bank. An explicit
      * config key (va_prefixes.{fee_code}) is the escape hatch once e-SPP
-     * confirms a real prefix.
+     * confirms a real prefix - EXCEPT for the PMB-owned fragments below,
+     * which are refused before the config is ever read: those ranges
+     * belong to the sibling app and no config key may opt Siakad into
+     * them (their va_prefixes rows exist only so the lookup table mirrors
+     * e-SPP's own code list).
      */
     /**
      * Fee-type fragments whose e-SPP VA ranges PMB issues; Siakad never

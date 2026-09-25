@@ -33,6 +33,11 @@ class UpdateDailyAttendanceSettingRequest extends FormRequest
             'pulang_enabled' => ['boolean'],
             'pulang_opens_at' => [
                 Rule::when(fn () => $this->boolean('pulang_enabled'), ['required', 'date_format:H:i']),
+                // The pulang window must not open before masuk closes (audit
+                // T65-b): an overlap made the gate serve MASUK for the whole
+                // overlap (a student leaving early could not scan pulang),
+                // and the device-once rule lost its cross-window guarantee.
+                Rule::when(fn () => $this->boolean('pulang_enabled'), ['after_or_equal:masuk_closes_at']),
                 'nullable',
             ],
             'pulang_closes_at' => [
@@ -71,6 +76,7 @@ class UpdateDailyAttendanceSettingRequest extends FormRequest
             'masuk_closes_at.after' => 'Jam tutup absen masuk harus setelah jam bukanya.',
             'masuk_late_after.after' => 'Batas terlambat harus setelah jam buka absen masuk.',
             'masuk_late_after.before' => 'Batas terlambat harus sebelum absen masuk ditutup.',
+            'pulang_opens_at.after_or_equal' => 'Jam buka absen pulang tidak boleh lebih awal dari jam tutup absen masuk.',
             'pulang_closes_at.after' => 'Jam tutup absen pulang harus setelah jam bukanya.',
         ];
     }

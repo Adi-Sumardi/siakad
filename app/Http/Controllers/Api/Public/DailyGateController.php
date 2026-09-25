@@ -171,10 +171,15 @@ class DailyGateController extends Controller
             ->get();
 
         // The gate serves whichever window is live right now - the same link
-        // and screen carry the afternoon pulang too. When none is open (the
-        // midday gap, or before/after everything), fall back to the window
-        // nearest in time so the page can honestly say which one and when.
-        return $sessions->first(fn (DailySession $s) => $s->isOpen())
+        // and screen carry the afternoon pulang too. Deterministic order
+        // (masuk first, then id) before the isOpen scan: an overlapping
+        // pair from pre-T65 settings data would otherwise pick whichever
+        // the DB returned first. When none is open (the midday gap, or
+        // before/after everything), fall back to the window nearest in time
+        // so the page can honestly say which one and when.
+        return $sessions
+            ->sortBy(fn (DailySession $s) => [$s->type === 'masuk' ? 0 : 1, $s->id])
+            ->first(fn (DailySession $s) => $s->isOpen())
             ?? $sessions->sortBy(fn (DailySession $s) => abs(
                 Carbon::now('Asia/Jakarta')->getTimestamp() - $s->opens_at?->getTimestamp()
             ))->first();

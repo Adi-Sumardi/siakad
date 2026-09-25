@@ -98,6 +98,23 @@ class AnnouncementController extends Controller
         $unit = ! empty($validated['school_unit_code']) ? SchoolUnit::findByCode($validated['school_unit_code']) : null;
         $classroom = ! empty($validated['classroom_ulid']) ? Classroom::where('ulid', $validated['classroom_ulid'])->first() : null;
 
+        // A classroom carries its own unit (audit T67-h): letting an
+        // arbitrary unit code sit beside ANOTHER unit's classroom stored a
+        // scope no reader honoured - staff of the written unit never saw the
+        // announcement while the classroom's families did, and a classroom
+        // without a unit read school-wide to staff but single-class to
+        // families. The classroom always wins; a contradiction is refused
+        // rather than silently resolved.
+        if ($classroom) {
+            if ($unit && $classroom->school_unit_id !== $unit->id) {
+                abort(response()->json([
+                    'message' => "Kelas {$classroom->name} bukan bagian dari {$unit->label} - pilih kelas dari unit yang sama.",
+                ], 422));
+            }
+
+            $unit = $classroom->schoolUnit;
+        }
+
         return [$unit, $classroom];
     }
 }

@@ -174,6 +174,17 @@ class DailyAttendanceService
             return;
         }
 
+        if (! $setting->runsOn($now->dayOfWeekIso)) {
+            // Today was just removed from the unit's active days (audit
+            // T65-c): same quiet close as switching the unit off - the unit
+            // just declared today is not an attendance day, so the next
+            // sweep tick must not alpa anybody for it either.
+            $sessions->where('status', 'open')
+                ->each(fn (DailySession $s) => $s->forceFill(['status' => 'closed', 'closed_at' => $now])->save());
+
+            return;
+        }
+
         foreach ($sessions as $session) {
             // Pulang withdrawn mid-day: its open window closes quietly - no
             // alpa is invented for a window the unit itself took away.
@@ -310,6 +321,14 @@ class DailyAttendanceService
     ): DailyRecord {
         if (! in_array($status, ['hadir', 'terlambat', 'sakit', 'izin', 'alpa'], true)) {
             throw new RuntimeException('Status presensi tidak dikenal.');
+        }
+
+        // A PULANG window answers "did they leave", not "why were they
+        // absent" (audit T65-e): sakit/izin/alpa describe the morning, and a
+        // non-hadir status on the afternoon roster reads as nonsense in
+        // every report the daily layer feeds.
+        if ($session->type === 'pulang' && in_array($status, ['sakit', 'izin', 'alpa'], true)) {
+            throw new RuntimeException('Sesi pulang hanya menerima status hadir atau terlambat.');
         }
 
         $term = Term::current();
@@ -700,10 +719,10 @@ class DailyAttendanceService
 
     /**
      * The closing pass. A morning session sweeps every active student of the
-     * unit who still has no live mark into an 'alpa' row and alerts their
-     * guardians - the "data must not have holes because a human forgot"
-     * guarantee (§5E). Pulang windows just close: an unscanned dismissal is
-     * "belum tercatat pulang" in the report, not an absence to invent.
+     * unit who still has no live mark into an 'alpa' row - the "data must
+     * not have holes because a human forgot" guarantee (§5E). Pulang
+     * windows just close: an unscanned dismissal is "belum tercatat pulang"
+     * in the report, not an absence to invent.
      *
      * @return int how many students were swept into alpa
      */

@@ -346,7 +346,10 @@ class BillingApiGateway implements PaymentGateway
      */
     public function checkForSurpriseLatePayment(Payment $payment): void
     {
-        if (! in_array($payment->status, ['failed', 'cancelled'], true)) {
+        // 'expired' included (audit T67-e) - same reasoning as the poller's
+        // superseded query: this app stamped the expiry itself, and the bank
+        // has proven it may still take money on it.
+        if (! in_array($payment->status, ['failed', 'cancelled', 'expired'], true)) {
             return;
         }
 

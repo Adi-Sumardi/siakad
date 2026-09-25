@@ -106,8 +106,11 @@ class CheckoutService
 
             if (isset($customAmounts[$bill->ulid])) {
                 $custom = round((float) $customAmounts[$bill->ulid]);
-                if ($custom <= 0) {
-                    throw new RuntimeException("Nominal kustom untuk tagihan '{$bill->description}' harus lebih dari 0.");
+                // The portal's own form floor, enforced server-side too
+                // (audit T67-d): the browser min is only a hint, and a
+                // Rp 1 checkout mints a real e-SPP registration for noise.
+                if ($custom < 10000) {
+                    throw new RuntimeException("Nominal kustom untuk tagihan '{$bill->description}' minimal Rp 10.000.");
                 }
                 if ($custom > $remaining) {
                     throw new RuntimeException(

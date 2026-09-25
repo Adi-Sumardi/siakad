@@ -2,7 +2,7 @@
 
 import { use, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock, ImageUp, MapPin, QrCode, ScanLine, School } from "lucide-react";
-import { decodeQrFromFile, deviceId, getPosition, rememberNis, useQrScanner } from "@/lib/absen-qr";
+import { decodeQrFromFile, deviceId, getPosition, rememberNis, rememberedNis, useQrScanner } from "@/lib/absen-qr";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -98,6 +98,16 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
 
   async function start() {
     setError("");
+
+    // The gate remembers too (audit T65-d): this phone's NIS from the last
+    // scan is offered back so the morning ritual is one tap instead of a
+    // retype. Wrong number? The field stays editable. Prefilled here, in
+    // the user's own tap, rather than in an effect - no hydration story,
+    // no setState-in-effect.
+    const remembered = rememberedNis();
+    if (remembered && !nis) {
+      setNis(remembered);
+    }
 
     if (!info?.geo.required) {
       setScreen({ step: "nis" });

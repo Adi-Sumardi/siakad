@@ -55,7 +55,15 @@ export default function DashboardPage() {
   }, [user]);
 
   const totalTunggakan = students?.reduce((sum, s) => sum + s.tunggakan, 0) ?? 0;
-  const flaggedStudents = students?.filter((s) => s.poin?.threshold) ?? [];
+  // "Perlu perhatian" means the band signals TROUBLE (audit T67-b): a
+  // negative balance or a warn/bad band. The old any-threshold filter
+  // counted children sitting in a positive appreciation band too.
+  const flaggedStudents =
+    students?.filter((s) => {
+      if (!s.poin) return false;
+      const color = (s.poin.threshold?.color ?? "").toLowerCase();
+      return s.poin.balance < 0 || color === "warn" || color === "bad";
+    }) ?? [];
 
   if (loading || !user || user.role !== "orangtua") {
     return (

@@ -119,7 +119,10 @@ class DapodikExportService
             $wali?->pekerjaan ?: self::MANUAL,
             $wali?->penghasilan_bulanan ?: self::MANUAL,
 
-            $billingContact?->no_hp ?: self::MANUAL,
+            // "Nomor Telepon Rumah" left blank on purpose (audit T67-g): the
+            // app only knows the family's mobile number, and duplicating it
+            // here ships the same value twice for Dapodik to reconcile.
+            self::MANUAL, // Nomor Telepon Rumah
             $billingContact?->no_hp ?: self::MANUAL,
             $billingContact?->email ?: self::MANUAL,
 
@@ -154,7 +157,11 @@ class DapodikExportService
 
     private function tanggalMasuk(Student $student): string
     {
-        $date = $student->entryYear?->starts_on ?? $student->enrollments->min('joined_on');
+        // The enrollment's own joined_on first (audit T67-g): the academic
+        // year's starts_on is always July 1st, but a mid-year entrant's
+        // actual first day is what Dapodik asks for - the old order filled
+        // 01-07 for everyone.
+        $date = $student->enrollments->min('joined_on') ?? $student->entryYear?->starts_on;
 
         return $date ? \Illuminate\Support\Carbon::parse($date)->format('d-m-Y') : self::MANUAL;
     }

@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Services\Billing\BillPdfService;
 use App\Services\Billing\BillReminderSender;
 use App\Services\Billing\BillingApiClient;
+use App\Services\Billing\CheckoutService;
 use App\Services\Billing\PaymentAllocator;
 use App\Services\Notification\NotificationRetryService;
 use App\Services\Payment\BillingApiGateway;
@@ -776,5 +777,226 @@ class AuditSep25FixesTest extends TestCase
 
         $this->assertSame(5, $otp->fresh()->attempts);
         $this->assertFalse($otp->fresh()->isUsable());
+    }
+
+    // --------------------------------------------------------------- T65
+
+    /** An open daily session of the given type, dated today. */
+    private function openDailySession(string $type = 'masuk'): \App\Models\DailySession
+    {
+        return \App\Models\DailySession::create([
+            'school_unit_id' => $this->sdUnit->id,
+            'date' => now('Asia/Jakarta')->toDateString(),
+            'type' => $type,
+            'opens_at' => now('Asia/Jakarta')->subHour(),
+            'closes_at' => now('Asia/Jakarta')->addHours(2),
+            'status' => 'open',
+        ]);
+    }
+
+    public function test_a_pulang_session_refuses_morning_absence_statuses(): void
+    {
+        \App\Models\Term::create([
+            'academic_year_id' => $this->year->id,
+            'name' => 'ganjil',
+            'starts_on' => '2026-07-01',
+            'ends_on' => '2026-12-31',
+        ])->activate();
+
+        $student = Student::create([
+            'nama_lengkap' => 'Siswa Pulang Cepat', 'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'status' => 'active',
+        ]);
+
+        $pulang = $this->openDailySession('pulang');
+        $service = app(\App\Services\Attendance\DailyAttendanceService::class);
+
+        try {
+            $service->mark($pulang, $student, 'sakit', $this->admin, 'tu');
+            $this->fail('status pagi harus ditolak di sesi pulang');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Sesi pulang', $e->getMessage());
+        }
+
+        // Hadir stays valid on both windows.
+        $service->mark($pulang, $student, 'hadir', $this->admin, 'tu');
+        $this->assertDatabaseHas('daily_records', ['daily_session_id' => $pulang->id, 'attendance_status' => 'hadir']);
+    }
+
+    public function test_removing_today_from_active_days_closes_the_open_window_quietly(): void
+    {
+        // Every day EXCEPT today (audit T65-c): the unit just declared today
+        // is not an attendance day.
+        $today = (int) now('Asia/Jakarta')->dayOfWeekIso;
+        $days = collect([1, 2, 3, 4, 5])->reject(fn ($d) => $d === $today)->values()->all();
+
+        $setting = \App\Models\DailyAttendanceSetting::create([
+            'school_unit_id' => $this->sdUnit->id,
+            'enabled' => true,
+            'days' => $days,
+            'masuk_opens_at' => '06:30',
+            'masuk_closes_at' => '08:00',
+            'pulang_enabled' => false,
+            'intake_mode' => 'wali_kelas',
+        ]);
+
+        $session = $this->openDailySession('masuk');
+
+        app(\App\Services\Attendance\DailyAttendanceService::class)
+            ->resyncTodayWindows($setting, $this->admin);
+
+        // The window closes quietly - and no auto-alpa is invented for a day
+        // the unit itself withdrew, so the next sweep tick finds nothing to
+        // sweep.
+        $this->assertSame('closed', $session->fresh()->status);
+        $this->assertDatabaseCount('daily_records', 0);
+    }
+
+    public function test_a_same_day_unit_move_is_refused_while_a_daily_mark_is_live(): void
+    {
+        \App\Models\Term::create([
+            'academic_year_id' => $this->year->id,
+            'name' => 'ganjil',
+            'starts_on' => '2026-07-01',
+            'ends_on' => '2026-12-31',
+        ])->activate();
+
+        // No enrollment - the promotion-lane guard passes; only the
+        // same-day mark holds the move back (audit T65-a).
+        $student = Student::create([
+            'nama_lengkap' => 'Siswa Pindah Hari Ini', 'jenis_kelamin' => 'P',
+            'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'status' => 'active',
+        ]);
+
+        $session = $this->openDailySession('masuk');
+        \App\Models\DailyRecord::create([
+            'daily_session_id' => $session->id,
+            'student_id' => $student->id,
+            'term_id' => \App\Models\Term::current()->id,
+            'date' => now('Asia/Jakarta')->toDateString(),
+            'attendance_status' => 'hadir',
+            'source' => 'tu',
+            'checked_in_at' => now('Asia/Jakarta'),
+            'record_status' => 'recorded',
+        ]);
+
+        $this->actingAs($this->admin)
+            ->patchJson("/api/admin/students/{$student->ulid}", ['school_unit_ulid' => $this->raUnit->ulid])
+            ->assertStatus(422)
+            ->assertJsonPath('message', fn (string $m) => str_contains($m, 'presensi'));
+
+        // Without the live mark, the same move goes through.
+        \App\Models\DailyRecord::query()->update(['record_status' => 'revoked', 'revoked_at' => now(), 'revoke_reason' => 'uji']);
+
+        $this->actingAs($this->admin)
+            ->patchJson("/api/admin/students/{$student->ulid}", ['school_unit_ulid' => $this->raUnit->ulid])
+            ->assertOk();
+    }
+
+    public function test_an_overlapping_pulang_window_is_refused_up_front(): void
+    {
+        $response = $this->actingAs($this->admin)->patchJson('/api/admin/daily-attendance/settings', [
+            'unit' => $this->sdUnit->ulid,
+            'enabled' => true,
+            'days' => [1, 2, 3, 4, 5],
+            'masuk_opens_at' => '06:30',
+            'masuk_closes_at' => '08:00',
+            'pulang_enabled' => true,
+            'pulang_opens_at' => '07:30',
+            'pulang_closes_at' => '14:00',
+        ]);
+
+        // pulang opening before masuk closes made the gate serve MASUK for
+        // the whole overlap and gutted the device-once cross-window rule
+        // (audit T65-b) - refused at validation now.
+        $response->assertStatus(422)->assertInvalid('pulang_opens_at');
+    }
+
+    // --------------------------------------------------------------- T67
+
+    public function test_an_announcement_cannot_pair_a_foreign_units_classroom(): void
+    {
+        $classroom = \App\Models\Classroom::create([
+            'school_unit_id' => $this->sdUnit->id,
+            'academic_year_id' => $this->year->id,
+            'tingkat' => 1,
+            'name' => '1-A',
+            'is_active' => true,
+        ]);
+
+        // RA's unit code beside SD's classroom: the stored scope used to say
+        // one thing to staff and another to families (audit T67-h).
+        $this->actingAs($this->admin)
+            ->postJson('/api/admin/announcements', [
+                'title' => 'Pengumuman Silang',
+                'body' => 'Unit B dengan kelas unit A.',
+                'school_unit_code' => $this->raUnit->code,
+                'classroom_ulid' => $classroom->ulid,
+            ])
+            ->assertStatus(422);
+    }
+
+    public function test_a_custom_checkout_below_ten_thousand_is_refused(): void
+    {
+        $bill = $this->billedStudent();
+        $guardian = $bill->student->guardians->first();
+
+        $wali = User::create([
+            'name' => 'Wali Checkout Kecil',
+            'role' => 'orangtua',
+            'is_active' => true,
+        ]);
+        $guardian->forceFill(['user_id' => $wali->id])->save();
+
+        try {
+            app(CheckoutService::class)->start($wali, [$bill->ulid], 'virtual_account', [$bill->ulid => 5000]);
+            $this->fail('nominal kustom di bawah Rp 10.000 harus ditolak');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Rp 10.000', $e->getMessage());
+        }
+
+        $this->assertDatabaseCount('payments', 0);
+    }
+
+    public function test_an_expired_va_is_still_watched_by_the_surprise_late_payment_net(): void
+    {
+        $this->app->bind(BillingApiClient::class, function () {
+            return new class extends BillingApiClient
+            {
+                public function __construct() {}
+
+                public function getByVaNumber(string $vaNumber): array
+                {
+                    return ['sisa' => 0];
+                }
+            };
+        });
+
+        // A payment the poller itself stamped 'expired' - money landing on it
+        // must surface exactly like it does for a failed VA (audit T67-e).
+        Payment::create([
+            'payment_number' => 'PAY-SEP25-EXP',
+            'amount' => 100000,
+            'method' => 'virtual_account',
+            'status' => 'expired',
+            'failed_at' => now()->subDay(),
+            'expires_at' => now()->subDay(),
+            'gateway_response' => ['provider' => 'bank_muamalat', 'va_number' => 'VA-SEP25-EXP'],
+        ]);
+
+        // One pending row keeps the command past its empty-queue early return.
+        Payment::create([
+            'payment_number' => 'PAY-SEP25-EXP-P',
+            'amount' => 100000,
+            'method' => 'virtual_account',
+            'status' => 'processing',
+            'gateway_response' => ['provider' => 'bank_muamalat', 'va_number' => 'VA-SEP25-EXP-P'],
+        ]);
+
+        \Illuminate\Support\Facades\Log::spy();
+
+        $this->artisan('payments:poll-billing-va')->assertSuccessful();
+
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('critical')->once();
     }
 }
