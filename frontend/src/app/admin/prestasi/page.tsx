@@ -19,7 +19,7 @@ const STATUS_LABEL: Record<Achievement["status"], { label: string; variant: "goo
   rejected: { label: "Ditolak", variant: "bad" },
 };
 
-function DecisionRow({ achievement, onDecided }: { achievement: Achievement; onDecided: () => void }) {
+function DecisionRow({ achievement, onDecided, isTeacher = false }: { achievement: Achievement; onDecided: () => void; isTeacher?: boolean }) {
   const [mode, setMode] = useState<"verify" | "reject" | null>(null);
   const [points, setPoints] = useState("10");
   const [reason, setReason] = useState("");
@@ -31,9 +31,11 @@ function DecisionRow({ achievement, onDecided }: { achievement: Achievement; onD
     setError(null);
     try {
       await api.post(`/api/admin/achievements/${achievement.ulid}/verify`, {
-        points_awarded: points ? Number(points) : undefined,
+        // Teacher achievements carry no points - the merit ledger is a
+        // student construct (Poin 7).
+        ...(isTeacher ? {} : { points_awarded: points ? Number(points) : undefined }),
       });
-      toast.success("Prestasi berhasil diverifikasi dan poin ditambahkan ke siswa.");
+      toast.success(isTeacher ? "Prestasi guru berhasil diverifikasi." : "Prestasi berhasil diverifikasi dan poin ditambahkan ke siswa.");
       onDecided();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Gagal memverifikasi.");
@@ -65,7 +67,7 @@ function DecisionRow({ achievement, onDecided }: { achievement: Achievement; onD
       <div className="flex items-center gap-2 pt-2 border-t border-border/60">
         <Button size="sm" onClick={() => setMode("verify")} className="gap-1.5 text-xs font-semibold">
           <CheckCircle2 className="size-3.5" />
-          <span>Verifikasi & Beri Poin</span>
+          <span>{isTeacher ? "Verifikasi" : "Verifikasi & Beri Poin"}</span>
         </Button>
         <Button
           size="sm"
@@ -81,7 +83,7 @@ function DecisionRow({ achievement, onDecided }: { achievement: Achievement; onD
 
   return (
     <div className="flex w-full flex-col gap-3 border-t border-border/60 pt-3">
-      {mode === "verify" && (
+      {mode === "verify" && !isTeacher && (
         <div className="flex flex-col sm:flex-row sm:items-center gap-2">
           <Label htmlFor="points_input" className="text-xs">Poin Apresiasi Diberikan:</Label>
           <Input
@@ -130,33 +132,58 @@ function DecisionRow({ achievement, onDecided }: { achievement: Achievement; onD
 }
 
 export default function AdminAchievementsPage() {
-  const [achievements, setAchievements] = useState<(Achievement & { student?: { nama_lengkap: string } })[] | null>(null);
+  const [achievements, setAchievements] = useState<(Achievement & { student?: { nama_lengkap: string }; teacher?: { nama_lengkap: string } | null; school_unit?: string | null })[] | null>(null);
   const [filter, setFilter] = useState<"pending" | "">("pending");
+  // Poin 7: the tab picks whose achievements this screen lists - students
+  // (verified by admin/admin_unit as always) or teachers (verified by
+  // admin_unit of their unit only; central admin sees, decides nothing).
+  const [tab, setTab] = useState<"siswa" | "guru">("siswa");
 
   function load() {
-    const qs = filter ? `?status=${filter}` : "";
+    const params = new URLSearchParams();
+    if (filter) params.set("status", filter);
+    params.set("achiever_type", tab);
+    const qs = params.toString();
     api
-      .get<{ achievements: (Achievement & { student?: { nama_lengkap: string } })[] }>(`/api/admin/achievements${qs}`)
+      .get<{ achievements: (Achievement & { student?: { nama_lengkap: string }; teacher?: { nama_lengkap: string } | null; school_unit?: string | null })[] }>(`/api/admin/achievements?${qs}`)
       .then((d) => setAchievements(d.achievements))
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat prestasi."));
   }
 
   useEffect(() => {
     load();
-  }, [filter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filter, tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Verifikasi Prestasi Siswa</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Verifikasi Prestasi</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Daftar pengajuan piagam dan kejuaraan dari wali murid atau guru yang menunggu verifikasi.
+            {tab === "siswa"
+              ? "Pengajuan piagam dan kejuaraan siswa dari wali murid atau guru yang menunggu verifikasi."
+              : "Pengajuan prestasi guru — diverifikasi oleh admin unit sekolahnya."}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-input bg-card p-0.5 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setTab("siswa")}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${tab === "siswa" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Prestasi Siswa
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("guru")}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${tab === "guru" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Prestasi Guru
+            </button>
+          </div>
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value as "pending" | "")}
@@ -200,7 +227,12 @@ export default function AdminAchievementsPage() {
                   </div>
 
                   <p className="text-sm font-medium text-foreground mt-1">
-                    Siswa: <strong className="text-primary">{a.student?.nama_lengkap}</strong> · {a.kategori} · Tingkat {a.tingkat}
+                    {tab === "siswa" ? (
+                      <>Siswa: <strong className="text-primary">{a.student?.nama_lengkap}</strong></>
+                    ) : (
+                      <>Guru: <strong className="text-primary">{a.teacher?.nama_lengkap ?? "—"}</strong>{a.school_unit ? ` · ${a.school_unit}` : ""}</>
+                    )}
+                    {" · "}{a.kategori} · Tingkat {a.tingkat}
                     {a.juara && ` · Juara ${a.juara}`}
                   </p>
 
@@ -224,7 +256,7 @@ export default function AdminAchievementsPage() {
                 )}
               </div>
 
-              {a.status === "pending" && <DecisionRow achievement={a} onDecided={load} />}
+              {a.status === "pending" && <DecisionRow achievement={a} onDecided={load} isTeacher={tab === "guru"} />}
               {a.status === "rejected" && a.rejection_reason && (
                 <p className="mt-3 text-xs text-bad bg-bad-soft/40 p-2.5 rounded-lg">
                   Alasan Penolakan: {a.rejection_reason}

@@ -77,6 +77,8 @@ export type Payment = {
   gateway_response?: GatewayResponseInfo | null;
   paid_at: string | null;
   created_at: string;
+  /** Shareable login-free receipt path (Poin 11C) - settled payments only. */
+  receipt_url?: string | null;
   bills?: Bill[];
 };
 

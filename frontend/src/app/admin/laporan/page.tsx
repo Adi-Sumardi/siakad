@@ -5,19 +5,23 @@ import { toast } from "sonner";
 import {
   Calendar,
   CreditCard,
+  FileDown,
   Layers,
+  Link2,
   RefreshCw,
   TrendingDown,
   TrendingUp,
   Users,
 } from "lucide-react";
 
+import { useAuth } from "@/lib/auth/auth-context";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError } from "@/lib/api";
+import { API_BASE, api, ApiError } from "@/lib/api";
 import { rupiah, todayJakarta } from "@/lib/format";
 
 type Receivables = {
@@ -46,7 +50,33 @@ function firstOfMonth(): string {
   return todayJakarta().slice(0, 7) + "-01";
 }
 
+type TxnRow = {
+  ulid: string;
+  payment_number: string;
+  reference_number: string;
+  amount: number;
+  method: string;
+  channel: string | null;
+  status: string;
+  paid_at: string | null;
+  created_at: string;
+  receipt_url: string | null;
+  bills: { bill_number: string; description: string; fee_type?: { name: string } | null; student?: { nama_lengkap: string; nis?: string | null; school_unit?: { label: string } | null } | null }[];
+};
+
+const TXN_STATUS: Record<string, { label: string; variant: "good" | "warn" | "bad" | "default" }> = {
+  completed: { label: "Lunas", variant: "good" },
+  pending: { label: "Menunggu", variant: "warn" },
+  processing: { label: "Diproses", variant: "warn" },
+  failed: { label: "Gagal", variant: "bad" },
+  expired: { label: "Kedaluwarsa", variant: "bad" },
+  cancelled: { label: "Dibatalkan", variant: "default" },
+};
+
 export default function ReportsPage() {
+  const { user } = useAuth();
+  const isCentral = user?.role === "admin";
+
   const [receivables, setReceivables] = useState<Receivables | null>(null);
   const [collections, setCollections] = useState<Collections | null>(null);
   const [attendance, setAttendance] = useState<Attendance | null>(null);
@@ -56,6 +86,36 @@ export default function ReportsPage() {
   // callback. First-load skeletons derive from the data states being null,
   // so refetching keeps the previous report on screen.
   const [refreshing, setRefreshing] = useState(false);
+
+  // Riwayat Transaksi (Poin 11A): its own filter set + pagination.
+  const [txns, setTxns] = useState<{ data: TxnRow[]; meta: { current_page: number; last_page: number; total: number } } | null>(null);
+  const [txnQ, setTxnQ] = useState("");
+  const [txnStatus, setTxnStatus] = useState("");
+  const [txnUnit, setTxnUnit] = useState("");
+  const [txnPage, setTxnPage] = useState(1);
+  const [unitOptions, setUnitOptions] = useState<{ code: string; label: string }[]>([]);
+
+  function loadTxns(page = txnPage) {
+    const params = new URLSearchParams();
+    if (txnQ.trim()) params.set("q", txnQ.trim());
+    if (txnStatus) params.set("status", txnStatus);
+    if (txnUnit) params.set("unit", txnUnit);
+    params.set("page", String(page));
+    api
+      .get<{ payments: { data: TxnRow[]; meta: { current_page: number; last_page: number; total: number } } }>(`/api/admin/payments?${params}`)
+      .then((d) => setTxns(d.payments))
+      .catch(() => setTxns({ data: [], meta: { current_page: 1, last_page: 1, total: 0 } }));
+  }
+
+  useEffect(() => {
+    loadTxns(1);
+    if (isCentral) {
+      api.get<{ school_units: { code: string; label: string }[] }>("/api/admin/school-units")
+        .then((d) => setUnitOptions(d.school_units))
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [txnStatus, txnUnit, isCentral]);
 
   // .then() chains (not async/await) so setState only ever runs in an async
   // callback - the effect below calls this synchronously, and awaiting first
@@ -193,6 +253,165 @@ export default function ReportsPage() {
               </div>
             </Card>
           </div>
+        )}
+      </div>
+
+      {/* SECTION 1b: RIWAYAT TRANSAKSI (Poin 11A) */}
+      <div className="space-y-4">
+        <div className="bg-muted/40 p-4 rounded-2xl border border-border">
+          <h2 className="text-base font-bold text-foreground flex items-center gap-2">
+            <Layers className="size-4.5 text-primary" />
+            <span>Riwayat Transaksi</span>
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Setiap pembayaran dengan filter lengkap — cari nomor, siswa, unit, status, dan unduh kuitansi per transaksi.
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-end gap-2.5">
+            <div className="flex flex-col gap-1 min-w-[200px] flex-1">
+              <Label className="text-[11px] font-semibold uppercase text-muted-foreground">Cari</Label>
+              <Input
+                value={txnQ}
+                onChange={(e) => setTxnQ(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { setTxnPage(1); loadTxns(1); } }}
+                placeholder="No. pembayaran / tagihan / nama / NIS…"
+                className="h-9 bg-card text-xs shadow-2xs"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label className="text-[11px] font-semibold uppercase text-muted-foreground">Status</Label>
+              <select
+                value={txnStatus}
+                onChange={(e) => { setTxnStatus(e.target.value); setTxnPage(1); }}
+                className="h-9 w-36 rounded-lg border border-input bg-card px-2.5 text-xs shadow-2xs"
+              >
+                <option value="">Semua</option>
+                <option value="completed">Lunas</option>
+                <option value="pending">Menunggu</option>
+                <option value="processing">Diproses</option>
+                <option value="failed">Gagal</option>
+                <option value="expired">Kedaluwarsa</option>
+              </select>
+            </div>
+            {isCentral && (
+              <div className="flex flex-col gap-1">
+                <Label className="text-[11px] font-semibold uppercase text-muted-foreground">Unit</Label>
+                <select
+                  value={txnUnit}
+                  onChange={(e) => { setTxnUnit(e.target.value); setTxnPage(1); }}
+                  className="h-9 w-44 rounded-lg border border-input bg-card px-2.5 text-xs shadow-2xs"
+                >
+                  <option value="">Semua Unit</option>
+                  {unitOptions.map((u) => <option key={u.code} value={u.code}>{u.label}</option>)}
+                </select>
+              </div>
+            )}
+            <Button size="sm" variant="outline" className="h-9 text-xs" onClick={() => { setTxnPage(1); loadTxns(1); }}>
+              Cari
+            </Button>
+          </div>
+        </div>
+
+        {txns === null ? (
+          <Skeleton className="h-56 w-full rounded-2xl" />
+        ) : txns.data.length === 0 ? (
+          <Card className="p-8 text-center text-sm text-muted-foreground">Tidak ada transaksi untuk filter ini.</Card>
+        ) : (
+          <>
+            <Card className="overflow-x-auto p-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <th className="px-4 py-3">No. Referensi</th>
+                    <th className="px-4 py-3">Tanggal Bayar</th>
+                    <th className="px-4 py-3">Siswa</th>
+                    <th className="px-4 py-3">Unit</th>
+                    <th className="px-4 py-3">Jenis Tagihan</th>
+                    <th className="px-4 py-3 text-right">Nominal</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {txns.data.map((t) => {
+                    const first = t.bills[0];
+                    const feeNames = [...new Set(t.bills.map((b) => b.fee_type?.name).filter(Boolean))].join(", ");
+                    const status = TXN_STATUS[t.status] ?? { label: t.status, variant: "default" as const };
+
+                    return (
+                      <tr key={t.ulid} className="border-b border-border/60 last:border-0 hover:bg-muted/20 transition-colors">
+                        <td className="px-4 py-3">
+                          <p className="font-mono text-xs font-bold text-foreground">{t.reference_number}</p>
+                          <p className="text-[11px] text-muted-foreground font-mono">{t.payment_number}</p>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">
+                          {t.paid_at ? new Date(t.paid_at).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="text-xs font-semibold text-foreground">{first?.student?.nama_lengkap ?? "—"}</p>
+                          {first?.student?.nis && <p className="text-[11px] text-muted-foreground">NIS {first.student.nis}</p>}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">
+                          {first?.student?.school_unit?.label ?? "—"}
+                        </td>
+                        <td className="px-4 py-3 text-xs">{feeNames || first?.description || "—"}</td>
+                        <td className="px-4 py-3 text-right font-bold tabular text-foreground">{rupiah(t.amount)}</td>
+                        <td className="px-4 py-3"><Badge variant={status.variant}>{status.label}</Badge></td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {t.status === "completed" && (
+                              <>
+                                <a
+                                  href={`${API_BASE}/api/admin/payments/${t.ulid}/receipt`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title="Unduh kuitansi PDF"
+                                  className="rounded-lg border border-input bg-card p-1.5 text-muted-foreground transition-colors hover:text-primary"
+                                >
+                                  <FileDown className="size-3.5" />
+                                </a>
+                                <button
+                                  type="button"
+                                  title="Salin tautan struk publik"
+                                  onClick={() => {
+                                    api.post<{ url: string }>(`/api/admin/payments/${t.ulid}/share-link`, {})
+                                      .then(({ url }) => {
+                                        navigator.clipboard.writeText(window.location.origin + url);
+                                        toast.success("Tautan struk publik disalin ke clipboard.");
+                                      })
+                                      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal membuat tautan."));
+                                  }}
+                                  className="rounded-lg border border-input bg-card p-1.5 text-muted-foreground transition-colors hover:text-primary"
+                                >
+                                  <Link2 className="size-3.5" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </Card>
+
+            {txns.meta.last_page > 1 && (
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <p className="text-muted-foreground">
+                  Halaman {txns.meta.current_page} dari {txns.meta.last_page} · {txns.meta.total} transaksi
+                </p>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" disabled={txns.meta.current_page <= 1} onClick={() => { const p = Math.max(1, txnPage - 1); setTxnPage(p); loadTxns(p); }}>
+                    Sebelumnya
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={txns.meta.current_page >= txns.meta.last_page} onClick={() => { const p = txnPage + 1; setTxnPage(p); loadTxns(p); }}>
+                    Berikutnya
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 

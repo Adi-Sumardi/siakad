@@ -16,6 +16,11 @@ type Classroom = { ulid: string; name: string };
 type StudentRow = { ulid: string; nama_lengkap: string };
 
 export default function GuruAchievementPage() {
+  // Poin 7: two tabs - a student's achievement (proposed here, verified by
+  // the child's wali kelas) or the teacher's own (verified by their
+  // admin_unit). Neither lands verified-on-arrival anymore.
+  const [tab, setTab] = useState<"siswa" | "diri">("siswa");
+
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [classroomUlid, setClassroomUlid] = useState("");
   const [students, setStudents] = useState<StudentRow[]>([]);
@@ -25,6 +30,7 @@ export default function GuruAchievementPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (tab !== "siswa") return;
     api
       .get<{ classrooms: Classroom[] }>("/api/guru/classrooms")
       .then((d) => {
@@ -32,10 +38,10 @@ export default function GuruAchievementPage() {
         if (d.classrooms[0]) setClassroomUlid(d.classrooms[0].ulid);
       })
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar kelas."));
-  }, []);
+  }, [tab]);
 
   useEffect(() => {
-    if (!classroomUlid) return;
+    if (!classroomUlid || tab !== "siswa") return;
     api
       .get<{ students: StudentRow[] }>(`/api/guru/classrooms/${classroomUlid}/students`)
       .then((d) => {
@@ -43,7 +49,7 @@ export default function GuruAchievementPage() {
         setStudentUlid(d.students[0]?.ulid ?? "");
       })
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar siswa."));
-  }, [classroomUlid]);
+  }, [classroomUlid, tab]);
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -51,11 +57,16 @@ export default function GuruAchievementPage() {
     setError(null);
 
     const form = new FormData(e.currentTarget);
-    form.set("student_ulid", studentUlid);
 
     try {
-      await api.post("/api/guru/achievements", form);
-      toast.success("Prestasi berhasil dicatat dan otomatis terverifikasi.");
+      if (tab === "siswa") {
+        form.set("student_ulid", studentUlid);
+        await api.post("/api/guru/achievements", form);
+        toast.success("Pengajuan prestasi siswa tersimpan — menunggu verifikasi wali kelas.");
+      } else {
+        await api.post("/api/guru/achievements/self", form);
+        toast.success("Pengajuan prestasi pribadi tersimpan — menunggu verifikasi admin unit.");
+      }
       (e.target as HTMLFormElement).reset();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Gagal menyimpan.");
@@ -72,38 +83,59 @@ export default function GuruAchievementPage() {
           <span>Kembali ke Kelas Saya</span>
         </Link>
         <div className="mt-2">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Catat Prestasi Siswa</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Ajukan Prestasi</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Prestasi yang dicatat guru/wali kelas otomatis terverifikasi dan poin apresiasi langsung diberikan.
+            {tab === "siswa"
+              ? "Pengajuan prestasi siswa diverifikasi oleh wali kelas anak sebelum poin diberikan."
+              : "Pengajuan prestasi pribadi diverifikasi oleh admin unit sekolah Anda."}
           </p>
         </div>
       </div>
 
+      <div className="flex w-fit rounded-lg border border-input bg-card p-0.5 shadow-2xs">
+        <button
+          type="button"
+          onClick={() => setTab("siswa")}
+          className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${tab === "siswa" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+        >
+          Prestasi Siswa
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("diri")}
+          className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${tab === "diri" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+        >
+          Prestasi Diri Saya
+        </button>
+      </div>
+
       <Card className="p-6 border-border/80 shadow-md max-w-4xl">
         <form onSubmit={submit} className="space-y-4" noValidate>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <Label className="text-xs">Pilih Kelas</Label>
-              <select
-                value={classroomUlid}
-                onChange={(e) => setClassroomUlid(e.target.value)}
-                className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:ring-2 focus:ring-primary"
-              >
-                {classrooms.map((c) => <option key={c.ulid} value={c.ulid}>Kelas {c.name}</option>)}
-              </select>
+          {tab === "siswa" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs">Pilih Kelas</Label>
+                <select
+                  value={classroomUlid}
+                  onChange={(e) => setClassroomUlid(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:ring-2 focus:ring-primary"
+                >
+                  {classrooms.map((c) => <option key={c.ulid} value={c.ulid}>Kelas {c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs">Pilih Siswa</Label>
+                <select
+                  value={studentUlid}
+                  onChange={(e) => setStudentUlid(e.target.value)}
+                  required
+                  className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:ring-2 focus:ring-primary"
+                >
+                  {students.map((s) => <option key={s.ulid} value={s.ulid}>{s.nama_lengkap}</option>)}
+                </select>
+              </div>
             </div>
-            <div>
-              <Label className="text-xs">Pilih Siswa</Label>
-              <select
-                value={studentUlid}
-                onChange={(e) => setStudentUlid(e.target.value)}
-                required
-                className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:ring-2 focus:ring-primary"
-              >
-                {students.map((s) => <option key={s.ulid} value={s.ulid}>{s.nama_lengkap}</option>)}
-              </select>
-            </div>
-          </div>
+          )}
 
           <div>
             <Label htmlFor="nama_prestasi" className="text-xs">Nama Prestasi / Juara</Label>
@@ -137,10 +169,15 @@ export default function GuruAchievementPage() {
               <Label htmlFor="tanggal_event" className="text-xs">Tanggal Pelaksanaan</Label>
               <Input id="tanggal_event" name="tanggal_event" type="date" max={todayJakarta()} className="mt-1" />
             </div>
-            <div>
-              <Label htmlFor="points_awarded" className="text-xs">Poin Apresiasi Diberikan</Label>
-              <Input id="points_awarded" name="points_awarded" type="number" min={1} placeholder="contoh: 20" defaultValue="15" className="mt-1 font-bold" />
-            </div>
+            {tab === "siswa" && (
+              <div>
+                <Label htmlFor="points_awarded" className="text-xs">Usulan Poin Apresiasi</Label>
+                <Input id="points_awarded" name="points_awarded" type="number" min={1} placeholder="contoh: 20" defaultValue="15" className="mt-1 font-bold" />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Usulan saja — poin baru diberikan saat wali kelas memverifikasi.
+                </p>
+              </div>
+            )}
           </div>
 
           <div>

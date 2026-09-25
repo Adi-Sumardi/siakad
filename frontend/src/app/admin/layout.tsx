@@ -42,10 +42,10 @@ const NAV: StaffNavItem[] = [
   { href: "/admin/presensi-harian", label: "Presensi Harian", icon: CalendarCheck2, group: "Akademik" },
   { href: "/admin/nilai", label: "Nilai & Rapor", icon: ClipboardList, group: "Akademik" },
 
-  { href: "/admin/ekstrakurikuler", label: "Ekstrakurikuler", icon: Trophy, group: "Kesiswaan" },
-  { href: "/admin/poin", label: "Poin & Tata Tertib", icon: Sparkles, group: "Kesiswaan" },
-  { href: "/admin/prestasi", label: "Prestasi Siswa", icon: Award, group: "Kesiswaan" },
-  { href: "/admin/informasi", label: "Pengumuman", icon: Megaphone, group: "Kesiswaan" },
+  { href: "/admin/ekstrakurikuler", label: "Ekstrakurikuler", icon: Trophy, group: "Kesiswaan & Guru" },
+  { href: "/admin/poin", label: "Poin & Tata Tertib", icon: Sparkles, group: "Kesiswaan & Guru" },
+  { href: "/admin/prestasi", label: "Prestasi", icon: Award, group: "Kesiswaan & Guru" },
+  { href: "/admin/informasi", label: "Pengumuman", icon: Megaphone, group: "Kesiswaan & Guru" },
 
   { href: "/admin/tagihan", label: "Tagihan & Transaksi", icon: Receipt, group: "Keuangan" },
   { href: "/admin/generate", label: "Terbitkan SPP Massal", icon: Wallet, group: "Keuangan" },

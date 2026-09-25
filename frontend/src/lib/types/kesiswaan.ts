@@ -171,6 +171,11 @@ export type Achievement = {
   verified_at: string | null;
   rejection_reason: string | null;
   created_at: string;
+  /** Whose achievement (Poin 7): "siswa" (default) or "guru". */
+  achiever_type?: "siswa" | "guru";
+  student?: { ulid: string; nama_lengkap: string; nama_panggilan: string | null } | null;
+  teacher?: { ulid: string; nama_lengkap: string } | null;
+  school_unit?: string | null;
 };
 
 export type Announcement = {

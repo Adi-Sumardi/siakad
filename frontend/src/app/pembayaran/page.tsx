@@ -246,6 +246,21 @@ function PaymentsContent() {
 
                     <p className="text-xs text-muted-foreground">
                       No. Referensi: <span className="font-mono font-bold text-foreground">{payment.reference_number}</span> · Dibuat: {tanggal(payment.created_at)}
+                      {payment.receipt_url && (
+                        <>
+                          {" · "}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(window.location.origin + payment.receipt_url);
+                              toast.success("Tautan struk publik disalin - bisa dibuka tanpa login.");
+                            }}
+                            className="font-semibold text-primary hover:underline"
+                          >
+                            Salin tautan struk
+                          </button>
+                        </>
+                      )}
                     </p>
 
                     <p className="text-xs text-muted-foreground">
