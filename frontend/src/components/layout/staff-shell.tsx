@@ -1,47 +1,39 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Menu, ShieldCheck, X } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { UserMenu } from "@/components/layout/user-menu";
-import { SidebarNav, useNavGroups, type StaffNavSection } from "@/components/layout/sidebar-nav";
 import { useAuth } from "@/lib/auth/auth-context";
 import { cn } from "@/lib/utils";
 
-export type { StaffNavItem, StaffNavGroup, StaffNavSection } from "./sidebar-nav";
+export type StaffNavItem = {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  centralOnly?: boolean;
+  /** Sidebar section heading. Consecutive items sharing one are listed
+      under it; an item with none sits at the top without a heading. */
+  group?: string;
+};
 
 export function StaffShell({
   nav,
   unitLabel,
   children,
 }: {
-  nav: StaffNavSection[];
+  nav: StaffNavItem[];
   unitLabel?: string;
   children: React.ReactNode;
 }) {
   const { user } = useAuth();
+  const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const identitySubtitle = unitLabel ?? (user?.role === "admin" ? "Admin Pusat" : user?.role);
 
-  // nav is a module-level const in both layouts, so this memo holds steady
-  // and the pathname effect inside useNavGroups never re-runs from churn.
-  // centralOnly filtering happens before any group logic so hidden items can
-  // never open a group on their own; a group emptied by the filter (none
-  // today — Sistem keeps Manajemen Pengguna) is dropped entirely.
-  const visibleSections = useMemo(() => {
-    const isCentral = user?.role === "admin";
-    return nav
-      .map((section) =>
-        "items" in section
-          ? { ...section, items: section.items.filter((item) => !item.centralOnly || isCentral) }
-          : section,
-      )
-      .filter((section) => !("items" in section) || section.items.length > 0);
-  }, [nav, user?.role]);
-
-  // Lifted here rather than inside SidebarNav: the drawer and the desktop
-  // aside are both mounted and must read one truth.
-  const { openGroups, toggleGroup } = useNavGroups(visibleSections);
+  const visibleNav = nav.filter((item) => !item.centralOnly || user?.role === "admin");
 
   return (
     <div className="min-h-dvh bg-canvas md:flex">
@@ -72,15 +64,7 @@ export function StaffShell({
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-4">
-          <div className="mb-3 px-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Menu Utama</p>
-          </div>
-          <SidebarNav
-            sections={visibleSections}
-            openGroups={openGroups}
-            onToggleGroup={toggleGroup}
-            onNavigate={() => setMobileOpen(false)}
-          />
+          <NavSections items={visibleNav} pathname={pathname} onNavigate={() => setMobileOpen(false)} />
         </div>
 
         <div className="border-t border-border bg-card/60 p-4">
@@ -106,10 +90,7 @@ export function StaffShell({
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-4">
-          <div className="mb-2 px-3">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Menu Navigasi</p>
-          </div>
-          <SidebarNav sections={visibleSections} openGroups={openGroups} onToggleGroup={toggleGroup} />
+          <NavSections items={visibleNav} pathname={pathname} />
         </div>
 
         {/* User Card in Desktop Sidebar - identity only; Profil/Keluar live
@@ -155,6 +136,66 @@ export function StaffShell({
           {children}
         </main>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The nav list, split into headed sections by each item's `group`. A nav
+ * with no groups at all (guru) keeps the single "Menu Navigasi" heading;
+ * a section left empty by the centralOnly filter never renders its heading.
+ */
+function NavSections({
+  items,
+  pathname,
+  onNavigate,
+}: {
+  items: StaffNavItem[];
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  const grouped = items.some((item) => item.group);
+  const sections: Array<{ title: string | null; items: StaffNavItem[] }> = [];
+
+  for (const item of items) {
+    const title = grouped ? (item.group ?? null) : "Menu Navigasi";
+    const last = sections[sections.length - 1];
+    if (last && last.title === title) last.items.push(item);
+    else sections.push({ title, items: [item] });
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {sections.map((section, i) => (
+        <div key={`${section.title ?? "top"}-${i}`}>
+          {section.title && (
+            <p className="mb-1.5 px-3 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">{section.title}</p>
+          )}
+          <nav className="flex flex-col gap-0.5" aria-label={section.title ?? "Menu"}>
+            {section.items.map((item) => {
+              const active = pathname === item.href || (item.href !== "/admin" && item.href !== "/guru" && pathname.startsWith(`${item.href}/`));
+              const Icon = item.icon;
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={onNavigate}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl px-3.5 py-2 text-sm font-medium transition-all",
+                    active
+                      ? "bg-primary text-primary-foreground shadow-sm font-semibold"
+                      : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-4.5 shrink-0" />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+      ))}
     </div>
   );
 }
