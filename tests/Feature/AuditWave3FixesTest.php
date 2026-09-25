@@ -169,6 +169,26 @@ class AuditWave3FixesTest extends TestCase
             ->assertJsonPath('state', 'open')
             ->assertJsonPath('session.type', 'pulang');
 
+        // A dismissal scan without a live morning mark is refused honestly
+        // (audit T46-a): the sweep already alpa'd this student, and a
+        // "successful" pulang scan used to leave the official day alpa
+        // while the screen celebrated.
+        $this->postJson('/api/absen/publik-smp/check-in', $this->gatePayload($pulang, '30002', 'device-pulang'))
+            ->assertStatus(400)
+            ->assertJsonPath('message', 'Belum ada catatan absen masuk hari ini - hubungi Tata Usaha untuk dicatat manual.');
+
+        // The TU lane puts the morning mark on file; pulang then serves.
+        \App\Models\DailyRecord::create([
+            'daily_session_id' => $masuk->id,
+            'student_id' => $student->id,
+            'term_id' => \App\Models\Term::current()?->id,
+            'date' => $masuk->date,
+            'attendance_status' => 'hadir',
+            'source' => 'tu',
+            'checked_in_at' => now(),
+            'record_status' => 'recorded',
+        ]);
+
         $this->postJson('/api/absen/publik-smp/check-in', $this->gatePayload($pulang, '30002', 'device-pulang'))
             ->assertStatus(200);
 

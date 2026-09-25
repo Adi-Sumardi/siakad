@@ -48,7 +48,12 @@ class AttendanceReportController extends Controller
         ];
 
         $byClass = $records
-            ->groupBy(fn (DailyRecord $r) => $r->classroom?->name ?? 'Tanpa kelas')
+            // Unit-scoped key (audit T46-e): "1A" exists in more than one
+            // unit, and a name-only group merged them (plus every unplaced
+            // student into one shared 'Tanpa kelas' bucket).
+            ->groupBy(fn (DailyRecord $r) => ($r->dailySession?->schoolUnit?->label ?? 'Tanpa unit')
+                .' · '
+                .($r->classroom?->name ?? 'Tanpa kelas'))
             ->map(fn ($group, $kelas) => ['kelas' => $kelas, ...$tally($group)])
             ->sortByDesc('alpa')
             ->values();

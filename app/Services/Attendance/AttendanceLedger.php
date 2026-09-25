@@ -11,6 +11,7 @@ use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -57,6 +58,20 @@ class AttendanceLedger
         }
 
         $deviceHash = ! empty($deviceId) ? hash('sha256', (string) $deviceId) : null;
+
+        // Cross-layer device mutex (audit T46-c) - see
+        // DailyAttendanceService::selfCheckIn() for the reasoning; both
+        // lanes take this same lock keyed by the device hash.
+        $deviceLock = null;
+
+        if ($deviceHash) {
+            try {
+                $deviceLock = Cache::lock('absen-device:'.$deviceHash, 10);
+                $deviceLock->block(5);
+            } catch (\Throwable) {
+                $deviceLock = null;
+            }
+        }
 
         try {
             return DB::transaction(function () use ($session, $student, $deviceHash) {
@@ -128,6 +143,8 @@ class AttendanceLedger
             // the student pre-check cannot race itself (same student, same
             // lock), so the collision is the device index by elimination.
             throw new RuntimeException('Perangkat ini sudah dipakai presensi siswa lain hari ini.');
+        } finally {
+            $deviceLock?->release();
         }
     }
 

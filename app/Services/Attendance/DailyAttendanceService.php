@@ -2,6 +2,7 @@
 
 namespace App\Services\Attendance;
 
+use App\Models\ActivityLog;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\Classroom;
@@ -15,8 +16,10 @@ use App\Models\Student;
 use App\Models\Term;
 use App\Models\User;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -227,7 +230,7 @@ class DailyAttendanceService
                 // Only the machine's own alpa rows, never a human's mark - a
                 // corrected-to-sakit row was already superseded, and a TU's
                 // manual alpa was somebody's decision, not the window's.
-                DailyRecord::where('daily_session_id', $session->id)
+                $revoked = DailyRecord::where('daily_session_id', $session->id)
                     ->active()
                     ->where('attendance_status', 'alpa')
                     ->where('description', self::AUTO_SWEEP_DESCRIPTION)
@@ -236,6 +239,14 @@ class DailyAttendanceService
                         $this->revoke($record, $by, 'Jendela absen diubah admin - alpa otomatis dibatalkan, siswa dapat absen ulang.');
                         $this->syncEnrollmentRollup($record->student);
                     });
+
+                // Reopening a window is a big administrative move (audit
+                // T46-d) - previously the only trace was opened_by.
+                ActivityLog::record($by, 'daily_attendance.window_reopened', $session, [
+                    'opens_at' => (string) $opens,
+                    'closes_at' => $newClosesAt->format('H:i'),
+                    'alpa_revoked' => $revoked->count(),
+                ]);
             });
         }
     }
@@ -340,7 +351,7 @@ class DailyAttendanceService
         $at ??= Carbon::now('Asia/Jakarta');
         $isLate = $status === 'terlambat';
 
-        $record = DB::transaction(function () use ($session, $student, $status, $by, $source, $description, $at, $isLate, $term) {
+        $attempt = fn () => DB::transaction(function () use ($session, $student, $status, $by, $source, $description, $at, $isLate, $term) {
             $existing = DailyRecord::where('daily_session_id', $session->id)
                 ->where('student_id', $student->id)
                 ->active()
@@ -365,6 +376,28 @@ class DailyAttendanceService
                 'record_status' => 'recorded',
             ]);
         });
+
+        try {
+            $record = $attempt();
+        } catch (UniqueConstraintViolationException) {
+            // A self-check-in scan raced this manual mark (audit T46-b):
+            // both passed the "no live mark" read before either wrote, and
+            // the violation used to surface as a bare 500 on the TU board.
+            // The retry's revoke pass eats the racing row - the same
+            // supersede semantics any re-mark already has.
+            $record = $attempt();
+        }
+
+        // The daily layer finally writes its own audit trail (audit T46-d):
+        // a TU mark is a human decision on the official record, invisible
+        // in the admin activity feed until now.
+        if ($source === 'tu') {
+            ActivityLog::record($by, 'daily_attendance.marked', $record, [
+                'student' => $student->nama_lengkap,
+                'status' => $isLate ? 'hadir (terlambat)' : $status,
+                'session' => $session->type,
+            ]);
+        }
 
         $this->syncEnrollmentRollup($student);
 
@@ -440,6 +473,25 @@ class DailyAttendanceService
         $deviceHash = ! empty($input['device_id']) ? hash('sha256', (string) $input['device_id']) : null;
         $ipHash = ! empty($input['ip']) ? hash('sha256', (string) $input['ip']) : null;
 
+        // Cross-layer device mutex (audit T46-c): this lane locks its OWN
+        // session row and the lesson lane locks a different table's, so a
+        // phone scanning the gate and the first lesson in the same second
+        // could both pass their device checks before either write landed.
+        // One lock, keyed by the device hash, spans both lanes
+        // (AttendanceLedger::checkIn takes the same one). Best-effort: a
+        // store without lock support just proceeds, with the partial
+        // uniques as the backstop.
+        $deviceLock = null;
+
+        if ($deviceHash) {
+            try {
+                $deviceLock = Cache::lock('absen-device:'.$deviceHash, 10);
+                $deviceLock->block(5);
+            } catch (\Throwable) {
+                $deviceLock = null;
+            }
+        }
+
         try {
             $record = DB::transaction(function () use ($session, $student, $term, $at, $isLate, $deviceHash, $ipHash) {
                 // Serialise concurrent scans for this session the same way
@@ -463,6 +515,25 @@ class DailyAttendanceService
                 if (DailyRecord::where('daily_session_id', $session->id)
                     ->where('student_id', $student->id)->active()->exists()) {
                     throw new RuntimeException($alreadyMessage);
+                }
+
+                if ($session->type === 'pulang') {
+                    // A dismissal scan without a live morning mark (audit
+                    // T46-a): the morning sweep already alpa'd this student,
+                    // and a "successful" afternoon scan left the official day
+                    // alpa in every report while the screen celebrated.
+                    // Refuse honestly and point at the desk - the TU mark
+                    // lane is the correction path, not the gate.
+                    $hasMasuk = DailyRecord::query()
+                        ->where('student_id', $student->id)
+                        ->active()
+                        ->whereDate('date', $session->date)
+                        ->whereHas('dailySession', fn ($q) => $q->where('type', 'masuk'))
+                        ->exists();
+
+                    if (! $hasMasuk) {
+                        throw new RuntimeException('Belum ada catatan absen masuk hari ini - hubungi Tata Usaha untuk dicatat manual.');
+                    }
                 }
 
                 if ($deviceHash && DailyRecord::query()
@@ -520,6 +591,8 @@ class DailyAttendanceService
             }
 
             throw new RuntimeException('Perangkat ini sudah dipakai absen siswa lain hari ini.');
+        } finally {
+            $deviceLock?->release();
         }
 
         $this->syncEnrollmentRollup($student);
@@ -787,6 +860,18 @@ class DailyAttendanceService
         // A swept alpa changes the watchlist's numbers, so the rollup must
         // land for every record the window just closed out.
         $records->each(fn (DailyRecord $record) => $this->syncEnrollmentRollup($record->student));
+
+        // The daily layer finally writes its own audit trail (audit T46-d):
+        // one summary line per swept window - whole cohorts of auto-alpa
+        // were invisible in the admin activity feed until now.
+        if ($missed->isNotEmpty()) {
+            ActivityLog::record($by, 'daily_attendance.swept', $session, [
+                'unit' => $session->schoolUnit?->label,
+                'date' => $session->date?->toDateString(),
+                'window' => $session->type,
+                'alpa_count' => $missed->count(),
+            ]);
+        }
 
         return $missed->count();
     }

@@ -562,7 +562,8 @@ class AttendanceSessionTest extends TestCase
 
         $this->assertSame(1, $response->json('summary.hadir'));
         $this->assertSame(1, $response->json('summary.total_records'));
-        $this->assertSame($classroom->name, $response->json('by_class.0.kelas'));
+        // Unit-scoped since audit T46-e: "1A" exists in more than one unit.
+        $this->assertSame($this->sd->label.' · '.$classroom->name, $response->json('by_class.0.kelas'));
         $this->assertSame('SD Sakinah', $response->json('by_unit.0.unit'));
     }
 
