@@ -1669,4 +1669,52 @@ class AuditSep25FixesTest extends TestCase
         $this->assertSame('completed', $pending->fresh()->status);
         $this->assertSame('paid', $bill->fresh()->status);
     }
+
+    // ------------------------------------------------------------- §6a-3
+
+    public function test_a_holiday_on_a_day_no_unit_operates_on_is_flagged(): void
+    {
+        // Every weekday EXCEPT today's, so "today" is a dead day.
+        $today = (int) now('Asia/Jakarta')->dayOfWeekIso;
+
+        \App\Models\DailyAttendanceSetting::create([
+            'school_unit_id' => $this->sdUnit->id,
+            'enabled' => true,
+            'days' => collect([1, 2, 3, 4, 5])->reject(fn ($d) => $d === $today)->values()->all(),
+            'masuk_opens_at' => '06:30',
+            'masuk_closes_at' => '08:00',
+            'pulang_enabled' => false,
+            'intake_mode' => 'wali_kelas',
+        ]);
+
+        $dead = $this->actingAs($this->admin)->postJson('/api/admin/holidays', [
+            'date' => now('Asia/Jakarta')->toDateString(),
+            'label' => 'Uji Hari Mati',
+        ]);
+
+        // Soft by design (harmless - runsOn() gates sessions anyway), but
+        // the server now says it out loud instead of leaving the calendar
+        // to hint at it (audit §6a-3).
+        $dead->assertCreated();
+        $this->assertNotNull($dead->json('warning'));
+        $this->assertStringContainsString('tidak berdampak', (string) $dead->json('warning'));
+
+        // Next week's same weekday is still dead; tomorrow (an operating
+        // day for this fixture when today isn't Saturday/Sunday) is not
+        // flagged. A holiday on an operating day is the feature working -
+        // no warning there.
+        $tomorrow = now('Asia/Jakarta')->addDay();
+        $operating = $this->actingAs($this->admin)->postJson('/api/admin/holidays', [
+            'date' => $tomorrow->toDateString(),
+            'label' => 'Uji Hari Operasional',
+        ]);
+
+        if (in_array((int) $tomorrow->dayOfWeekIso, [1, 2, 3, 4, 5], true)) {
+            $operating->assertCreated();
+            $this->assertNull($operating->json('warning'));
+        } else {
+            $operating->assertCreated();
+            $this->assertNotNull($operating->json('warning'));
+        }
+    }
 }

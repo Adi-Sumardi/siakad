@@ -36,7 +36,25 @@ class HolidayController extends Controller
     {
         $holiday = Holiday::create($request->validated());
 
-        return response()->json(['holiday' => $this->row($holiday)], 201);
+        // A soft warning, not a refusal (audit §6a-3): a holiday on a
+        // weekday no enabled unit operates on is harmless by design -
+        // index()'s hint already says the calendar side of it - but it is
+        // almost always a typo'd date, so the server says so out loud too.
+        // Only when settings exist at all: before any unit has configured
+        // its days there is nothing to compare against, and holiday data
+        // may legitimately be prepared first.
+        $activeDays = $this->activeDays();
+
+        $warning = ($activeDays !== [] && ! in_array((int) $holiday->date->dayOfWeekIso, $activeDays, true))
+            ? 'Catatan: tidak ada unit yang menjalankan presensi di hari '
+                .$holiday->date->locale('id')->translatedFormat('l')
+                .' - libur ini tidak berdampak apa-apa. Periksa kembali tanggalnya.'
+            : null;
+
+        return response()->json(
+            ['holiday' => $this->row($holiday)] + ($warning !== null ? ['warning' => $warning] : []),
+            201,
+        );
     }
 
     public function destroy(Request $request, string $ulid): JsonResponse

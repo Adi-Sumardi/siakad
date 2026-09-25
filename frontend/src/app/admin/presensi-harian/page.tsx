@@ -596,11 +596,14 @@ function HolidayCalendarCard() {
     e.preventDefault();
     setBusy(true);
     try {
-      const res = await api.post<{ holiday: HolidayRow }>("/api/admin/holidays", {
+      const res = await api.post<{ holiday: HolidayRow; warning?: string }>("/api/admin/holidays", {
         date,
         label,
       });
       toast.success(`Hari libur ${res.holiday.date} (${res.holiday.weekday}) terdaftar.`);
+      // The server flags a holiday landing on a weekday no unit operates on
+      // (audit §6a-3) - almost always a typo'd date, worth saying twice.
+      if (res.warning) toast.warning(res.warning);
       setHolidays((prev) => [...(prev ?? []), res.holiday].sort((a, b) => a.date.localeCompare(b.date)));
       setDate("");
       setLabel("");
