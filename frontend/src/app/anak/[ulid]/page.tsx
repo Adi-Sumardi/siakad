@@ -271,7 +271,6 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
   const [enrollPick, setEnrollPick] = useState("");
   const [enrolling, setEnrolling] = useState(false);
   const [downloadingRapor, setDownloadingRapor] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   // useCallback so the mount effect below can list them as deps without a
   // stale closure - the eslint exhaustive-deps warning was real: ulid is a
@@ -280,7 +279,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
     api
       .get<{ achievements: Achievement[] }>(`/api/wali/students/${ulid}/achievements`)
       .then((d) => setAchievements(d.achievements))
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Bagian halaman ini gagal dimuat - data lain tetap tampil."));
   }, [ulid]);
 
   const loadEkskul = useCallback(() => {
@@ -291,7 +290,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
         setAvailableEkskul(d.available ?? []);
         setEnrollPick("");
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Bagian halaman ini gagal dimuat - data lain tetap tampil."));
   }, [ulid]);
 
   async function handleEnroll() {
@@ -316,11 +315,11 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
     api
       .get<PointSummary>(`/api/wali/students/${ulid}/points`)
       .then(setPoints)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Bagian halaman ini gagal dimuat - data lain tetap tampil."));
     api
       .get<AttendanceOverview>(`/api/wali/students/${ulid}/attendance`)
       .then(setAttendance)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Bagian halaman ini gagal dimuat - data lain tetap tampil."));
     loadEkskul();
     loadAchievements();
   }, [ulid, user, loadEkskul, loadAchievements]);
@@ -333,7 +332,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
         setGrades(d);
         if (!termUlid && d.term_ulid) setSelectedTermUlid(d.term_ulid);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Tidak dapat memuat data anak."));
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Bagian halaman ini gagal dimuat - data lain tetap tampil."));
   }
 
   useEffect(() => {
@@ -376,18 +375,9 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
     );
   }
 
-  if (error) {
-    return (
-      <WaliShell>
-        <Card className="p-8 text-center space-y-3">
-          <p className="text-sm text-destructive">{error}</p>
-          <Link href="/dashboard">
-            <Button variant="outline" size="sm">Kembali ke Beranda</Button>
-          </Link>
-        </Card>
-      </WaliShell>
-    );
-  }
+  // Section loaders toast their own failures (audit T54-5): one blip on the
+  // grades endpoint used to swap the WHOLE child page for an error card,
+  // taking points, attendance, achievements and ekskul down with it.
 
   return (
     <WaliShell>

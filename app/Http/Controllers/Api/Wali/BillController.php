@@ -100,14 +100,16 @@ class BillController extends Controller
 
     public function payments(Request $request): JsonResponse
     {
+        // Paginated (audit T54-6): the old limit(100) cap silently truncated
+        // a long history with no page, no note - the family simply stopped
+        // seeing their own older payments.
         $payments = Payment::query()
             ->visibleTo($request->user())
             ->with(['bills.feeType', 'bills.student.schoolUnit'])
             ->latest()
-            ->limit(100)
-            ->get();
+            ->paginate($request->integer('per_page', 50));
 
-        return response()->json(['payments' => PaymentResource::collection($payments)]);
+        return response()->json(['payments' => PaymentResource::collection($payments)->response()->getData(true)]);
     }
 
     /**

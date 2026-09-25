@@ -46,7 +46,9 @@ export function WaliBillAlert() {
         // status=open keeps the payload to the bill rows the bell can list;
         // summary is still computed over exactly those rows.
         api.get<{ bills: Bill[]; summary: BillSummary }>("/api/wali/bills?status=open").catch(() => null),
-        api.get<{ payments: Payment[] }>("/api/wali/payments").catch(() => null),
+        // The first page is plenty for the bell's recent-receipts window -
+        // it stays light while the history page paginates (audit T54-6).
+        api.get<{ payments: { data: Payment[] } }>("/api/wali/payments?per_page=10").catch(() => null),
       ]).then(([freshBills, freshPayments]) => {
         if (cancelled) return;
         // A failed refresh keeps the last known state; the tagihan page
@@ -60,7 +62,7 @@ export function WaliBillAlert() {
           const cutoff = Date.now() - RECEIPT_WINDOW_DAYS * 86_400_000;
 
           setReceipts(
-            freshPayments.payments
+            freshPayments.payments.data
               .filter((p) => p.status === "completed" && p.paid_at && new Date(p.paid_at).getTime() >= cutoff)
               .slice(0, 3),
           );

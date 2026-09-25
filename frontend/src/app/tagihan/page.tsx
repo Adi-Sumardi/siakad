@@ -114,6 +114,18 @@ export default function BillsPage() {
       }
     }
 
+    // Same basket rule the API enforces, caught up front (audit T54-1): a
+    // VA is per (anak, jenis biaya, tahun) - mixing SPP with jamiyyah used
+    // to pass every toggle and die at checkout with a bare 422.
+    if (!alreadySelected && bill && selected.size > 0) {
+      const cartFee = selectedBills[0]?.fee_type?.code ?? selectedBills[0]?.feeType?.code ?? null;
+      const billFee = bill.fee_type?.code ?? bill.feeType?.code ?? null;
+      if (cartFee !== billFee) {
+        toast.error("Virtual Account bersifat khusus per jenis biaya (mis. SPP). Bayar tiap jenis biaya dalam transaksi terpisah.");
+        return;
+      }
+    }
+
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(ulid)) next.delete(ulid);
@@ -128,14 +140,22 @@ export default function BillsPage() {
       return;
     }
 
-    const firstStudentUlid = openBills[0]?.student?.ulid;
+    const first = openBills[0];
+    const firstStudentUlid = first?.student?.ulid;
+    const firstFee = first?.fee_type?.code ?? first?.feeType?.code ?? null;
     const sameChildBills = openBills.filter((b) => b.student?.ulid === firstStudentUlid);
+    const sameFeeBills = sameChildBills.filter(
+      (b) => (b.fee_type?.code ?? b.feeType?.code ?? null) === firstFee,
+    );
 
     if (sameChildBills.length < openBills.length) {
       toast.info("Virtual Account bersifat khusus per anak - hanya tagihan satu ananda yang dipilih sekaligus.");
     }
+    if (sameFeeBills.length < sameChildBills.length) {
+      toast.info("Virtual Account juga khusus per jenis biaya - hanya tagihan jenis biaya yang sama yang dipilih sekaligus.");
+    }
 
-    setSelected(new Set(sameChildBills.map((b) => b.ulid)));
+    setSelected(new Set(sameFeeBills.map((b) => b.ulid)));
   }
 
   async function checkoutMulti() {
@@ -153,11 +173,8 @@ export default function BillsPage() {
       setSelected(new Set());
       load();
 
-      if (payment.invoice_url && !payment.invoice_url.includes("/pembayaran")) {
-        window.location.href = payment.invoice_url;
-        return;
-      }
-
+      // invoice_url never carries an external URL anymore (the VA gateway
+      // never sets one) - the payment screen is always the destination.
       router.push(`/pembayaran?payment=${payment.ulid}`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Tidak dapat memproses pembayaran.");
@@ -192,11 +209,8 @@ export default function BillsPage() {
       setCustomBill(null);
       load();
 
-      if (payment.invoice_url && !payment.invoice_url.includes("/pembayaran")) {
-        window.location.href = payment.invoice_url;
-        return;
-      }
-
+      // invoice_url never carries an external URL anymore (the VA gateway
+      // never sets one) - the payment screen is always the destination.
       router.push(`/pembayaran?payment=${payment.ulid}`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal membuat pembayaran kustom.");

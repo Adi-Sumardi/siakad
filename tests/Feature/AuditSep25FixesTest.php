@@ -1409,4 +1409,176 @@ class AuditSep25FixesTest extends TestCase
 
         $this->assertSame(2, Bill::where('student_id', $student->id)->count());
     }
+
+    // --------------------------------------------------------------- T49
+
+    /** A student actively enrolled in the given classroom. */
+    private function studentIn(\App\Models\Classroom $classroom, string $nama): Student
+    {
+        $student = Student::create([
+            'nama_lengkap' => $nama,
+            'jenis_kelamin' => 'L',
+            'school_unit_id' => $classroom->school_unit_id,
+            'entry_year_id' => $classroom->academic_year_id,
+            'status' => 'active',
+        ]);
+
+        \App\Models\Enrollment::create([
+            'student_id' => $student->id,
+            'academic_year_id' => $classroom->academic_year_id,
+            'classroom_id' => $classroom->id,
+            'status' => 'active',
+            'joined_on' => '2026-07-01',
+        ]);
+
+        return $student;
+    }
+
+    public function test_promotion_respects_the_target_classrooms_capacity(): void
+    {
+        $source = \App\Models\Classroom::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $this->year->id,
+            'tingkat' => 1, 'name' => '1-A', 'is_active' => true,
+        ]);
+        $nextYear = AcademicYear::where('year', '2027/2028')->firstOrFail();
+        $target = \App\Models\Classroom::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $nextYear->id,
+            'tingkat' => 2, 'name' => '2-A', 'is_active' => true, 'capacity' => 1,
+        ]);
+
+        $anak = $this->studentIn($source, 'Anak Pertama');
+        $budi = $this->studentIn($source, 'Anak Kedua');
+
+        $service = app(\App\Services\Academic\PromotionService::class);
+
+        try {
+            $service->promoteBatch($source, $nextYear, collect([
+                ['student' => $anak, 'outcome' => 'promoted', 'target_classroom' => $target],
+                ['student' => $budi, 'outcome' => 'promoted', 'target_classroom' => $target],
+            ]), $this->admin);
+            $this->fail('batch melebihi kapasitas harus ditolak');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('sudah penuh', $e->getMessage());
+        }
+
+        // The whole batch rolled back - seat one never landed either.
+        $this->assertSame(2, \App\Models\Enrollment::where('classroom_id', $source->id)->where('status', 'active')->count());
+        $this->assertSame(0, \App\Models\Enrollment::where('classroom_id', $target->id)->count());
+    }
+
+    public function test_the_promotion_roster_flags_students_with_open_bills(): void
+    {
+        $source = \App\Models\Classroom::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $this->year->id,
+            'tingkat' => 1, 'name' => '1-B', 'is_active' => true,
+        ]);
+
+        $debitur = $this->studentIn($source, 'Siswa Debitur');
+        $lunas = $this->studentIn($source, 'Siswa Lunas');
+
+        Bill::create([
+            'bill_number' => 'SPP/2026/00001',
+            'student_id' => $debitur->id,
+            'academic_year_id' => $this->year->id,
+            'fee_type_id' => $this->spp->id,
+            'dedup_key' => 'spp:t49:1',
+            'description' => 'SPP',
+            'subtotal' => 100, 'total_amount' => 100, 'remaining_amount' => 100,
+            'status' => 'unpaid', 'due_date' => now()->addDays(7), 'issued_at' => now(),
+        ]);
+
+        $response = $this->actingAs($this->admin)
+            ->getJson("/api/admin/classrooms/{$source->ulid}/promotion-roster")
+            ->assertOk();
+
+        $byName = collect($response->json('students'))->keyBy('nama_lengkap');
+
+        $this->assertTrue($byName['Siswa Debitur']['has_open_bills']);
+        $this->assertFalse($byName['Siswa Lunas']['has_open_bills']);
+    }
+
+    public function test_a_promotion_batch_can_be_undone(): void
+    {
+        $source = \App\Models\Classroom::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $this->year->id,
+            'tingkat' => 1, 'name' => '1-C', 'is_active' => true,
+        ]);
+        $nextYear = AcademicYear::where('year', '2027/2028')->firstOrFail();
+        $nextYear->activate();
+        $target = \App\Models\Classroom::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $nextYear->id,
+            'tingkat' => 2, 'name' => '2-C', 'is_active' => true,
+        ]);
+
+        $student = $this->studentIn($source, 'Siswa Diundo');
+
+        app(\App\Services\Academic\PromotionService::class)->promoteBatch(
+            $source,
+            $nextYear,
+            collect([['student' => $student, 'outcome' => 'promoted', 'target_classroom' => $target]]),
+            $this->admin,
+        );
+
+        $this->assertSame(
+            'promoted',
+            \App\Models\Enrollment::where('student_id', $student->id)->where('classroom_id', $source->id)->value('status'),
+        );
+
+        $result = app(\App\Services\Academic\PromotionService::class)->undoBatch($source, $this->admin);
+
+        $this->assertSame(1, $result['undone']);
+        $this->assertSame([], $result['skipped']);
+
+        // Back in the source world: enrollment reopened, new-year row gone,
+        // student active again (audit T49-a).
+        $this->assertSame('active', \App\Models\Enrollment::where('student_id', $student->id)->where('classroom_id', $source->id)->value('status'));
+        $this->assertSame(0, \App\Models\Enrollment::where('student_id', $student->id)->where('classroom_id', $target->id)->count());
+        $this->assertSame('active', $student->fresh()->status);
+    }
+
+    public function test_undo_refuses_when_the_target_year_already_has_bills(): void
+    {
+        $source = \App\Models\Classroom::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $this->year->id,
+            'tingkat' => 1, 'name' => '1-D', 'is_active' => true,
+        ]);
+        $nextYear = AcademicYear::where('year', '2027/2028')->firstOrFail();
+        $nextYear->activate();
+        $target = \App\Models\Classroom::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $nextYear->id,
+            'tingkat' => 2, 'name' => '2-D', 'is_active' => true,
+        ]);
+
+        $student = $this->studentIn($source, 'Siswa Berbayar');
+
+        app(\App\Services\Academic\PromotionService::class)->promoteBatch(
+            $source,
+            $nextYear,
+            collect([['student' => $student, 'outcome' => 'promoted', 'target_classroom' => $target]]),
+            $this->admin,
+        );
+
+        // The new year already billed them (SPP ran) - undoing would orphan
+        // real money, so it refuses instead (audit T49-a).
+        Bill::create([
+            'bill_number' => 'SPP/2027/00001',
+            'student_id' => $student->id,
+            'academic_year_id' => $nextYear->id,
+            'fee_type_id' => $this->spp->id,
+            'dedup_key' => 'spp:t49:2',
+            'description' => 'SPP 2027',
+            'subtotal' => 100, 'total_amount' => 100, 'remaining_amount' => 100,
+            'status' => 'unpaid', 'due_date' => now()->addDays(7), 'issued_at' => now(),
+        ]);
+
+        try {
+            app(\App\Services\Academic\PromotionService::class)->undoBatch($source, $this->admin);
+            $this->fail('undo dengan tagihan hidup di tahun tujuan harus ditolak');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('nilai atau tagihan', $e->getMessage());
+        }
+
+        // Nothing rolled back - the promotion still stands.
+        $this->assertSame('active', \App\Models\Enrollment::where('student_id', $student->id)->where('classroom_id', $target->id)->value('status'));
+    }
 }

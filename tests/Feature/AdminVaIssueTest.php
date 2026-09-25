@@ -151,7 +151,7 @@ class AdminVaIssueTest extends TestCase
         $this->actingAs($this->waliUser)
             ->getJson('/api/wali/payments')
             ->assertOk()
-            ->assertJsonCount(1, 'payments');
+            ->assertJsonCount(1, 'payments.data');
 
         $this->assertDatabaseHas('notification_logs', [
             'channel' => 'whatsapp',

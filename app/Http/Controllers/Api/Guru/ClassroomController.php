@@ -107,8 +107,7 @@ class ClassroomController extends Controller
         $term = Term::current();
         $ledger = app(PointLedger::class);
 
-        $students = $classroom->enrollments()
-            ->where('status', 'active')
+        $students = $classroom->rosterEnrollments()
             ->with('student')
             ->get()
             ->pluck('student')
@@ -148,8 +147,7 @@ class ClassroomController extends Controller
             : ($term ? Carbon::parse($term->starts_on)->startOfDay() : now('Asia/Jakarta')->startOfMonth());
         $to = isset($validated['to']) ? Carbon::parse($validated['to'])->endOfDay() : now('Asia/Jakarta')->endOfDay();
 
-        $students = $classroom->enrollments()
-            ->where('status', 'active')
+        $students = $classroom->rosterEnrollments()
             ->with('student')
             ->get()
             ->pluck('student')

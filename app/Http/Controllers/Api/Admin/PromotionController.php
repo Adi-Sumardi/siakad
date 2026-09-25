@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\PromotionTargetsRequest;
 use App\Http\Requests\Admin\StorePromotionRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
+use App\Models\Bill;
 use App\Models\Classroom;
 use App\Models\Student;
 use App\Services\Academic\PromotionService;
@@ -31,6 +32,15 @@ class PromotionController extends Controller
             ->sortBy('nama_lengkap')
             ->values();
 
+        // Outstanding bills follow the student silently (audit T49-c): the
+        // money stays attached whichever classroom they land in, but the
+        // operator used to get no signal at all before moving a whole
+        // debtor cohort into the next year.
+        $debtorIds = Bill::whereIn('student_id', $students->pluck('id'))
+            ->open()
+            ->pluck('student_id')
+            ->unique();
+
         return response()->json([
             'classroom' => [
                 'ulid' => $classroom->ulid, 'name' => $classroom->name, 'tingkat' => $classroom->tingkat,
@@ -38,6 +48,7 @@ class PromotionController extends Controller
             ],
             'students' => $students->map(fn (Student $s) => [
                 'ulid' => $s->ulid, 'nama_lengkap' => $s->nama_lengkap, 'nis' => $s->nis,
+                'has_open_bills' => $debtorIds->contains($s->id),
             ]),
         ]);
     }
@@ -106,5 +117,29 @@ class PromotionController extends Controller
         ]);
 
         return response()->json(['promoted' => $results->count()], 201);
+    }
+
+    /**
+     * Reverts a classroom's executed promotion (audit T49-a) - the undo a
+     * wrong batch never had (database surgery was the only option). Whole
+     * batch or nothing per student: someone who already has grades or
+     * bills in the target year is skipped and named, never orphaned.
+     */
+    public function undo(Request $request, string $classroomUlid, PromotionService $service): JsonResponse
+    {
+        $classroom = Classroom::visibleTo($request->user())->where('ulid', $classroomUlid)->firstOrFail();
+
+        try {
+            $result = $service->undoBatch($classroom, $request->user());
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'undone' => $result['undone'],
+            'skipped' => $result['skipped'],
+            'message' => "Promosi {$result['undone']} siswa dibatalkan."
+                .($result['skipped'] !== [] ? ' Dilewati: '.implode(', ', $result['skipped']).'.' : ''),
+        ]);
     }
 }

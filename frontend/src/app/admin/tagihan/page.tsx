@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError, API_BASE } from "@/lib/api";
 import { useAuth } from "@/lib/auth/auth-context";
-import { dueLabel, rupiah, tanggal } from "@/lib/format";
+import { dueLabel, rupiah, tanggal, todayJakarta } from "@/lib/format";
 import { isOpen, OPEN_STATUSES, type Bill, type Payment } from "@/lib/types/billing";
 import { Pagination } from "@/components/ui/pagination";
 
@@ -49,7 +49,13 @@ function emptyManualForm() {
     fee_type_ulid: "",
     description: "",
     amount: "",
-    due_date: new Date(Date.now() + 14 * 86_400_000).toISOString().split("T")[0],
+    // Prefill H+14 from the JAKARTA clock (audit T54-3): a UTC-midnight
+    // Date prefilled H-13 between 00:00-07:00 WIB.
+    due_date: (() => {
+      const d = new Date(`${todayJakarta()}T00:00:00`);
+      d.setDate(d.getDate() + 14);
+      return d.toISOString().split("T")[0];
+    })(),
   };
 }
 

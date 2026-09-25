@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
-import { rupiah } from "@/lib/format";
+import { rupiah, todayJakarta } from "@/lib/format";
 
 type FeeType = { ulid: string; code: string; name: string };
 type SchoolUnit = { ulid: string; code: string; label: string };
@@ -124,7 +124,7 @@ export default function AdminDiscountPage() {
     student_ulid: "",
     discount_scheme_ulid: "",
     academic_year_ulid: "",
-    effective_from: new Date().toISOString().split("T")[0],
+    effective_from: todayJakarta(), // audit T54-3: UTC midnight prefilled 'yesterday' between 00:00-07:00 WIB
     effective_to: "",
     reason: "",
   });
@@ -265,7 +265,7 @@ export default function AdminDiscountPage() {
         student_ulid: "",
         discount_scheme_ulid: "",
         academic_year_ulid: "",
-        effective_from: new Date().toISOString().split("T")[0],
+        effective_from: todayJakarta(), // audit T54-3: UTC midnight prefilled 'yesterday' between 00:00-07:00 WIB
         effective_to: "",
         reason: "",
       });

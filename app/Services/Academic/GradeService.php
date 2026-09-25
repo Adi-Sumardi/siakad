@@ -171,8 +171,7 @@ class GradeService
             ->sortBy('name')
             ->values();
 
-        $students = $classroom->enrollments()
-            ->where('status', 'active')
+        $students = $classroom->rosterEnrollments()
             ->with('student')
             ->get()
             ->pluck('student')

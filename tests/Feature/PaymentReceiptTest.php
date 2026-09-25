@@ -221,9 +221,9 @@ class PaymentReceiptTest extends TestCase
         $this->actingAs($user)
             ->getJson('/api/wali/payments')
             ->assertOk()
-            ->assertJsonCount(1, 'payments')
-            ->assertJsonPath('payments.0.ulid', $payment->ulid)
-            ->assertJsonPath('payments.0.status', 'completed');
+            ->assertJsonCount(1, 'payments.data')
+            ->assertJsonPath('payments.data.0.ulid', $payment->ulid)
+            ->assertJsonPath('payments.data.0.status', 'completed');
     }
 
     public function test_a_phone_only_contact_gets_no_receipt_email_but_the_bell_still_shows_it(): void

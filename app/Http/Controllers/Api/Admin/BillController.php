@@ -38,8 +38,13 @@ class BillController extends Controller
                 : $q->where('status', $status))
             ->when($request->string('type')->value(), fn ($q, $code) => $q->whereHas('feeType', fn ($t) => $t->where('code', $code)))
             ->when($request->integer('month'), fn ($q, $month) => $q->where('period_month', $month))
-            ->when($request->string('q')->value(), fn ($q, $term) => $q->whereHas('student',
-                fn ($s) => $s->where('nama_lengkap', 'like', "%{$term}%")))
+            ->when($request->string('q')->value(), fn ($q, $term) => $q->where(function ($q) use ($term) {
+                // Name AND bill number (audit T54-2): staff paste numbers
+                // straight from a bank mutation; a name-only LIKE answered
+                // those searches with an eternally empty list.
+                $q->whereHas('student', fn ($s) => $s->where('nama_lengkap', 'like', "%{$term}%"))
+                    ->orWhere('bill_number', 'like', "%{$term}%");
+            }))
             // One student's bills - what the manual-bill form asks before it
             // offers to issue another cambridge bill for the same year.
             // visibleTo() still narrows a per-unit admin, so a foreign ULID

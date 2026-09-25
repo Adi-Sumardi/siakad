@@ -70,6 +70,8 @@ function PaymentsContent() {
   const initialPaymentUlid = searchParams.get("payment");
 
   const [payments, setPayments] = useState<Payment[] | null>(null);
+  const [payMeta, setPayMeta] = useState<{ current_page: number; last_page: number; total: number; from: number | null; to: number | null } | null>(null);
+  const [payPage, setPayPage] = useState(1);
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [simulating, setSimulating] = useState(false);
   // Bumped by handleSimulateSettle so the effect below owns the only fetch of
@@ -86,15 +88,20 @@ function PaymentsContent() {
     let cancelled = false;
 
     const load = () => {
+      // Paginated server-side now (audit T54-6): the old client-side list
+      // was silently capped at the 100 newest rows.
       api
-        .get<{ payments: Payment[] }>("/api/wali/payments")
+        .get<{ payments: { data: Payment[]; meta: { current_page: number; last_page: number; total: number; from: number | null; to: number | null } } }>(
+          `/api/wali/payments?page=${payPage}`,
+        )
         .then((data) => {
           if (cancelled) return;
-          setPayments(data.payments);
+          setPayments(data.payments.data);
+          setPayMeta(data.payments.meta);
 
           if (initialPaymentUlid && !autoOpenedRef.current) {
             autoOpenedRef.current = true;
-            const found = data.payments.find((p) => p.ulid === initialPaymentUlid);
+            const found = data.payments.data.find((p) => p.ulid === initialPaymentUlid);
             if (found) setSelectedPayment(found);
           }
         })
@@ -110,7 +117,7 @@ function PaymentsContent() {
     return () => {
       cancelled = true;
     };
-  }, [user, initialPaymentUlid, reloadKey]);
+  }, [user, initialPaymentUlid, reloadKey, payPage]);
 
   function copyToClipboard(text: string, label: string) {
     navigator.clipboard.writeText(text);
@@ -224,8 +231,6 @@ function PaymentsContent() {
           {payments?.map((payment) => {
             const status = STATUS_LABEL[payment.status] ?? { label: payment.status, variant: "default" as const };
             const isCompleted = payment.status === "completed";
-            const gatewayResp = (payment as unknown as { gateway_response?: Record<string, unknown> })?.gateway_response;
-            const uniqueCode = typeof gatewayResp?.unique_code === "number" ? gatewayResp.unique_code : 0;
 
             return (
               <Card
@@ -237,11 +242,6 @@ function PaymentsContent() {
                     <div className="flex items-center gap-2.5 flex-wrap">
                       <p className="tabular font-black text-xl text-foreground">{rupiah(payment.amount)}</p>
                       <Badge variant={status.variant}>{status.label}</Badge>
-                      {uniqueCode > 0 && !isCompleted && (
-                        <span className="text-[11px] font-mono bg-amber-500/10 text-amber-700 dark:text-amber-300 font-bold px-2 py-0.5 rounded-md">
-                          Kode Unik: +{uniqueCode}
-                        </span>
-                      )}
                     </div>
 
                     <p className="text-xs text-muted-foreground">
@@ -308,6 +308,36 @@ function PaymentsContent() {
             );
           })}
         </div>
+
+        {/* History pagination (audit T54-6) */}
+        {payMeta && payMeta.last_page > 1 && (
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <p className="text-xs text-muted-foreground">
+              Menampilkan {payMeta.from ?? 0}–{payMeta.to ?? 0} dari {payMeta.total} transaksi
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={payMeta.current_page <= 1}
+                onClick={() => setPayPage((p) => Math.max(1, p - 1))}
+              >
+                Sebelumnya
+              </Button>
+              <span className="text-xs font-semibold tabular">
+                {payMeta.current_page} / {payMeta.last_page}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={payMeta.current_page >= payMeta.last_page}
+                onClick={() => setPayPage((p) => p + 1)}
+              >
+                Berikutnya
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* DETAILED INVOICE & PAYMENT MODAL */}
         {selectedPayment && (

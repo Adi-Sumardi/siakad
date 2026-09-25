@@ -47,6 +47,24 @@ class Classroom extends Model
         return $this->hasMany(Enrollment::class);
     }
 
+    /**
+     * Roster view of this classroom's enrollments (audit T49-d): active
+     * only while the classroom belongs to the RUNNING year, everyone who
+     * was ever enrolled once the year is past - promoting a cohort used to
+     * empty the previous year's roster and every recap built on it, while
+     * the data sat there untouched.
+     */
+    public function rosterEnrollments(): HasMany
+    {
+        $activeYearId = \App\Models\AcademicYear::current()?->id;
+
+        return $this->enrollments()
+            ->when(
+                $activeYearId !== null && (int) $this->academic_year_id === (int) $activeYearId,
+                fn ($q) => $q->where('status', 'active'),
+            );
+    }
+
     public function classSchedules(): HasMany
     {
         return $this->hasMany(ClassSchedule::class);

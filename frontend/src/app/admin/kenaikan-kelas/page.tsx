@@ -16,7 +16,14 @@ type ClassroomOption = {
   academic_year?: string | null;
 };
 type AcademicYearOption = { ulid: string; year: string; is_active: boolean };
-type RosterStudent = { ulid: string; nama_lengkap: string; nis: string | null };
+type RosterStudent = {
+  ulid: string;
+  nama_lengkap: string;
+  nis: string | null;
+  /** Outstanding bills travel with the student - shown so the operator
+      knows before moving a debtor cohort (audit T49-c). */
+  has_open_bills?: boolean;
+};
 type Outcome = "promoted" | "repeated" | "graduated" | "left";
 
 const OUTCOME_LABEL: Record<Outcome, string> = {
@@ -116,6 +123,29 @@ export default function KenaikanKelasPage() {
     toast.success("Kelas tujuan diterapkan ke semua siswa yang naik kelas.");
   }
 
+  async function undoPromotion() {
+    if (!sourceClassroom || submitting) return;
+    if (!window.confirm(
+      "Batalkan promosi yang sudah dijalankan untuk kelas ini? Enrollment tahun tujuan dihapus dan siswa dikembalikan ke kelas ini. Siswa yang sudah punya nilai/tagihan di tahun tujuan dilewati (disebut di hasil).",
+    )) {
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const result = await api.post<{ undone: number; skipped: string[]; message: string }>(
+        `/api/admin/classrooms/${sourceClassroom}/promotion-undo`,
+      );
+      toast.success(result.message);
+      setRoster(null);
+      setSourceClassroom("");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal membatalkan promosi.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function submit() {
     if (!roster || !targetYear) return;
     setSubmitting(true);
@@ -212,6 +242,15 @@ export default function KenaikanKelasPage() {
           <Button type="button" variant="outline" onClick={applyBulkTarget} disabled={!bulkTarget}>
             Terapkan ke Semua
           </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="ml-auto text-bad hover:text-bad"
+            onClick={undoPromotion}
+            disabled={submitting}
+          >
+            Batalkan promosi kelas ini
+          </Button>
         </Card>
       )}
 
@@ -227,7 +266,14 @@ export default function KenaikanKelasPage() {
             return (
               <Card key={s.ulid} className="flex flex-wrap items-center justify-between gap-3 p-4">
                 <div>
-                  <p className="font-medium">{s.nama_lengkap}</p>
+                  <p className="font-medium">
+                    {s.nama_lengkap}
+                    {s.has_open_bills && (
+                      <span className="ml-2 rounded-full border border-warn/40 bg-warn-soft px-2 py-0.5 text-[11px] font-semibold text-warn">
+                        Ada tunggakan
+                      </span>
+                    )}
+                  </p>
                   <p className="text-sm text-muted-foreground">{s.nis ?? "-"}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

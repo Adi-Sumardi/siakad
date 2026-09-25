@@ -3,8 +3,11 @@
 namespace App\Services\Academic;
 
 use App\Models\AcademicYear;
+use App\Models\ActivityLog;
+use App\Models\Bill;
 use App\Models\Classroom;
 use App\Models\Enrollment;
+use App\Models\Grade;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\User;
@@ -96,8 +99,13 @@ class PromotionService
      */
     public function promoteBatch(Classroom $source, AcademicYear $newYear, Collection $entries, User $actor): Collection
     {
-        return DB::transaction(function () use ($source, $newYear, $entries) {
-            return $entries->map(function (array $entry) use ($source, $newYear) {
+        // Seats this batch has already claimed per target classroom (audit
+        // T49-b): each entry's capacity check must see the entries ahead of
+        // it, or a 40-strong batch walks into a 30-seat room uncounted.
+        $inflow = [];
+
+        return DB::transaction(function () use ($source, $newYear, $entries, &$inflow) {
+            return $entries->map(function (array $entry) use ($source, $newYear, &$inflow) {
                 /** @var Student $student */
                 $student = $entry['student'];
                 $outcome = $entry['outcome'];
@@ -115,7 +123,7 @@ class PromotionService
                 }
 
                 if (in_array($outcome, ['promoted', 'repeated'], true)) {
-                    $this->assertValidTarget($student, $source, $newYear, $outcome, $target);
+                    $this->assertValidTarget($student, $source, $newYear, $outcome, $target, $inflow);
                 }
 
                 $current->forceFill([
@@ -143,6 +151,8 @@ class PromotionService
                     'joined_on' => $newYear->starts_on,
                 ]);
 
+                $inflow[$target->id] = ($inflow[$target->id] ?? 0) + 1;
+
                 // The student ROW follows the move (audit T41): every
                 // downstream system keys on students.school_unit_id - guru
                 // scoping (visibleTo), the daily-attendance roster and
@@ -162,13 +172,107 @@ class PromotionService
     }
 
     /**
+     * Reverts a classroom's executed promotion in one transaction (audit
+     * T49-a): each closed source enrollment goes back to 'active', the one
+     * enrollment this promotion opened is deleted, and the student row
+     * (status + unit - T41's move) returns to the source world. Skips -
+     * never orphans - any student who already has grades or bills in the
+     * target year, or who has moved on to yet another classroom since;
+     * their names come back so the operator knows what is left to fix by
+     * hand. A wrong batch used to be a database-only operation.
+     *
+     * @return array{undone: int, skipped: list<string>}
+     */
+    public function undoBatch(Classroom $source, User $actor): array
+    {
+        return DB::transaction(function () use ($source, $actor) {
+            $closed = $source->enrollments()
+                ->whereIn('status', ['promoted', 'repeated', 'graduated', 'left'])
+                ->with('student')
+                ->get();
+
+            if ($closed->isEmpty()) {
+                throw new RuntimeException('Tidak ada hasil promosi yang bisa dibatalkan untuk kelas ini.');
+            }
+
+            $undone = 0;
+            $skipped = [];
+
+            foreach ($closed as $sourceEnrollment) {
+                $student = $sourceEnrollment->student;
+
+                if (! $student) {
+                    continue;
+                }
+
+                // Everything the promotion opened sits in enrollments with a
+                // higher id; more than one means the student has moved on
+                // again through another classroom - undoing here would tear
+                // a journey this source is no longer the start of.
+                $newer = Enrollment::where('student_id', $student->id)
+                    ->where('id', '>', $sourceEnrollment->id)
+                    ->orderByDesc('id')
+                    ->get();
+
+                if ($newer->count() > 1) {
+                    $skipped[] = $student->nama_lengkap.' (sudah pindah lagi)';
+
+                    continue;
+                }
+
+                $target = $newer->first();
+
+                if ($target) {
+                    $hasGrades = Grade::where('student_id', $student->id)
+                        ->whereHas('term', fn ($q) => $q->where('academic_year_id', $target->academic_year_id))
+                        ->exists();
+                    $hasBills = Bill::where('student_id', $student->id)
+                        ->where('academic_year_id', $target->academic_year_id)
+                        ->exists();
+
+                    if ($target->status !== 'active' || $hasGrades || $hasBills) {
+                        $skipped[] = $student->nama_lengkap.' (sudah ada nilai/tagihan di tahun tujuan)';
+
+                        continue;
+                    }
+
+                    $target->delete();
+                }
+
+                $sourceEnrollment->forceFill([
+                    'status' => 'active',
+                    'left_on' => null,
+                ])->save();
+
+                $student->forceFill([
+                    'status' => 'active',
+                    'school_unit_id' => $source->school_unit_id,
+                ])->save();
+
+                $undone++;
+            }
+
+            if ($undone === 0) {
+                throw new RuntimeException('Semua siswa sudah punya nilai atau tagihan di tahun ajaran tujuan - pembatalan otomatis tidak aman, perbaiki manual.');
+            }
+
+            ActivityLog::record($actor, 'promotion.undone', $source, [
+                'undone' => $undone,
+                'skipped' => $skipped,
+            ]);
+
+            return ['undone' => $undone, 'skipped' => $skipped];
+        });
+    }
+
+    /**
      * The real gate - eligibleTargetClassrooms() is only advisory (it builds
      * the picker's option list), so every one of its constraints is
      * re-checked here independently rather than trusted from the request.
      * A caller could otherwise submit any target_classroom_ulid it can name,
      * regardless of what the picker ever offered.
      */
-    private function assertValidTarget(Student $student, Classroom $source, AcademicYear $newYear, string $outcome, ?Classroom $target): void
+    private function assertValidTarget(Student $student, Classroom $source, AcademicYear $newYear, string $outcome, ?Classroom $target, array $inflow = []): void
     {
         if (! $target) {
             throw new RuntimeException("Kelas tujuan wajib diisi untuk {$student->nama_lengkap}.");
@@ -204,6 +308,24 @@ class PromotionService
 
         if (! $this->validTargetUnitIds($source, $outcome)->contains($target->school_unit_id)) {
             throw new RuntimeException("Kelas tujuan untuk {$student->nama_lengkap} bukan unit yang bisa dituju dari {$source->schoolUnit->label}.");
+        }
+
+        // Capacity, read under the row lock this transaction already holds
+        // (audit T49-b): neither the picker's list nor this gate ever
+        // counted seats - the pattern ExtracurricularService::assignStudent
+        // got right on day one. Active enrollments plus the seats earlier
+        // entries of THIS batch have already claimed.
+        $capacity = (int) (Classroom::whereKey($target->id)->lockForUpdate()->value('capacity') ?? 0);
+
+        if ($capacity > 0) {
+            $active = Enrollment::where('classroom_id', $target->id)->where('status', 'active')->count();
+            $claimed = (int) ($inflow[$target->id] ?? 0);
+
+            if ($active + $claimed >= $capacity) {
+                throw new RuntimeException(
+                    "Kelas tujuan {$target->name} sudah penuh (kapasitas {$capacity}) untuk {$student->nama_lengkap}."
+                );
+            }
         }
 
         $alreadyEnrolled = Enrollment::where('student_id', $student->id)

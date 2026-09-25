@@ -287,6 +287,7 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/classrooms/{classroomUlid}/promotion-roster', [PromotionController::class, 'roster']);
     Route::get('/classrooms/{classroomUlid}/promotion-targets', [PromotionController::class, 'targets']);
     Route::post('/classrooms/{classroomUlid}/promote', [PromotionController::class, 'store']);
+    Route::post('/classrooms/{classroomUlid}/promotion-undo', [PromotionController::class, 'undo']);
 
     Route::get('/extracurriculars', [App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'index']);
     Route::post('/extracurriculars', [App\Http\Controllers\Api\Admin\ExtracurricularController::class, 'store']);
