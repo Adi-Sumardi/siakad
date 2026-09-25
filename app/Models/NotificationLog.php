@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Concerns\HasEncryptedAttributes;
 use App\Concerns\HasUlidKey;
 use Illuminate\Contracts\Database\Query\Expression;
 use Illuminate\Database\Eloquent\Model;
@@ -10,7 +11,15 @@ use Illuminate\Support\Facades\DB;
 
 class NotificationLog extends Model
 {
-    use HasUlidKey;
+    use HasEncryptedAttributes, HasUlidKey;
+
+    /**
+     * Encrypted at rest (audit T51-b): the recipient is a live contact for
+     * every family in the school - the rest of the row is operational data,
+     * this column alone was a plaintext contact list. No blind index: no
+     * query ever looks rows up BY recipient.
+     */
+    protected $encrypted = ['recipient'];
 
     protected $fillable = [
         'channel',
@@ -49,6 +58,26 @@ class NotificationLog extends Model
     public static function rawAttemptIncrement(): Expression
     {
         return DB::raw('attempts + 1');
+    }
+
+    /**
+     * The display form of a contact (audit T51-b): enough to recognize
+     * ("sampai tidak? ke nomor mana?"), never enough to harvest - first
+     * character + domain for emails, last four digits for phones.
+     */
+    public static function maskRecipient(?string $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return $value;
+        }
+
+        if (str_contains($value, '@')) {
+            [$local, $domain] = explode('@', $value, 2);
+
+            return mb_substr($local, 0, 1).'***@'.$domain;
+        }
+
+        return '****'.mb_substr($value, -4);
     }
 
     /**

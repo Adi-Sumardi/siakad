@@ -70,7 +70,9 @@ class NotificationLogController extends Controller
 
         ActivityLog::record($request->user(), 'notification.resent', $log, [
             'template' => $log->template,
-            'recipient' => $log->recipient,
+            // Masked (audit T51-b): the audit trail needs "which contact",
+            // recognizably - not another plaintext copy of it.
+            'recipient' => NotificationLog::maskRecipient($log->recipient),
             'success' => $result->success,
         ]);
 
@@ -87,7 +89,10 @@ class NotificationLogController extends Controller
             'ulid' => $log->ulid,
             'channel' => $log->channel,
             'template' => $log->template,
-            'recipient' => $log->recipient,
+            // Masked display (audit T51-b): the column is ciphertext at
+            // rest now, and the monitoring screen shows the recognizable
+            // form rather than re-publishing the full contact.
+            'recipient' => NotificationLog::maskRecipient($log->recipient),
             'status' => $log->status,
             'attempts' => $log->attempts,
             'error' => mb_substr((string) $log->error, 0, 200),

@@ -21,6 +21,7 @@ use App\Services\Billing\PaymentAllocator;
 use App\Services\Notification\NotificationRetryService;
 use App\Services\Payment\BillingApiGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
 use Tests\TestCase;
@@ -1716,5 +1717,29 @@ class AuditSep25FixesTest extends TestCase
             $operating->assertCreated();
             $this->assertNotNull($operating->json('warning'));
         }
+    }
+
+    // ------------------------------------------------------------- T51-b
+
+    public function test_the_recipient_column_is_ciphertext_at_rest_but_readable_in_app(): void
+    {
+        NotificationLog::create([
+            'channel' => 'whatsapp',
+            'template' => 'bill_reminder',
+            'recipient' => '081299912345',
+            'payload' => [],
+            'status' => 'sent',
+        ]);
+
+        // At rest: ciphertext, not a plaintext contact list (audit T51-b).
+        $raw = DB::table('notification_logs')->where('template', 'bill_reminder')->value('recipient');
+        $this->assertStringNotContainsString('081299912345', (string) $raw);
+
+        // Through the model (every send/resend lane reads this way): plain.
+        $this->assertSame('081299912345', NotificationLog::where('template', 'bill_reminder')->first()->recipient);
+
+        // The monitoring display form: recognizable, not re-publishable.
+        $this->assertSame('****2345', NotificationLog::maskRecipient('081299912345'));
+        $this->assertSame('b***@yapinet.id', NotificationLog::maskRecipient('budi@yapinet.id'));
     }
 }

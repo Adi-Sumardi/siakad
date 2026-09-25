@@ -51,8 +51,8 @@ pengecekan per-controller.
 | GET | `/api/wali/bills` | lintas anak |
 | GET | `/api/wali/bills/{ulid}` | header + `lines` + pembayaran yang mengalokasikannya |
 | GET | `/api/wali/bills/{ulid}/pdf` | invoice selama belum lunas, kuitansi setelah lunas — satu template |
-| POST | `/api/wali/checkout` | **inti**: `{bill_ulids: [...], method}` → satu `payments` + N `payment_allocations` → invoice Xendit |
-| GET | `/api/wali/payments` | riwayat transaksi + status |
+| POST | `/api/wali/checkout` | **inti**: `{bill_ulids: [...], method, bank}` → satu `payments` + N `payment_allocations` → registrasi VA e-SPP (Muamalat/BSI). Satu transaksi = satu anak + satu jenis biaya + satu tahun ajaran (D3) |
+| GET | `/api/wali/payments` | riwayat transaksi + status — ter-paginasi (`?page`, `?per_page` default 50, bentuk `data` + `meta`) |
 
 `POST /api/wali/checkout` menerima banyak `bill_ulids` sekaligus — itulah yang
 membuat "bayar SPP 3 bulan untuk 2 anak dalam satu transaksi" mungkin (D3).
@@ -94,7 +94,7 @@ bukan 403).
 ### Keuangan
 | Method | Path | Keterangan |
 |---|---|---|
-| GET | `/api/admin/fee-types` | admin_unit maupun pusat — perlu tahu jenis biaya sebelum menjalankan billing run |
+| GET | `/api/admin/fee-types` | admin_unit maupun pusat — perlu tahu jenis biaya sebelum menjalankan billing run; menyertakan `has_va_prefix` + `units_without_va_prefix` (prefix VA bersifat per unit untuk cambridge/ekskul) |
 | POST, PATCH | `/api/admin/fee-types` | **pusat saja** |
 | GET | `/api/admin/fee-rates` | admin_unit **dipaksa** ke unitnya sendiri (parameter `?unit=` diabaikan bila terkirim), pusat bebas filter unit mana pun |
 | POST, PATCH | `/api/admin/fee-rates` | **pusat saja** — harga menyangkut ratusan keluarga |
@@ -127,10 +127,16 @@ bukan 403).
 | GET | `/api/admin/academic-years` | untuk pemilih tahun ajaran saat membuat tarif |
 | GET | `/api/admin/classrooms` | `visibleTo()` — admin_unit hanya kelasnya sendiri, pusat semua unit |
 
-Belum dibangun: manajemen siswa/kelas/wali langsung dari admin (siswa datang
-dari handoff PMB, kelas & guru masih lewat tinker/seed) dan promosi kelas
-massal. Frontend admin (10 halaman) dan guru (3 halaman) sudah dibangun
-menyusul API-nya.
+### Kenaikan kelas (promosi massal)
+| Method | Path | Keterangan |
+|---|---|---|
+| GET | `/api/admin/classrooms/{ulid}/promotion-roster` | roster aktif kelas sumber + penanda `has_open_bills` per siswa (debitur tak lagi senyap) |
+| GET | `/api/admin/classrooms/{ulid}/promotion-targets` | kelas tujuan kandidat (`?academic_year_ulid&outcome`); kapasitas kelas dicek ulang di gerbang penyimpanan |
+| POST | `/api/admin/classrooms/{ulid}/promote` | satu batch satu transaksi; outcome per siswa `promoted/repeated/graduated/left` (R10: enrollment baru, bukan timpa) |
+| POST | `/api/admin/classrooms/{ulid}/promotion-undo` | batalkan batch dalam satu transaksi; siswa yang sudah punya nilai/tagihan di tahun tujuan **dilewati dan disebut namanya**, tak pernah diyatimkan |
+
+Siswa "perlu perhatian": `GET /api/admin/students/attention` (`?reason=`, `?unit=`) —
+drill-down di balik tile dashboard, satu `WatchlistService` dengan tile-nya.
 
 ## File privat
 

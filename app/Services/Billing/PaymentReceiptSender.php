@@ -85,15 +85,15 @@ class PaymentReceiptSender
         // (it loads its list, then loops one HTTP call per VA - a webhook
         // settling the payment mid-loop re-enters here with a 'processing'
         // snapshot), and unlike the email lane this sender had no dedup, so
-        // the family got two receipts and monitoring got two rows. The
-        // notifiable bill scopes the payment_ulid to one student, so
-        // siblings settled by the same payment still each get theirs.
+        // the family got two receipts and monitoring got two rows. Keyed on
+        // the payload's payment_ulid + this student's name - one sibling
+        // settled by the same multi-month payment still gets their own.
         $alreadyDelivered = NotificationLog::query()
             ->where('channel', 'whatsapp')
             ->where('template', 'receipt_spp_school')
             ->where('status', '!=', 'failed')
             ->where('payload->payment_ulid', $payment->ulid)
-            ->where('notifiable_id', $bill->id)
+            ->where('payload->student_name', $bill->student->nama_lengkap)
             ->exists();
 
         if ($alreadyDelivered) {
@@ -125,8 +125,12 @@ class PaymentReceiptSender
                 'payment_ulid' => $payment->ulid,
             ],
             'status' => 'queued',
-            'notifiable_type' => Bill::class,
-            'notifiable_id' => $bill->id,
+            // The payment, not the first bill (audit T64-e): a consolidated
+            // multi-month receipt covers many bills, and the morph used to
+            // point at only the first of them - admin navigation from the
+            // log row reached one bill and orphaned the rest.
+            'notifiable_type' => Payment::class,
+            'notifiable_id' => $payment->id,
         ]);
 
         SendQontakTemplateMessage::dispatch(

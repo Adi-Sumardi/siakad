@@ -503,9 +503,12 @@ class BillingTest extends TestCase
             'template' => 'payment_receipt',
             'notifiable_type' => Payment::class,
             'notifiable_id' => $payment->id,
-            'recipient' => $user->guardian->email,
             'status' => 'sent',
         ]);
+        // The recipient column is ciphertext at rest (audit T51-b) - the
+        // readable address lives through the model, and it is the same one.
+        $receipt = \App\Models\NotificationLog::where('template', 'payment_receipt')->first();
+        $this->assertSame($user->guardian->email, $receipt->recipient);
     }
 
     public function test_checkout_with_an_unconfigured_billing_api_falls_back_to_a_simulated_va(): void

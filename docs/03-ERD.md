@@ -77,6 +77,8 @@ Hanya satu boleh `is_active` — ditegakkan unique partial index `WHERE is_activ
 ### `terms`
 `id, ulid, academic_year_id FK, name enum(ganjil, genap), starts_on, ends_on, is_active`.
 Unique `(academic_year_id, name)`. Dipakai sebagai periode reset poin dan periode buku.
+Hanya SATU `is_active` secara **global** (semester berjalan tunggal) — ditegakkan
+unique partial index `WHERE is_active` (migrasi `2026_09_25_000002`).
 
 ### `classrooms` (rombel)
 | Kolom | Tipe | Catatan |
@@ -376,10 +378,13 @@ last_sent_at, created_by FK nullable, timestamps`.
 
 ### `notification_logs`
 `id, ulid, channel enum(email, whatsapp), template, recipient, payload jsonb,
-status enum(queued, sent, failed), provider_message_id, error, sent_at,
-notifiable_type, notifiable_id, timestamps`.
+status enum(queued, sent, failed), attempts, provider_message_id, error,
+sent_at, claimed_at, notifiable_type, notifiable_id, timestamps`.
 
-Dipakai untuk menjawab "orang tua bilang tidak dapat email tagihan".
+`attempts` default 1 (pengiriman pembuat baris sudah terhitung); `claimed_at`
+adalah klaim pengiriman atomik — dua job tak bisa sama-sama mengirim satu baris
+(klaim basi 30 menit diambil alih sweep retry). Dipakai untuk menjawab "orang
+tua bilang tidak dapat email tagihan".
 
 ### `integration_events`
 `id, ulid, source enum(pmb, xendit), event_type, event_id string **unique**,

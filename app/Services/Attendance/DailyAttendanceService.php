@@ -230,15 +230,19 @@ class DailyAttendanceService
                 // Only the machine's own alpa rows, never a human's mark - a
                 // corrected-to-sakit row was already superseded, and a TU's
                 // manual alpa was somebody's decision, not the window's.
+                $revokedStudents = collect();
                 $revoked = DailyRecord::where('daily_session_id', $session->id)
                     ->active()
                     ->where('attendance_status', 'alpa')
                     ->where('description', self::AUTO_SWEEP_DESCRIPTION)
+                    ->with('student')
                     ->get()
-                    ->each(function (DailyRecord $record) use ($by) {
+                    ->each(function (DailyRecord $record) use ($by, $revokedStudents) {
                         $this->revoke($record, $by, 'Jendela absen diubah admin - alpa otomatis dibatalkan, siswa dapat absen ulang.');
-                        $this->syncEnrollmentRollup($record->student);
+                        $revokedStudents->push($record->student);
                     });
+
+                $this->syncEnrollmentRollups($revokedStudents);
 
                 // Reopening a window is a big administrative move (audit
                 // T46-d) - previously the only trace was opened_by.
@@ -775,6 +779,55 @@ class DailyAttendanceService
         ])->save();
     }
 
+    /**
+     * The batch form of syncEnrollmentRollup() for the sweep path (audit
+     * T65-f): a closing window recomputed one student at a time - roughly
+     * two queries per student, a thousand for a full unit - while the
+     * per-student loop below the write already exists. ONE update with
+     * correlated subqueries, portable across SQLite and Postgres, computes
+     * every counter for every active enrollment of the given students at
+     * once. Same recomputed-from-source semantics, same per-enrollment
+     * academic-year scoping.
+     *
+     * @param  \Illuminate\Support\Collection<int, Student>|list<Student>  $students
+     */
+    public function syncEnrollmentRollups($students): void
+    {
+        $ids = collect($students)->map(fn (Student $s) => $s->id)->unique()->values()->all();
+
+        if ($ids === []) {
+            return;
+        }
+
+        $bindings = ['sakit', 'izin', 'alpa'];
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+        // One correlated SELECT per counter; each repeats the same four
+        // filters (live record, masuk window, the enrollment's own academic
+        // year, the counted status).
+        $counter = fn (string $status) => sprintf(
+            '(SELECT COUNT(*) FROM daily_records dr '
+            .'JOIN daily_sessions ds ON ds.id = dr.daily_session_id '
+            .'JOIN terms t ON t.id = dr.term_id '
+            .'WHERE dr.student_id = enrollments.student_id '
+            ."AND dr.record_status = 'recorded' "
+            ."AND ds.type = 'masuk' "
+            .'AND t.academic_year_id = enrollments.academic_year_id '
+            .'AND dr.attendance_status = ?) ',
+            $status,
+        );
+
+        DB::update(
+            'UPDATE enrollments SET '
+            .'sick_count = '.$counter('sakit').', '
+            .'permit_count = '.$counter('izin').', '
+            .'absent_count = '.$counter('alpa').' '
+            ."WHERE enrollments.status = 'active' "
+            ."AND enrollments.student_id IN ({$placeholders})",
+            array_merge($bindings, $ids),
+        );
+    }
+
     /** Excludes the row from every report; the row and its reasoning stay on file (D6). */
     public function revoke(DailyRecord $record, User $revokedBy, string $reason): void
     {
@@ -858,8 +911,9 @@ class DailyAttendanceService
         });
 
         // A swept alpa changes the watchlist's numbers, so the rollup must
-        // land for every record the window just closed out.
-        $records->each(fn (DailyRecord $record) => $this->syncEnrollmentRollup($record->student));
+        // land for every student the window just closed out - in ONE
+        // batched update (audit T65-f), not two queries per student.
+        $this->syncEnrollmentRollups($missed);
 
         // The daily layer finally writes its own audit trail (audit T46-d):
         // one summary line per swept window - whole cohorts of auto-alpa

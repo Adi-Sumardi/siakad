@@ -9,6 +9,7 @@ use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Models\AccountInvitation;
 use App\Models\ActivityLog;
 use App\Models\Guardian;
+use App\Models\NotificationLog;
 use App\Models\SchoolUnit;
 use App\Models\StaffProfile;
 use App\Models\User;
@@ -287,7 +288,11 @@ class UserController extends Controller
             return response()->json(['message' => 'Anda tidak dapat menghapus akun Anda sendiri.'], 422);
         }
 
-        ActivityLog::record($request->user(), 'user.deleted', $user, ['email' => $user->email]);
+        // Masked (audit T51-b): the audit trail keeps "which address",
+        // recognizably - not one more plaintext copy of it.
+        ActivityLog::record($request->user(), 'user.deleted', $user, [
+            'email' => NotificationLog::maskRecipient($user->email),
+        ]);
         $user->delete();
 
         return response()->json(['message' => 'User berhasil dihapus.']);
@@ -336,7 +341,8 @@ class UserController extends Controller
 
         ActivityLog::record($request->user(), 'user.reset_access_issued', $user, [
             'channel' => $request->channel,
-            'sent_to' => $contact,
+            // Masked (audit T51-b): recognizability, not another plaintext copy.
+            'sent_to' => NotificationLog::maskRecipient($contact),
             'delivered' => $result->success,
         ]);
 

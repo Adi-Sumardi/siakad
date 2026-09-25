@@ -173,7 +173,8 @@ class NotificationLogMonitoringTest extends TestCase
 
         $this->assertSame(1, $body['meta']['total']);
         $this->assertSame($failed->ulid, $body['data'][0]['ulid']);
-        $this->assertSame('budi@example.com', $body['data'][0]['recipient']);
+        // Masked since audit T51-b - recognizable, not re-publishable.
+        $this->assertSame('b***@example.com', $body['data'][0]['recipient']);
         $this->assertSame(1, $body['data'][0]['attempts']);
         $this->assertArrayNotHasKey('payload', $body['data'][0]);
         $this->assertArrayNotHasKey('notifiable_id', $body['data'][0]);
