@@ -67,4 +67,71 @@ class PointController extends Controller
             'students' => $rows->sortBy('balance')->values(),
         ]);
     }
+
+    /**
+     * The two top-5 boards (feature batch Poin 6): highest MERIT total and
+     * highest VIOLATION total, from the same signed ledger the balance
+     * reads - positive rows are merit, negative rows are violations, and
+     * revoked rows are already excluded by active(). Only verified records
+     * ever reach point_records in the first place (achievements write their
+     * points at verify time), so "terverifikasi" is the ledger's own
+     * contract.
+     *
+     * One pair of filters (unit + jenjang) drives both boards at once -
+     * the school's explicit choice - and jenjang resolves through the
+     * student's active enrollment's classroom, exactly like the student
+     * list filter.
+     */
+    public function leaderboard(Request $request): JsonResponse
+    {
+        $term = Term::current();
+
+        if (! $term) {
+            return response()->json(['term' => null, 'merit' => [], 'violation' => []]);
+        }
+
+        $students = Student::query()
+            ->visibleTo($request->user())
+            ->active()
+            ->when($request->string('unit')->value(), fn ($q, $code) => $q->whereHas('schoolUnit', fn ($u) => $u->where('code', $code)))
+            ->when($jenjang = $request->string('jenjang')->value(), function ($q, $jenjang) use ($term) {
+                $q->whereHas('enrollments', function ($eq) use ($jenjang, $term) {
+                    $eq->where('status', 'active')
+                        ->where('academic_year_id', $term->academic_year_id)
+                        ->whereHas('classroom', fn ($cq) => \App\Support\Jenjang::applyToClassroomQuery($cq, $jenjang));
+                });
+            })
+            ->with('schoolUnit')
+            ->get();
+
+        // One grouped query feeds both boards: the sign of the ledger row
+        // decides which side it counts for.
+        $totals = PointRecord::where('term_id', $term->id)
+            ->active()
+            ->whereIn('student_id', $students->pluck('id'))
+            ->selectRaw('student_id, SUM(CASE WHEN points > 0 THEN points ELSE 0 END) as merit, SUM(CASE WHEN points < 0 THEN -points ELSE 0 END) as violation')
+            ->groupBy('student_id')
+            ->get()
+            ->keyBy('student_id');
+
+        $shape = fn ($students, $side) => $students
+            ->map(fn (Student $student) => [
+                'student' => [
+                    'ulid' => $student->ulid,
+                    'nama_lengkap' => $student->nama_lengkap,
+                    'unit' => $student->schoolUnit?->label,
+                ],
+                'total' => (int) ($totals[$student->id]->{$side} ?? 0),
+            ])
+            ->filter(fn ($row) => $row['total'] > 0)
+            ->sortByDesc('total')
+            ->take(5)
+            ->values();
+
+        return response()->json([
+            'term' => $term->label(),
+            'merit' => $shape($students, 'merit'),
+            'violation' => $shape($students, 'violation'),
+        ]);
+    }
 }

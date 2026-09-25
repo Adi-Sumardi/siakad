@@ -310,6 +310,7 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::patch('/point-thresholds/{pointThreshold}', [PointThresholdController::class, 'update']);
 
     Route::get('/points', [AdminPointController::class, 'index']);
+    Route::get('/points/leaderboard', [AdminPointController::class, 'leaderboard']);
 
     Route::get('/achievements', [AdminAchievementController::class, 'index']);
     Route::post('/achievements/{ulid}/verify', [AdminAchievementController::class, 'verify']);

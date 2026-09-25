@@ -46,6 +46,9 @@ export default function GenerateBillsPage() {
   const [feeTypes, setFeeTypes] = useState<FeeType[] | null>(null);
   const [feeTypeCode, setFeeTypeCode] = useState("spp");
   const [month, setMonth] = useState(new Date().getMonth() + 1);
+  // The PRINTING date (Poin 10): empty = today. Backdate a late-issued
+  // month's bills here; the due date keeps coming from the rate's due_day.
+  const [issuedAt, setIssuedAt] = useState("");
 
   const [preview, setPreview] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(false);
@@ -82,6 +85,7 @@ export default function GenerateBillsPage() {
     try {
       const body: Record<string, unknown> = { fee_type_code: feeTypeCode };
       if (isMonthly) body.month = month;
+      if (issuedAt) body.issued_at = issuedAt;
       const data = await api.post<Preview>("/api/admin/billing-runs/preview", body);
       setPreview(data);
     } catch (err) {
@@ -99,6 +103,7 @@ export default function GenerateBillsPage() {
     try {
       const body: Record<string, unknown> = { fee_type_code: feeTypeCode };
       if (isMonthly) body.month = month;
+      if (issuedAt) body.issued_at = issuedAt;
       const { run } = await api.post<{ run: { bills_created: number; total_amount: number } }>("/api/admin/billing-runs", body);
       setResult(run);
       setPreview(null);
@@ -154,6 +159,20 @@ export default function GenerateBillsPage() {
               </select>
             </div>
           )}
+
+          <div>
+            <Label htmlFor="issued_at" className="text-xs">Tanggal Terbit (opsional)</Label>
+            <input
+              id="issued_at"
+              type="date"
+              value={issuedAt}
+              onChange={(e) => setIssuedAt(e.target.value)}
+              className="mt-1 w-full h-10 rounded-md border border-input bg-card px-3 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Kosong = hari ini. Isi bila mengejar tagihan bulan yang terlanjur lewat terbitnya.
+            </p>
+          </div>
 
           <div>
             <Button onClick={runPreview} disabled={loading} className="w-full gap-2 shadow-xs">

@@ -45,6 +45,7 @@ class BillGenerator
         ?int $month = null,
         ?Term $term = null,
         ?Carbon $dueDate = null,
+        ?Carbon $issuedAt = null,
     ): array {
         $eligible = 0;
         $totalAmount = 0.0;
@@ -86,6 +87,7 @@ class BillGenerator
         ?Term $term = null,
         ?Carbon $dueDate = null,
         ?User $actor = null,
+        ?Carbon $issuedAt = null,
     ): BillingRun {
         $run = BillingRun::create([
             'fee_type_id' => $type->id,
@@ -117,7 +119,7 @@ class BillGenerator
                     continue;
                 }
 
-                $bill = $this->issue($student, $type, $year, $outcome, $run, $actor);
+                $bill = $this->issue($student, $type, $year, $outcome, $run, $actor, $issuedAt);
 
                 if ($bill->wasRecentlyCreated) {
                     $created++;
@@ -308,6 +310,7 @@ class BillGenerator
         array $outcome,
         BillingRun $run,
         ?User $actor,
+        ?Carbon $issuedAt = null,
     ): Bill {
         /** @var FeeRate $rate */
         $rate = $outcome['rate'];
@@ -319,8 +322,8 @@ class BillGenerator
         // recomputed number each time, is cheap insurance against a crash that
         // would otherwise stop an entire run partway through hundreds of
         // students.
-        return retry(3, function () use ($student, $type, $year, $outcome, $run, $actor, $rate) {
-            return DB::transaction(function () use ($student, $type, $year, $outcome, $run, $actor, $rate) {
+        return retry(3, function () use ($student, $type, $year, $outcome, $run, $actor, $rate, $issuedAt) {
+            return DB::transaction(function () use ($student, $type, $year, $outcome, $run, $actor, $rate, $issuedAt) {
                 // firstOrCreate against the unique (student_id, dedup_key): two
                 // admins pressing the button at once, or a scheduler that fires
                 // twice, end up with one bill either way.
@@ -350,7 +353,7 @@ class BillGenerator
                         // without this key holds null, and the column's default
                         // only applies to rows the database inserts on its own.
                         'allow_installment' => (bool) $type->allow_installment,
-                        'issued_at' => now(),
+                        'issued_at' => $issuedAt ?? now(),
                         'issued_by' => $actor?->id,
                     ]
                 );

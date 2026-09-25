@@ -58,9 +58,9 @@ class BillingRunController extends Controller
 
     public function preview(BillingRunRequest $request, BillGenerator $generator): JsonResponse
     {
-        [$type, $year, $unit, $month, $due] = $this->resolve($request);
+        [$type, $year, $unit, $month, $due, $issuedAt] = $this->resolve($request);
 
-        $preview = $generator->preview($type, $year, $unit, $month, $year->activeTerm(), $due);
+        $preview = $generator->preview($type, $year, $unit, $month, $year->activeTerm(), $due, $issuedAt);
 
         return response()->json([
             'fee_type' => $type->name,
@@ -75,9 +75,9 @@ class BillingRunController extends Controller
 
     public function store(BillingRunRequest $request, BillGenerator $generator): JsonResponse
     {
-        [$type, $year, $unit, $month, $due] = $this->resolve($request);
+        [$type, $year, $unit, $month, $due, $issuedAt] = $this->resolve($request);
 
-        $run = $generator->run($type, $year, $unit, $month, $year->activeTerm(), $due, $request->user());
+        $run = $generator->run($type, $year, $unit, $month, $year->activeTerm(), $due, $request->user(), $issuedAt);
 
         ActivityLog::record($request->user(), 'billing_run.executed', $run, [
             'fee_type' => $type->code,
@@ -100,7 +100,7 @@ class BillingRunController extends Controller
     }
 
     /**
-     * @return array{0: FeeType, 1: AcademicYear, 2: ?SchoolUnit, 3: ?int, 4: ?Carbon}
+     * @return array{0: FeeType, 1: AcademicYear, 2: ?SchoolUnit, 3: ?int, 4: ?Carbon, 5: ?Carbon}
      */
     private function resolve(BillingRunRequest $request): array
     {
@@ -129,6 +129,7 @@ class BillingRunController extends Controller
             $unit,
             $validated['month'] ?? null,
             isset($validated['due_date']) ? Carbon::parse($validated['due_date']) : null,
+            isset($validated['issued_at']) ? Carbon::parse($validated['issued_at'])->startOfDay() : null,
         ];
     }
 }

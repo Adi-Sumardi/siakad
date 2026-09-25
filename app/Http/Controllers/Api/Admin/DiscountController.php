@@ -40,6 +40,9 @@ class DiscountController extends Controller
                 'code' => $s->code,
                 'name' => $s->name,
                 'type' => $s->type,
+                // The scholarship kind (feature batch Poin 13) - 'lainnya'
+                // for everything written before the column existed.
+                'jenis' => $s->jenis,
                 'value' => (float) $s->value,
                 'fee_type' => $s->feeType ? ['ulid' => $s->feeType->ulid, 'code' => $s->feeType->code, 'name' => $s->feeType->name] : null,
                 'school_unit' => $s->schoolUnit ? ['ulid' => $s->schoolUnit->ulid, 'code' => $s->schoolUnit->code, 'label' => $s->schoolUnit->label] : null,
@@ -64,6 +67,7 @@ class DiscountController extends Controller
             'code' => $validated['code'],
             'name' => $validated['name'],
             'type' => $validated['type'],
+            'jenis' => $validated['jenis'] ?? 'lainnya',
             'value' => $validated['value'],
             'fee_type_id' => $feeType?->id,
             'school_unit_id' => $unit?->id,

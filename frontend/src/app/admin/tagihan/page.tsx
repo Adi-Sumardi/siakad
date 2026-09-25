@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -802,16 +803,18 @@ function AdminBillsContent() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Nominal (Rp)</Label>
-                  <Input
-                    type="number"
-                    min={1000}
-                    step={500}
-                    value={manualLines.length > 0 ? (linesTotal || "") : manual.amount}
-                    onChange={(e) => setManual({ ...manual, amount: e.target.value })}
+                  <CurrencyInput
+                    value={
+                      manualLines.length > 0
+                        ? linesTotal || null
+                        : manual.amount === ""
+                          ? null
+                          : Number(manual.amount)
+                    }
+                    onChange={(n) => setManual({ ...manual, amount: n === null ? "" : String(n) })}
                     disabled={manualLines.length > 0}
-                    required
-                    placeholder="mis. 450000"
-                    className="mt-1 font-bold disabled:opacity-70"
+                    placeholder="mis. 450.000"
+                    className="mt-1 disabled:opacity-70"
                   />
                   {!isCentral && manualIsCambridge && manualLines.length === 0 && (
                     <p className="mt-1 text-[11px] text-muted-foreground">

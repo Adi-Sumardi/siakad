@@ -2,18 +2,23 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { ArrowRight, Users } from "lucide-react";
+import { useAuth } from "@/lib/auth/auth-context";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { JenjangSelect } from "@/components/ui/jenjang-select";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
+import { jenjangEntry, jenjangSortIndex, keyForClassroom, matchesClassroom } from "@/lib/jenjang";
 
 type ClassroomOption = {
   ulid: string;
   name: string;
   tingkat: number;
-  school_unit: { code: string; label: string };
+  school_unit: { code: string; label: string; jenjang_group?: string | null };
   academic_year?: string | null;
+  active_student_count?: number;
 };
 type AcademicYearOption = { ulid: string; year: string; is_active: boolean };
 type RosterStudent = {
@@ -34,10 +39,20 @@ const OUTCOME_LABEL: Record<Outcome, string> = {
 };
 
 export default function KenaikanKelasPage() {
+  const { user } = useAuth();
+  const isCentral = user?.role === "admin";
+
   const [classrooms, setClassrooms] = useState<ClassroomOption[] | null>(null);
   const [years, setYears] = useState<AcademicYearOption[]>([]);
   const [sourceClassroom, setSourceClassroom] = useState("");
   const [targetYear, setTargetYear] = useState("");
+  // The per-class table's narrowing (Poin 3): unit + jenjang, so a central
+  // admin works one campus at a time instead of every unit in one flat
+  // list. Promotion itself is always per source classroom, so a filtered
+  // view cannot touch another unit's students by construction.
+  const [unitFilter, setUnitFilter] = useState("");
+  const [jenjangFilter, setJenjangFilter] = useState("");
+  const [unitOptions, setUnitOptions] = useState<{ code: string; label: string }[]>([]);
 
   const [roster, setRoster] = useState<RosterStudent[] | null>(null);
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
@@ -63,7 +78,13 @@ export default function KenaikanKelasPage() {
         return api.get<{ classrooms: ClassroomOption[] }>(`/api/admin/classrooms${query}`);
       })
       .then((d) => setClassrooms(d.classrooms));
-  }, []);
+
+    if (isCentral) {
+      api.get<{ school_units: { code: string; label: string }[] }>("/api/admin/school-units")
+        .then((d) => setUnitOptions(d.school_units))
+        .catch(() => {});
+    }
+  }, [isCentral]);
 
   // No sync reset-to-null inside the effects: "empty" is derived during
   // render from the selectors (a roster without a source class, target
@@ -174,6 +195,14 @@ export default function KenaikanKelasPage() {
   const readyToSubmit = roster !== null && roster.length > 0 && targetYear
     && roster.every((s) => !["promoted", "repeated"].includes(outcomes[s.ulid]) || targetClassrooms[s.ulid]);
 
+  // Poin 3's per-class table: the active-year classrooms narrowed by unit +
+  // jenjang, in ladder order, with each row's active roster size.
+  const tableRows = (classrooms ?? [])
+    .filter((c) => !unitFilter || c.school_unit.code === unitFilter)
+    .filter((c) => matchesClassroom(c, jenjangFilter || null))
+    .slice()
+    .sort((a, b) => jenjangSortIndex(a) - jenjangSortIndex(b) || a.name.localeCompare(b.name));
+
   return (
     <div className="flex flex-col gap-5 pb-24">
       <div>
@@ -182,6 +211,96 @@ export default function KenaikanKelasPage() {
           Pindahkan satu rombongan kelas ke tahun ajaran berikutnya sekaligus - naik kelas, tinggal kelas, lulus, atau keluar.
         </p>
       </div>
+
+      {/* Poin 3: filter per unit + jenjang di atas tabel kelas. */}
+      <Card className="flex flex-wrap items-end gap-3 p-5">
+        {isCentral && (
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Unit</Label>
+            <select
+              value={unitFilter}
+              onChange={(e) => setUnitFilter(e.target.value)}
+              className="h-10 w-52 rounded-lg border border-input bg-card px-3 text-sm"
+            >
+              <option value="">Semua Unit</option>
+              {unitOptions.map((u) => (
+                <option key={u.code} value={u.code}>{u.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Jenjang</Label>
+          <JenjangSelect
+            value={jenjangFilter}
+            onChange={setJenjangFilter}
+            className="h-10 w-56 rounded-lg border border-input bg-card px-3 text-sm"
+          />
+        </div>
+      </Card>
+
+      <Card className="overflow-x-auto p-0">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-5 py-3.5">Jenjang</th>
+              <th className="px-5 py-3.5">Nama Kelas</th>
+              <th className="px-5 py-3.5">Unit</th>
+              <th className="px-5 py-3.5">Jumlah Siswa</th>
+              <th className="px-5 py-3.5">Tahun Ajaran</th>
+              <th className="px-5 py-3.5 text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {classrooms === null && (
+              <tr>
+                <td colSpan={6} className="px-5 py-10 text-center text-sm text-muted-foreground">
+                  <Skeleton className="mx-auto h-6 w-40" />
+                </td>
+              </tr>
+            )}
+            {classrooms !== null && tableRows.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-5 py-10 text-center text-sm text-muted-foreground">
+                  Tidak ada kelas aktif untuk filter ini.
+                </td>
+              </tr>
+            )}
+            {tableRows.map((c) => {
+              const jenjang = jenjangEntry(keyForClassroom(c) ?? "");
+
+              return (
+                <tr key={c.ulid} className="border-b border-border/60 last:border-0 hover:bg-muted/20 transition-colors">
+                  <td className="px-5 py-4 font-medium">{jenjang?.label ?? "—"}</td>
+                  <td className="px-5 py-4 font-bold">{c.name}</td>
+                  <td className="px-5 py-4 text-muted-foreground">{c.school_unit.label}</td>
+                  <td className="px-5 py-4">
+                    <span className="inline-flex items-center gap-1.5 font-semibold">
+                      <Users className="size-3.5 text-muted-foreground" />
+                      {c.active_student_count ?? 0}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4 text-muted-foreground">{c.academic_year ?? "—"}</td>
+                  <td className="px-5 py-4 text-right">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5"
+                      onClick={() => {
+                        setSourceClassroom(c.ulid);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                    >
+                      <ArrowRight className="size-3.5" />
+                      Proses
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Card>
 
       <Card className="flex flex-wrap items-end gap-3 p-5">
         <div className="flex flex-col gap-1.5">
@@ -195,12 +314,15 @@ export default function KenaikanKelasPage() {
               className="h-10 w-64 rounded-lg border border-input bg-card px-3 text-sm"
             >
               <option value="">Pilih kelas</option>
-              {classrooms.map((c) => (
-                <option key={c.ulid} value={c.ulid}>
-                  {c.school_unit.label} · {c.name} (tingkat {c.tingkat}
-                  {c.academic_year ? ` · TA ${c.academic_year}` : ""})
-                </option>
-              ))}
+              {classrooms
+                .filter((c) => !unitFilter || c.school_unit.code === unitFilter)
+                .filter((c) => matchesClassroom(c, jenjangFilter || null))
+                .map((c) => (
+                  <option key={c.ulid} value={c.ulid}>
+                    {c.school_unit.label} · {c.name} (tingkat {c.tingkat}
+                    {c.academic_year ? ` · TA ${c.academic_year}` : ""})
+                  </option>
+                ))}
             </select>
           )}
         </div>

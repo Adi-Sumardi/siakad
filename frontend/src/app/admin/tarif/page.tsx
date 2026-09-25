@@ -18,6 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -1132,15 +1133,11 @@ export default function FeeRatesPage() {
                 </div>
                 <div>
                   <Label htmlFor="rate_amount" className="text-xs">Nominal Tagihan (Rp)</Label>
-                  <Input
+                  <CurrencyInput
                     id="rate_amount"
-                    type="number"
-                    min="0"
-                    placeholder="misal: 500000"
-                    value={rateForm.amount}
-                    onChange={(e) => setRateForm({ ...rateForm, amount: e.target.value })}
-                    required
-                    className="mt-1 font-bold"
+                    value={rateForm.amount === "" ? null : Number(rateForm.amount)}
+                    onChange={(n) => setRateForm({ ...rateForm, amount: n === null ? "" : String(n) })}
+                    className="mt-1"
                   />
                 </div>
               </div>
@@ -1202,13 +1199,11 @@ export default function FeeRatesPage() {
                           onChange={(e) => setRateComponents((cs) => cs.map((x, xi) => xi === i ? { ...x, name: e.target.value } : x))}
                           className="h-8 w-40 text-xs"
                         />
-                        <Input
-                          type="number"
-                          min="0"
+                        <CurrencyInput
+                          value={c.amount === "" ? null : Number(c.amount)}
+                          onChange={(n) => setRateComponents((cs) => cs.map((x, xi) => xi === i ? { ...x, amount: n === null ? "" : String(n) } : x))}
                           placeholder="Harga"
-                          value={c.amount}
-                          onChange={(e) => setRateComponents((cs) => cs.map((x, xi) => xi === i ? { ...x, amount: e.target.value } : x))}
-                          className="h-8 w-28 text-xs"
+                          className="h-8 w-28 rounded-md border border-input bg-card pl-8 pr-2 text-xs font-bold tabular"
                         />
                         <Input
                           type="number"
@@ -1472,7 +1467,11 @@ export default function FeeRatesPage() {
             <form onSubmit={handleUpdateRate} className="space-y-3.5 text-xs">
               <div>
                 <Label className="text-xs">Nominal Tagihan (Rp)</Label>
-                <Input type="number" min={0} value={editRateForm.amount} onChange={(e) => setEditRateForm((f) => ({ ...f, amount: e.target.value }))} required className="mt-1" />
+                <CurrencyInput
+                  value={editRateForm.amount === "" ? null : Number(editRateForm.amount)}
+                  onChange={(n) => setEditRateForm((f) => ({ ...f, amount: n === null ? "" : String(n) }))}
+                  className="mt-1"
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1481,7 +1480,11 @@ export default function FeeRatesPage() {
                 </div>
                 <div>
                   <Label className="text-xs">Denda Keterlambatan (Rp)</Label>
-                  <Input type="number" min={0} value={editRateForm.late_fee_amount} onChange={(e) => setEditRateForm((f) => ({ ...f, late_fee_amount: e.target.value }))} className="mt-1" />
+                  <CurrencyInput
+                    value={editRateForm.late_fee_amount === "" ? null : Number(editRateForm.late_fee_amount)}
+                    onChange={(n) => setEditRateForm((f) => ({ ...f, late_fee_amount: n === null ? "" : String(n) }))}
+                    className="mt-1"
+                  />
                 </div>
               </div>
               <div>

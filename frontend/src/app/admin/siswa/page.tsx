@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { JenjangSelect } from "@/components/ui/jenjang-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -448,20 +449,14 @@ function AdminStudentsContent() {
           {isAdministrator && (
             <div>
               <Label className="text-xs">Jenjang Sekolah</Label>
-              <select
+              <JenjangSelect
                 value={jenjangFilter}
-                onChange={(e) => {
-                  setJenjangFilter(e.target.value);
+                onChange={(key) => {
+                  setJenjangFilter(key);
                   setPage(1);
                 }}
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
-              >
-                <option value="">Semua Jenjang</option>
-                <option value="tk">TK / PAUD / RA</option>
-                <option value="sd">SD</option>
-                <option value="smp">SMP</option>
-                <option value="sma">SMA</option>
-              </select>
+              />
             </div>
           )}
 

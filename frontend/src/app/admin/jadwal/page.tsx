@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { JenjangSelect } from "@/components/ui/jenjang-select";
+import { matchesClassroom } from "@/lib/jenjang";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,7 +15,7 @@ import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth/auth-context";
 import { DAY_OF_WEEK_LABEL, type ClassSchedule, type Subject } from "@/lib/types/kesiswaan";
 
-type ClassroomOption = { ulid: string; name: string; tingkat: number; school_unit: { code: string; label: string } };
+type ClassroomOption = { ulid: string; name: string; tingkat: number; school_unit: { code: string; label: string; jenjang_group?: string | null } };
 type TeacherOption = { ulid: string; name: string };
 
 function NewSubjectForm({ onCreated }: { onCreated: () => void }) {
@@ -244,6 +246,13 @@ export default function JadwalPage() {
 
   const [classrooms, setClassrooms] = useState<ClassroomOption[] | null>(null);
   const [selectedClassroom, setSelectedClassroom] = useState<string>("");
+  // Display-only narrowing ahead of the picker (Poin 4): a central admin's
+  // classroom list is unit- and jenjang-filterable so one campus's timetable
+  // never drowns in every other unit's; admin_unit is already scoped by the
+  // API, where jenjang still helps inside their own unit.
+  const [unitFilter, setUnitFilter] = useState("");
+  const [jenjangFilter, setJenjangFilter] = useState("");
+  const [unitOptions, setUnitOptions] = useState<{ code: string; label: string }[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [schedules, setSchedules] = useState<{ classroomUlid: string; rows: ClassSchedule[] } | null>(null);
@@ -266,6 +275,10 @@ export default function JadwalPage() {
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar kelas."));
 
     loadSubjects();
+
+    api.get<{ school_units: { code: string; label: string }[] }>("/api/admin/school-units")
+      .then((d) => setUnitOptions(d.school_units))
+      .catch(() => {});
 
     api.get<{ users: { data: TeacherOption[] } }>("/api/admin/users?role=guru&per_page=200")
       .then((d) => setTeachers(d.users.data))
@@ -323,21 +336,49 @@ export default function JadwalPage() {
       </Card>
 
       <Card className="p-5">
-        <div className="flex flex-col gap-1.5">
-          <Label>Kelas</Label>
-          {classrooms === null ? (
-            <Skeleton className="h-10 w-64" />
-          ) : (
-            <select
-              value={selectedClassroom}
-              onChange={(e) => setSelectedClassroom(e.target.value)}
-              className="h-10 w-64 rounded-lg border border-input bg-card px-3 text-sm"
-            >
-              {classrooms.map((c) => (
-                <option key={c.ulid} value={c.ulid}>{c.school_unit.label} · {c.name}</option>
-              ))}
-            </select>
+        <div className="flex flex-wrap items-end gap-4">
+          {isCentral && (
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Unit</Label>
+              <select
+                value={unitFilter}
+                onChange={(e) => setUnitFilter(e.target.value)}
+                className="h-10 w-52 rounded-lg border border-input bg-card px-3 text-sm"
+              >
+                <option value="">Semua Unit</option>
+                {unitOptions.map((u) => (
+                  <option key={u.code} value={u.code}>{u.label}</option>
+                ))}
+              </select>
+            </div>
           )}
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Jenjang</Label>
+            <JenjangSelect
+              value={jenjangFilter}
+              onChange={setJenjangFilter}
+              className="h-10 w-56 rounded-lg border border-input bg-card px-3 text-sm"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Kelas</Label>
+            {classrooms === null ? (
+              <Skeleton className="h-10 w-64" />
+            ) : (
+              <select
+                value={selectedClassroom}
+                onChange={(e) => setSelectedClassroom(e.target.value)}
+                className="h-10 w-64 rounded-lg border border-input bg-card px-3 text-sm"
+              >
+                {classrooms
+                  .filter((c) => !unitFilter || c.school_unit.code === unitFilter)
+                  .filter((c) => matchesClassroom(c, jenjangFilter || null))
+                  .map((c) => (
+                    <option key={c.ulid} value={c.ulid}>{c.school_unit.label} · {c.name}</option>
+                  ))}
+              </select>
+            )}
+          </div>
         </div>
       </Card>
 

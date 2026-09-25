@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { JenjangSelect } from "@/components/ui/jenjang-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -248,14 +249,23 @@ export default function EkstrakurikulerPage() {
     api.get<{ students: { data: StudentOption[] } }>("/api/admin/students?per_page=500").then((d) => setStudents(d.students.data));
   }, []);
 
-  function loadActivities() {
+  // Poin 5: unit (central only) + coarse jenjang filters, applied
+  // server-side; an admin_unit's list is already scoped by the API.
+  const [unitFilter, setUnitFilter] = useState("");
+  const [jenjangFilter, setJenjangFilter] = useState("");
+
+  function loadActivities(unit = unitFilter, jenjang = jenjangFilter) {
     setActivities(null);
-    api.get<{ extracurriculars: EkskulRow[] }>("/api/admin/extracurriculars")
+    const params = new URLSearchParams();
+    if (unit) params.set("unit", unit);
+    if (jenjang) params.set("jenjang", jenjang);
+    const query = params.toString();
+    api.get<{ extracurriculars: EkskulRow[] }>(`/api/admin/extracurriculars${query ? `?${query}` : ""}`)
       .then((d) => setActivities(d.extracurriculars))
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar ekstrakurikuler."));
   }
 
-  useEffect(loadActivities, []);
+  useEffect(loadActivities, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex flex-col gap-5">
@@ -265,6 +275,40 @@ export default function EkstrakurikulerPage() {
           Katalog kegiatan dan roster anggota. Biaya ekskul hanya tertagih untuk siswa yang terdaftar aktif di sini.
         </p>
       </div>
+
+      <Card className="flex flex-wrap items-end gap-4 p-5">
+        {isCentral && (
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Unit</Label>
+            <select
+              value={unitFilter}
+              onChange={(e) => {
+                setUnitFilter(e.target.value);
+                loadActivities(e.target.value, jenjangFilter);
+              }}
+              className="h-10 w-52 rounded-lg border border-input bg-card px-3 text-sm"
+            >
+              <option value="">Semua Unit</option>
+              {units.map((u) => (
+                <option key={u.code} value={u.code}>{u.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Jenjang</Label>
+          <JenjangSelect
+            granularity="coarse"
+            allLabel="Semua Jenjang"
+            value={jenjangFilter}
+            onChange={(key) => {
+              setJenjangFilter(key);
+              loadActivities(unitFilter, key);
+            }}
+            className="h-10 w-48 rounded-lg border border-input bg-card px-3 text-sm"
+          />
+        </div>
+      </Card>
 
       <Card className="p-5">
         <h2 className="mb-3 text-sm font-semibold">Tambah ekstrakurikuler</h2>

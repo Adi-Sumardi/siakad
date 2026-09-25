@@ -11,7 +11,7 @@ class DiscountScheme extends Model
     use HasUlidKey;
 
     protected $fillable = [
-        'code', 'name', 'type', 'value',
+        'code', 'name', 'type', 'jenis', 'value',
         'fee_type_id', 'school_unit_id', 'is_active', 'notes',
     ];
 

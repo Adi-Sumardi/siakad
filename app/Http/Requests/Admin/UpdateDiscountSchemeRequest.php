@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * Code and type stay locked on edit - the code is the key bills already
@@ -21,6 +22,7 @@ class UpdateDiscountSchemeRequest extends FormRequest
         return [
             'name' => 'sometimes|string|max:120',
             'type' => 'sometimes|in:percent,nominal',
+            'jenis' => ['nullable', Rule::in(StoreDiscountSchemeRequest::JENIS)],
             'value' => 'sometimes|numeric|min:0',
             'fee_type_ulid' => 'nullable|exists:fee_types,ulid',
             'school_unit_ulid' => 'nullable|exists:school_units,ulid',

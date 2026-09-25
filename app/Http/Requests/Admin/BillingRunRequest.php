@@ -19,6 +19,11 @@ class BillingRunRequest extends FormRequest
             'month' => 'nullable|integer|min:1|max:12',
             'unit_code' => 'nullable|exists:school_units,code',
             'due_date' => 'nullable|date',
+            // The PRINTING date (user's explicit choice, Poin 10): what the
+            // bills carry as issued_at - backdating a late-issued month's
+            // bills is the point. The due date keeps coming from due_day /
+            // due_date above, untouched.
+            'issued_at' => 'nullable|date',
         ];
     }
 }

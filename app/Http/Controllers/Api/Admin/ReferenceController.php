@@ -24,8 +24,12 @@ class ReferenceController extends Controller
     public function schoolUnits(): JsonResponse
     {
         return response()->json([
-            'school_units' => SchoolUnit::active()->ordered()->get(['ulid', 'code', 'label'])->map(fn (SchoolUnit $u) => [
+            // jenjang_group rides along (feature batch Poin 1-6): the
+            // frontend's shared jenjang ladder needs it to filter and sort
+            // anything unit-shaped without a second request.
+            'school_units' => SchoolUnit::active()->ordered()->get(['ulid', 'code', 'label', 'jenjang_group'])->map(fn (SchoolUnit $u) => [
                 'ulid' => $u->ulid, 'code' => $u->code, 'label' => $u->label,
+                'jenjang_group' => $u->jenjang_group,
             ]),
         ]);
     }
@@ -114,15 +118,19 @@ class ReferenceController extends Controller
             ->where('is_active', true)
             ->when($academicYear, fn ($q) => $q->where('academic_year_id', $academicYear->id))
             ->with(['schoolUnit', 'academicYear', 'homeroomTeacher'])
+            // One correlated subquery (feature batch Poin 3): the per-class
+            // promotion table needs each classroom's active roster size.
+            ->withCount(['enrollments as active_student_count' => fn ($q) => $q->where('status', 'active')])
             ->orderBy('tingkat')->orderBy('name')
             ->get();
 
         return response()->json([
             'classrooms' => $classrooms->map(fn (Classroom $c) => [
                 'ulid' => $c->ulid, 'name' => $c->name, 'tingkat' => $c->tingkat,
-                'school_unit' => ['code' => $c->schoolUnit->code, 'label' => $c->schoolUnit->label],
+                'school_unit' => ['code' => $c->schoolUnit->code, 'label' => $c->schoolUnit->label, 'jenjang_group' => $c->schoolUnit->jenjang_group],
                 'academic_year' => $c->academicYear?->year,
                 'capacity' => $c->capacity,
+                'active_student_count' => $c->active_student_count,
                 'homeroom_teacher' => $c->homeroomTeacher?->name,
                 'homeroom_teacher_ulid' => $c->homeroomTeacher?->ulid,
                 'is_active' => $c->is_active,

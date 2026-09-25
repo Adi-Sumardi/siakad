@@ -52,7 +52,29 @@ class StudentController extends Controller
                 });
             })
             ->when($request->string('unit')->value(), fn ($q, $unitCode) => $q->whereHas('schoolUnit', fn ($uq) => $uq->where('code', $unitCode)))
-            ->when($request->string('jenjang')->value(), fn ($q, $jenjang) => $q->whereHas('schoolUnit', fn ($uq) => $uq->where('jenjang_group', $jenjang)))
+            // Jenjang comes in two granularities off one ladder
+            // (feature batch Poin 1): a coarse group key (tk|sd|smp|sma -
+            // the historical values, kept working) filters the unit's
+            // group; a granular key (sd-3, tk-a, pg-sb…) additionally
+            // matches the classroom's tingkat and, for early childhood,
+            // its name prefix. Granular goes through the student's ACTIVE
+            // ENROLLMENT in the selected year - an unplaced student has no
+            // rung to sit on and stays outside the granular result by
+            // design (coarse still catches them).
+            ->when($request->string('jenjang')->value(), function ($q, $jenjang) use ($selectedYear) {
+                $q->where(function ($jq) use ($jenjang, $selectedYear) {
+                    $group = \App\Support\Jenjang::groupOf($jenjang);
+                    $jq->whereHas('schoolUnit', fn ($uq) => $uq->where('jenjang_group', $group));
+
+                    if (\App\Support\Jenjang::isValid($jenjang) && ! in_array($jenjang, \App\Support\Jenjang::GROUPS, true)) {
+                        $jq->whereHas('enrollments', function ($eq) use ($jenjang, $selectedYear) {
+                            $eq->where('status', 'active')
+                                ->where('academic_year_id', $selectedYear?->id)
+                                ->whereHas('classroom', fn ($cq) => \App\Support\Jenjang::applyToClassroomQuery($cq, $jenjang));
+                        });
+                    }
+                });
+            })
             ->when($request->string('status')->value(), fn ($q, $status) => $q->where('status', $status))
             // The dashboard's "belum ditempatkan di kelas" alert links here
             // with placement=none - same definition that alert counts:

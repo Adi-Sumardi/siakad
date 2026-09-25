@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Edit2, Power, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { JenjangSelect } from "@/components/ui/jenjang-select";
+import { matchesClassroom } from "@/lib/jenjang";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,9 +22,10 @@ type ClassroomRow = {
   ulid: string;
   name: string;
   tingkat: number;
-  school_unit: { code: string; label: string };
+  school_unit: { code: string; label: string; jenjang_group?: string | null };
   academic_year: string | null;
   capacity: number | null;
+  active_student_count?: number;
   homeroom_teacher: string | null;
   homeroom_teacher_ulid: string | null;
   is_active: boolean;
@@ -122,6 +125,10 @@ export default function KelasPage() {
   const [years, setYears] = useState<AcademicYearOption[]>([]);
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [yearFilter, setYearFilter] = useState<string>("");
+  // Display-only narrowing (Poin 2, user's choice a): the schema of the
+  // academic year card never changes - this just shrinks the classroom
+  // list shown below it.
+  const [jenjangFilter, setJenjangFilter] = useState("");
   const [classrooms, setClassrooms] = useState<ClassroomRow[] | null>(null);
 
   const [editingClassroom, setEditingClassroom] = useState<ClassroomRow | null>(null);
@@ -234,19 +241,29 @@ export default function KelasPage() {
       </Card>
 
       <Card className="p-5">
-        <div className="flex flex-col gap-1.5">
-          <Label>Tahun ajaran</Label>
-          {years.length === 0 ? (
-            <Skeleton className="h-10 w-48" />
-          ) : (
-            <select
-              value={yearFilter}
-              onChange={(e) => setYearFilter(e.target.value)}
-              className="h-10 w-48 rounded-lg border border-input bg-card px-3 text-sm"
-            >
-              {years.map((y) => <option key={y.ulid} value={y.ulid}>{y.year}{y.is_active ? " (aktif)" : ""}</option>)}
-            </select>
-          )}
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Label>Tahun ajaran</Label>
+            {years.length === 0 ? (
+              <Skeleton className="h-10 w-48" />
+            ) : (
+              <select
+                value={yearFilter}
+                onChange={(e) => setYearFilter(e.target.value)}
+                className="h-10 w-48 rounded-lg border border-input bg-card px-3 text-sm"
+              >
+                {years.map((y) => <option key={y.ulid} value={y.ulid}>{y.year}{y.is_active ? " (aktif)" : ""}</option>)}
+              </select>
+            )}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Jenjang</Label>
+            <JenjangSelect
+              value={jenjangFilter}
+              onChange={setJenjangFilter}
+              className="h-10 w-56 rounded-lg border border-input bg-card px-3 text-sm"
+            />
+          </div>
         </div>
       </Card>
 
@@ -255,7 +272,9 @@ export default function KelasPage() {
         {classrooms !== null && classrooms.length === 0 && (
           <p className="text-sm text-muted-foreground">Belum ada kelas untuk tahun ajaran ini.</p>
         )}
-        {classrooms?.map((c) => (
+        {classrooms
+          ?.filter((c) => matchesClassroom(c, jenjangFilter || null))
+          .map((c) => (
           <Card key={c.ulid} className="flex items-center justify-between gap-3 p-4">
             <div>
               <p className="font-medium">

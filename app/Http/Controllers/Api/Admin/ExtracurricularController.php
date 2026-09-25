@@ -24,6 +24,22 @@ class ExtracurricularController extends Controller
     {
         $activities = Extracurricular::query()
             ->visibleTo($request->user())
+            // Unit + jenjang filters (feature batch Poin 5): an activity has
+            // no classroom of its own, so jenjang resolves COARSE - the
+            // unit's group on the shared ladder (sd, smp, …), granular keys
+            // included. For a per-unit admin visibleTo() already wins over
+            // any ?unit= asking for another campus.
+            ->when($request->string('unit')->value(), fn ($q, $code) => $q->whereHas('schoolUnit', fn ($u) => $u->where('code', $code)))
+            ->when($request->string('jenjang')->value(), function ($q, $jenjang) {
+                $group = \App\Support\Jenjang::groupOf($jenjang) ?? $jenjang;
+
+                return $q->where(fn ($sq) => $sq
+                    ->whereHas('schoolUnit', fn ($u) => $u->where('jenjang_group', $group))
+                    // School-wide activities (no unit) sit outside every
+                    // jenjang - they only surface when no jenjang is asked
+                    // for, which is what the old unfiltered list did too.
+                    ->orWhereNull('school_unit_id'));
+            })
             ->with(['schoolUnit', 'academicYear', 'pembina'])
             ->withCount(['activeMembers as member_count'])
             ->orderBy('name')

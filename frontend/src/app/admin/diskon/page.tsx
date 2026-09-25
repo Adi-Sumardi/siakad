@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,11 +25,25 @@ type FeeType = { ulid: string; code: string; name: string };
 type SchoolUnit = { ulid: string; code: string; label: string };
 type AcademicYear = { ulid: string; year: string; is_active: boolean };
 
+/** The scholarship kinds - mirrors StoreDiscountSchemeRequest::JENIS. */
+const JENIS_BEASISWA = [
+  { value: "beasiswa_penuh", label: "Beasiswa Penuh" },
+  { value: "beasiswa_parsial", label: "Beasiswa Parsial" },
+  { value: "keringanan", label: "Keringanan" },
+  { value: "diskon_karyawan", label: "Diskon Karyawan" },
+  { value: "lainnya", label: "Lainnya" },
+] as const;
+
+const JENIS_LABEL: Record<string, string> = Object.fromEntries(
+  JENIS_BEASISWA.map((j) => [j.value, j.label]),
+);
+
 type DiscountScheme = {
   ulid: string;
   code: string;
   name: string;
   type: "percent" | "nominal";
+  jenis?: string | null;
   value: number;
   fee_type: { ulid: string; code: string; name: string } | null;
   school_unit: { ulid: string; code: string; label: string } | null;
@@ -82,6 +97,7 @@ export default function AdminDiscountPage() {
       code: s.code,
       name: s.name,
       type: s.type,
+      jenis: s.jenis ?? "lainnya",
       value: String(s.value),
       fee_type_ulid: s.fee_type?.ulid ?? "",
       school_unit_ulid: s.school_unit?.ulid ?? "",
@@ -98,6 +114,7 @@ export default function AdminDiscountPage() {
       code: "",
       name: "",
       type: "percent",
+      jenis: "lainnya",
       value: "",
       fee_type_ulid: "",
       school_unit_ulid: "",
@@ -111,6 +128,7 @@ export default function AdminDiscountPage() {
     code: "",
     name: "",
     type: "percent" as "percent" | "nominal",
+    jenis: "lainnya",
     value: "",
     fee_type_ulid: "",
     school_unit_ulid: "",
@@ -198,6 +216,7 @@ export default function AdminDiscountPage() {
         await api.patch(`/api/admin/discount-schemes/${editingScheme.ulid}`, {
           name: schemeForm.name,
           type: schemeForm.type,
+          jenis: schemeForm.jenis,
           value: parseFloat(schemeForm.value),
           fee_type_ulid: schemeForm.fee_type_ulid || null,
           school_unit_ulid: schemeForm.school_unit_ulid || null,
@@ -210,6 +229,7 @@ export default function AdminDiscountPage() {
           code: schemeForm.code,
           name: schemeForm.name,
           type: schemeForm.type,
+          jenis: schemeForm.jenis,
           value: parseFloat(schemeForm.value),
           fee_type_ulid: schemeForm.fee_type_ulid || null,
           school_unit_ulid: schemeForm.school_unit_ulid || null,
@@ -380,6 +400,7 @@ export default function AdminDiscountPage() {
                 <tr>
                   <th className="px-5 py-3.5">Kode & Nama Skema</th>
                   <th className="px-5 py-3.5">Besaran Potongan</th>
+                  <th className="px-5 py-3.5">Jenis Beasiswa</th>
                   <th className="px-5 py-3.5">Jenis Tagihan</th>
                   <th className="px-5 py-3.5">Unit Sekolah</th>
                   <th className="px-5 py-3.5">Penerima</th>
@@ -413,6 +434,11 @@ export default function AdminDiscountPage() {
                       <span className="font-semibold text-primary">
                         {s.type === "percent" ? `${s.value}%` : rupiah(s.value)}
                       </span>
+                    </td>
+                    <td className="px-5 py-4">
+                      <Badge variant={s.jenis === "beasiswa_penuh" || s.jenis === "beasiswa_parsial" ? "primary" : "default"}>
+                        {JENIS_LABEL[s.jenis ?? "lainnya"] ?? "Lainnya"}
+                      </Badge>
                     </td>
                     <td className="px-5 py-4">
                       <Badge variant="default">{s.fee_type?.name ?? "Semua Tagihan"}</Badge>
@@ -576,6 +602,19 @@ export default function AdminDiscountPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
+                  <Label htmlFor="jenis" className="text-xs">Jenis Beasiswa</Label>
+                  <select
+                    id="jenis"
+                    value={schemeForm.jenis}
+                    onChange={(e) => setSchemeForm({ ...schemeForm, jenis: e.target.value })}
+                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
+                  >
+                    {JENIS_BEASISWA.map((j) => (
+                      <option key={j.value} value={j.value}>{j.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
                   <Label htmlFor="type" className="text-xs">Tipe Potongan</Label>
                   <select
                     id="type"
@@ -589,17 +628,26 @@ export default function AdminDiscountPage() {
                 </div>
                 <div>
                   <Label htmlFor="value" className="text-xs">Nilai Potongan ({schemeForm.type === "percent" ? "%" : "Rp"})</Label>
-                  <Input
-                    id="value"
-                    type="number"
-                    min="0"
-                    step="any"
-                    placeholder={schemeForm.type === "percent" ? "contoh: 50" : "contoh: 250000"}
-                    value={schemeForm.value}
-                    onChange={(e) => setSchemeForm({ ...schemeForm, value: e.target.value })}
-                    required
-                    className="mt-1"
-                  />
+                  {schemeForm.type === "nominal" ? (
+                    <CurrencyInput
+                      id="value"
+                      value={schemeForm.value === "" ? null : Number(schemeForm.value)}
+                      onChange={(n) => setSchemeForm({ ...schemeForm, value: n === null ? "" : String(n) })}
+                      className="mt-1"
+                    />
+                  ) : (
+                    <Input
+                      id="value"
+                      type="number"
+                      min="0"
+                      step="any"
+                      placeholder="contoh: 50"
+                      value={schemeForm.value}
+                      onChange={(e) => setSchemeForm({ ...schemeForm, value: e.target.value })}
+                      required
+                      className="mt-1"
+                    />
+                  )}
                 </div>
               </div>
 
