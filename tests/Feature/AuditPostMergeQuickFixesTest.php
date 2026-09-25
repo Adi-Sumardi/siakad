@@ -170,7 +170,9 @@ class AuditPostMergeQuickFixesTest extends TestCase
         // Siakad's own families are untouched.
         $this->assertSame('802001', BillingApiClient::resolvePrefix('spp'));
         $this->assertSame('802003', BillingApiClient::resolvePrefix('jamiyyah'));
-        $this->assertSame('365601', BillingApiClient::resolvePrefix('spp', null, 'bsi'));
+        // 7895, not 3656: BSI splits by institution code (school decision
+        // 2026-09-24) - 3656 is uang pangkal only, SPP lives under 7895.
+        $this->assertSame('789501', BillingApiClient::resolvePrefix('spp', null, 'bsi'));
     }
 
     // --------------------------------------------------------------- T38-d

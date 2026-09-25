@@ -105,7 +105,7 @@ class BillReminderTest extends TestCase
             {
                 return [
                     'muamalat' => ['va_number' => '8020012627000001', 'bank_name' => 'Bank Muamalat'],
-                    'bsi' => ['va_number' => '3656012627000001', 'bank_name' => 'Bank Syariah Indonesia (BSI)'],
+                    'bsi' => ['va_number' => '7895012627000001', 'bank_name' => 'Bank Syariah Indonesia (BSI)'],
                 ];
             }
         });
@@ -258,7 +258,7 @@ class BillReminderTest extends TestCase
         $this->assertSame('081234567890', $sent0['phone']);
         $this->assertSame('Aisyah Nur Ramadhani', $sent0['bodyValues'][0]);
         $this->assertSame('8020012627000001', $sent0['bodyValues'][3]);
-        // BSI's fixed 4-digit institution code (3656) is stripped before
+        // BSI's fixed 4-digit institution code (7895) is stripped before
         // this value - the template shows it separately as static text.
         $this->assertSame('012627000001', $sent0['bodyValues'][4]);
 

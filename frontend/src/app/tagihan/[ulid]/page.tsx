@@ -336,10 +336,10 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
             <div className="p-3 bg-card rounded-xl border border-border shadow-2xs space-y-1.5">
               <p className="font-bold text-foreground">Bank Syariah Indonesia (BSI)</p>
               <p className="text-[11px] text-muted-foreground">
-                Kode Bank <strong className="text-primary">451</strong> · Kode Institusi e-SPP <strong className="text-primary">3656</strong>
+                Kode Bank <strong className="text-primary">451</strong> · Kode Institusi e-SPP <strong className="text-primary">7895</strong>
               </p>
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Bayar via <strong>Byond by BSI</strong> (Akademik, kode biller 3656), ATM BSI, atau transfer antar bank ke nomor Virtual Account yang terbit.
+                Bayar via <strong>Byond by BSI</strong> (Akademik, kode biller 7895), ATM BSI, atau transfer antar bank ke nomor Virtual Account yang terbit.
               </p>
             </div>
           </div>

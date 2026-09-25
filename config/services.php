@@ -78,7 +78,7 @@ return [
         // for money) - SPP only for now (see
         // BillReminderSender::queueSppReminderTemplate()). 5 positional
         // variables: nama anak, bulan tagihan, jumlah, VA Muamalat, kode
-        // bayar BSI (VA BSI minus its fixed "3656" prefix).
+        // bayar BSI (VA BSI minus its 4-digit institution code, 7895 for SPP).
         'spp_reminder_template_id' => env('QONTAK_SPP_REMINDER_TEMPLATE_ID'),
         // UUID of the approved 'receipt_spp_school' Utility template
         // (confirms money arrived) - see PaymentReceiptSender. 6 positional
@@ -123,12 +123,19 @@ return [
         // createInvoice() resolve everything about "which bank" from one key.
         'banks' => [
             // VA prefixes below were CONFIRMED correct by the school on
-            // 2026-09-17 (Muamalat 8020.01-.08, BSI 3656.01-.08 - same layout,
-            // different institution head). Fee types WITHOUT a prefix here
+            // 2026-09-17 (Muamalat 8020.01-.08, BSI same layout under the
+            // institution head below). Fee types WITHOUT a prefix here
             // (seragam, buku, kegiatan) get NO VA at all: BillingApiClient
             // refuses rather than borrowing another fee type's prefix, so
             // those stay cash-at-the-desk until e-SPP registers one - add it
             // as an explicit 'va_prefixes.{fee_code}' key when they do.
+            //
+            // NOTE (mentor, disampaikan 2026-09-24 lewat Iwan): BSI membagi
+            // VA per kode institusi - institusi 3656 KHUSUS pembayaran Uang
+            // Formulir dan Uang Pangkal (area PMB), sedangkan aplikasi
+            // SIAKAD memakai kode institusi 7895 untuk VA SPP dan semua
+            // jenis biaya lainnya. Muamalat tidak ikut terbagi: tetap satu
+            // institusi 8020 untuk semuanya.
             'muamalat' => [
                 // Unconfirmed with e-SPP as of 2026-09 - defaults to '1', the
                 // original single-bank value, which is likely Muamalat's real
@@ -160,19 +167,25 @@ return [
                 'bank_id' => env('BILLING_API_BSI_BANK_ID', '1'),
                 'bank_name' => 'Bank Syariah Indonesia (BSI)',
                 'bank_code' => '451',
-                'institution_code' => env('BILLING_API_BSI_INSTITUTION_CODE', '3656'),
+                'institution_code' => env('BILLING_API_BSI_INSTITUTION_CODE', '7895'),
+                // BSI splits by institution code (school, 2026-09-24): 3656
+                // is uang pangkal ONLY, 7895 is SPP and everything else.
+                // Uang pangkal and pendaftaran are billed by PMB (see
+                // BillingApiClient::PMB_OWNED_FEE_TYPES), which keeps 3656
+                // for both - their rows stay here only so the lookup table
+                // matches e-SPP's code list.
                 'va_prefixes' => [
-                    'spp' => env('BILLING_API_BSI_VA_PREFIX_SPP', '365601'),
+                    'spp' => env('BILLING_API_BSI_VA_PREFIX_SPP', '789501'),
                     'uang_pangkal' => env('BILLING_API_BSI_VA_PREFIX_UANG_PANGKAL', '365602'),
-                    'jamiyyah' => env('BILLING_API_BSI_VA_PREFIX_JAMIYYAH', '365603'),
+                    'jamiyyah' => env('BILLING_API_BSI_VA_PREFIX_JAMIYYAH', '789503'),
                     'pendaftaran' => env('BILLING_API_BSI_VA_PREFIX_PENDAFTARAN', '365604'),
-                    'ekskul_tk' => env('BILLING_API_BSI_VA_PREFIX_EKSKUL_TK', '365605'),
-                    'ekskul_sd' => env('BILLING_API_BSI_VA_PREFIX_EKSKUL_SD', '365606'),
-                    'ekskul_smp12' => env('BILLING_API_BSI_VA_PREFIX_EKSKUL_SMP12', '365607'),
-                    'ekskul_smp55' => env('BILLING_API_BSI_VA_PREFIX_EKSKUL_SMP55', '365608'),
-                    'cambridge_sd' => env('BILLING_API_BSI_VA_PREFIX_CAMBRIDGE_SD', '365609'),
-                    'cambridge_smp12' => env('BILLING_API_BSI_VA_PREFIX_CAMBRIDGE_SMP12', '365610'),
-                    'cambridge_smp55' => env('BILLING_API_BSI_VA_PREFIX_CAMBRIDGE_SMP55', '365611'),
+                    'ekskul_tk' => env('BILLING_API_BSI_VA_PREFIX_EKSKUL_TK', '789505'),
+                    'ekskul_sd' => env('BILLING_API_BSI_VA_PREFIX_EKSKUL_SD', '789506'),
+                    'ekskul_smp12' => env('BILLING_API_BSI_VA_PREFIX_EKSKUL_SMP12', '789507'),
+                    'ekskul_smp55' => env('BILLING_API_BSI_VA_PREFIX_EKSKUL_SMP55', '789508'),
+                    'cambridge_sd' => env('BILLING_API_BSI_VA_PREFIX_CAMBRIDGE_SD', '789509'),
+                    'cambridge_smp12' => env('BILLING_API_BSI_VA_PREFIX_CAMBRIDGE_SMP12', '789510'),
+                    'cambridge_smp55' => env('BILLING_API_BSI_VA_PREFIX_CAMBRIDGE_SMP55', '789511'),
                 ],
             ],
         ],

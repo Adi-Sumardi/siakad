@@ -16,10 +16,10 @@ class PaymentReferenceNumberTest extends TestCase
     {
         $payment = new Payment([
             'payment_number' => 'YAPI-SPP-2026-000001-2',
-            'gateway_response' => ['va_number' => '3656012728000001'],
+            'gateway_response' => ['va_number' => '7895012728000001'],
         ]);
 
-        $this->assertSame('3656012728000001', $payment->referenceNumber());
+        $this->assertSame('7895012728000001', $payment->referenceNumber());
     }
 
     public function test_it_falls_back_to_the_internal_number_without_a_va(): void

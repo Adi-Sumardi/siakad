@@ -165,7 +165,7 @@ class PaymentReceiptWhatsAppTest extends TestCase
             'method' => 'virtual_account',
             'channel' => 'billing_api',
             'status' => 'pending',
-            'gateway_response' => ['bank_name' => 'Bank Syariah Indonesia (BSI)', 'va_number' => '3656011234567890'],
+            'gateway_response' => ['bank_name' => 'Bank Syariah Indonesia (BSI)', 'va_number' => '7895011234567890'],
         ]);
 
         PaymentAllocation::create(['payment_id' => $payment->id, 'bill_id' => $august->id, 'amount' => 650000]);

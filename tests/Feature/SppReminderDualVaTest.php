@@ -84,7 +84,7 @@ class SppReminderDualVaTest extends TestCase
 
         $studentCode = str_pad((string) $this->student->id, 6, '0', STR_PAD_LEFT);
         $this->assertSame('802001'.'2627'.$studentCode, $result['muamalat']['va_number']);
-        $this->assertSame('365601'.'2627'.$studentCode, $result['bsi']['va_number']);
+        $this->assertSame('789501'.'2627'.$studentCode, $result['bsi']['va_number']);
         $this->assertSame('Bank Muamalat', $result['muamalat']['bank_name']);
         $this->assertSame('Bank Syariah Indonesia (BSI)', $result['bsi']['bank_name']);
 
