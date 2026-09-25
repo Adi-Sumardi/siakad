@@ -192,10 +192,21 @@ class AccountInvitationSender
             'notifiable_id' => $invitation->id,
         ]);
 
+        // The rendered body carries the activation URL - a working
+        // credential for up to 7 days - so it travels by reference, not by
+        // value (audit T51-a): the job holds a key, QueueSecret holds the
+        // encrypted body expiring with the invitation itself.
+        \App\Services\Security\QueueSecret::stash(
+            'invite:'.$invitation->ulid,
+            $this->renderWhatsAppMessage($data, $invitation->purpose),
+            $invitation->expires_at,
+        );
+
         SendWhatsAppMessage::dispatch(
             $invitation->sent_to,
-            $this->renderWhatsAppMessage($data, $invitation->purpose),
+            '',
             $log->ulid,
+            secretKey: 'invite:'.$invitation->ulid,
         );
 
         return NotificationResult::ok(['mode' => 'queued']);

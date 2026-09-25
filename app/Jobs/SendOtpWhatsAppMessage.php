@@ -44,7 +44,13 @@ class SendOtpWhatsAppMessage implements ShouldQueue
 
     public function __construct(
         public string $phone,
-        public string $code,
+        /**
+         * The LoginOtp row's ULID - NOT the code itself (audit T51-a): a
+         * serialized job lands in jobs.payload plaintext, and failed_jobs
+         * keeps it forever. The code waits in QueueSecret's encrypted,
+         * expiring store instead, keyed by this ULID.
+         */
+        public string $otpUlid,
         public ?string $notificationLogUlid = null,
     ) {}
 
@@ -60,7 +66,24 @@ class SendOtpWhatsAppMessage implements ShouldQueue
             return;
         }
 
-        $result = $gateway->sendOtp($this->phone, $this->code);
+        $code = \App\Services\Security\QueueSecret::take('otp:'.$this->otpUlid);
+
+        if ($code === null) {
+            // The code's 15-minute window closed while this job waited out
+            // the limiter - delivering it now would be useless noise. The
+            // user simply asks again (audit T51-a).
+            if ($this->notificationLogUlid) {
+                NotificationLog::where('ulid', $this->notificationLogUlid)->update([
+                    'status' => 'failed',
+                    'error' => 'Kode kedaluwarsa sebelum sempat terkirim dari antrean.',
+                    'claimed_at' => null,
+                ]);
+            }
+
+            return;
+        }
+
+        $result = $gateway->sendOtp($this->phone, $code);
 
         if ($this->notificationLogUlid) {
             NotificationLog::where('ulid', $this->notificationLogUlid)->update([

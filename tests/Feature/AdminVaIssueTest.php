@@ -124,6 +124,9 @@ class AdminVaIssueTest extends TestCase
         // per call, and a shared one trips payments.external_transaction_id's
         // unique index on the second issue.
         $mock->shouldReceive('createBilling')->andReturnUsing(fn () => ['uuid' => 'bill-uuid-'.uniqid(), 'status' => 'success']);
+        // The re-issue path asks the bank about the VA it supersedes (audit
+        // T39-c) - "still outstanding" is the ordinary answer.
+        $mock->shouldReceive('getByVaNumber')->andReturnUsing(fn () => ['sisa' => 999999]);
         $this->app->instance(BillingApiClient::class, $mock);
 
         return $mock;

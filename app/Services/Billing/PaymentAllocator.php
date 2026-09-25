@@ -74,24 +74,43 @@ class PaymentAllocator
      */
     public function settle(Payment $payment, ?string $externalId = null, array $gatewayResponse = []): void
     {
-        if (! in_array($payment->status, ['pending', 'processing'], true)) {
-            return;
-        }
+        // The claim is one conditional, locked UPDATE (audit T39-a): the
+        // old in-memory status check let the webhook and the poller - two
+        // snapshots of the same row - both pass it and both run the full
+        // settle, double-sending receipts. The loser here changes nothing
+        // and sends nothing.
+        $claimed = DB::transaction(function () use ($payment, $externalId, $gatewayResponse) {
+            $fresh = Payment::query()
+                ->whereKey($payment->id)
+                ->whereIn('status', ['pending', 'processing'])
+                ->lockForUpdate()
+                ->first();
 
-        DB::transaction(function () use ($payment, $externalId, $gatewayResponse) {
+            if (! $fresh) {
+                return false;
+            }
+
             // Merged, never replaced (audit T38-b): the webhook and poller
             // payloads carry verification data but not va_number/bank_name,
             // and a wholesale overwrite dropped those keys - every receipt
             // surface then fell back to the internal payment_number instead
             // of the VA, the exact drift ad095e closed. Passing keys win,
             // everything already recorded survives.
-            $payment->forceFill([
+            $fresh->forceFill([
                 'status' => 'completed',
-                'paid_at' => $payment->paid_at ?? now(),
-                'external_transaction_id' => $externalId ?? $payment->external_transaction_id,
-                'gateway_response' => array_merge($payment->gateway_response ?? [], $gatewayResponse),
+                'paid_at' => $fresh->paid_at ?? now(),
+                'external_transaction_id' => $externalId ?? $fresh->external_transaction_id,
+                'gateway_response' => array_merge($fresh->gateway_response ?? [], $gatewayResponse),
             ])->save();
+
+            return true;
         });
+
+        if (! $claimed) {
+            return;
+        }
+
+        $payment->refresh();
 
         $this->recomputeFor($payment->allocations()->pluck('bill_id')->all());
 
@@ -143,17 +162,36 @@ class PaymentAllocator
     /** A failed or expired checkout releases the bills it was holding. */
     public function fail(Payment $payment, string $status = 'failed', ?string $reason = null): void
     {
-        if ($payment->isSettled()) {
-            // Never walk back money that already arrived - that is a refund,
-            // which is a different operation with different bookkeeping.
+        // Same locked conditional claim as settle() (audit T39-a): the old
+        // isSettled() read decided on a possibly-stale snapshot - a fail()
+        // racing a settle() could flip a completed payment back to failed,
+        // reopening a bill the money had already closed.
+        $claimed = DB::transaction(function () use ($payment, $status, $reason) {
+            $fresh = Payment::query()
+                ->whereKey($payment->id)
+                ->whereIn('status', ['pending', 'processing'])
+                ->lockForUpdate()
+                ->first();
+
+            if (! $fresh) {
+                // Never walk back money that already arrived - that is a
+                // refund, which is a different operation with different
+                // bookkeeping. Also no-ops on an already-failed row.
+                return false;
+            }
+
+            $fresh->forceFill([
+                'status' => $status,
+                'failed_at' => now(),
+                'rejection_reason' => $reason,
+            ])->save();
+
+            return true;
+        });
+
+        if (! $claimed) {
             return;
         }
-
-        $payment->forceFill([
-            'status' => $status,
-            'failed_at' => now(),
-            'rejection_reason' => $reason,
-        ])->save();
 
         $this->recomputeFor($payment->allocations()->pluck('bill_id')->all());
     }

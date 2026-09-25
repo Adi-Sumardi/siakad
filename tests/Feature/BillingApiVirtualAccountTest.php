@@ -985,6 +985,10 @@ class BillingApiVirtualAccountTest extends TestCase
         $mockClient->shouldReceive('createBilling')
             ->twice()
             ->andReturn(['uuid' => 'muamalat-uuid'], ['uuid' => 'bsi-uuid']);
+        // The bank-switch path asks about the VA it supersedes before
+        // failing it (audit T39-c) - here still outstanding.
+        $mockClient->shouldReceive('getByVaNumber')
+            ->andReturn(['sisa' => 650000]);
         $mockClient->shouldReceive('updateBilling')
             ->once()
             ->with('muamalat-uuid', Mockery::on(fn ($mainForm) => $mainForm['date_end'] === now()->toDateString()))

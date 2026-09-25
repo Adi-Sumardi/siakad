@@ -126,49 +126,72 @@ class CheckoutService
 
         $amount = round($amount, 2);
 
-        // Outside the transaction on purpose: supersedeOtherVaPaymentsForSameGroup()
-        // may call the bank, and one of its outcomes settles money (which opens
-        // its own transaction and notifies the family) - neither belongs inside
-        // the checkout's lock window.
-        $this->supersedePendingPaymentsFor($bills);
-        $this->supersedeOtherVaPaymentsForSameGroup($bills);
+        // One registration per (student, fee type, year, bank) at a time
+        // (audit T39-d): the VA number is deterministic, so two parallel
+        // checkouts minted two e-SPP bills carrying the SAME number before
+        // either superseded the other. A short cache mutex serialises the
+        // mint; best-effort by design - the partial uniques and the
+        // payment_number retry remain the backstop.
+        $primary = $bills->first();
+        $mintLock = \Illuminate\Support\Facades\Cache::lock(
+            'va-mint:'.$primary->student_id.':'.$primary->fee_type_id.':'.$primary->academic_year_id.':'.$selectedBank,
+            30,
+        );
 
-        $payment = DB::transaction(function () use ($guardian, $bills, $amount, $method, $allocations, $selectedBank) {
-            $payment = Payment::create([
-                'payment_number' => Payment::generateNumber(),
-                'payer_guardian_id' => $guardian->id,
-                'amount' => $amount,
-                'method' => $method,
-                'status' => 'pending',
-                'metadata' => [
-                    'bill_ulids' => $bills->pluck('ulid')->all(),
-                    'bank_channel' => $selectedBank,
-                ],
-            ]);
-
-            $this->allocator->allocate(
-                $payment,
-                $allocations,
-            );
-
-            return $payment;
-        });
-
-        // Outside the transaction: the gateway is a network call
         try {
-            return $this->gateway->createInvoice($payment, $bills, $guardian);
-        } catch (\Throwable $e) {
-            // The Payment row (and its allocations) are already committed;
-            // a production registration failure used to leave the row
-            // 'pending' forever - no VA for the poller to ask about, no
-            // expires_at to age it out, invisible to every sweep (audit
-            // T55-a). Failing it releases the basket and shows in the
-            // family's feed as a checkout that did not go through, which
-            // is exactly what happened. (Local dev's simulated-VA fallback
-            // returns instead of throwing and never lands here.)
-            $this->allocator->fail($payment, 'failed', 'Registrasi Virtual Account gagal: '.$e->getMessage());
+            $mintLock->block(10);
+        } catch (\Throwable) {
+            // A store without lock support, or a genuinely stuck holder -
+            // proceed guarded; collisions remain caught downstream.
+        }
 
-            throw $e;
+        try {
+            // Outside the transaction on purpose: supersedeOtherVaPaymentsForSameGroup()
+            // may call the bank, and one of its outcomes settles money (which opens
+            // its own transaction and notifies the family) - neither belongs inside
+            // the checkout's lock window.
+            $this->supersedePendingPaymentsFor($bills);
+            $this->supersedeOtherVaPaymentsForSameGroup($bills);
+
+            $payment = DB::transaction(function () use ($guardian, $bills, $amount, $method, $allocations, $selectedBank) {
+                $payment = Payment::create([
+                    'payment_number' => Payment::generateNumber(),
+                    'payer_guardian_id' => $guardian->id,
+                    'amount' => $amount,
+                    'method' => $method,
+                    'status' => 'pending',
+                    'metadata' => [
+                        'bill_ulids' => $bills->pluck('ulid')->all(),
+                        'bank_channel' => $selectedBank,
+                    ],
+                ]);
+
+                $this->allocator->allocate(
+                    $payment,
+                    $allocations,
+                );
+
+                return $payment;
+            });
+
+            // Outside the transaction: the gateway is a network call
+            try {
+                return $this->gateway->createInvoice($payment, $bills, $guardian);
+            } catch (\Throwable $e) {
+                // The Payment row (and its allocations) are already committed;
+                // a production registration failure used to leave the row
+                // 'pending' forever - no VA for the poller to ask about, no
+                // expires_at to age it out, invisible to every sweep (audit
+                // T55-a). Failing it releases the basket and shows in the
+                // family's feed as a checkout that did not go through, which
+                // is exactly what happened. (Local dev's simulated-VA fallback
+                // returns instead of throwing and never lands here.)
+                $this->allocator->fail($payment, 'failed', 'Registrasi Virtual Account gagal: '.$e->getMessage());
+
+                throw $e;
+            }
+        } finally {
+            $mintLock->release();
         }
     }
 
@@ -351,6 +374,12 @@ class CheckoutService
      * Fails every still-pending or still-processing payment that touches any
      * of these bills, so at most one live invoice ever exists per bill.
      *
+     * VA payments are asked about at the bank first - the same
+     * settleStaleIfAlreadyPaid() guard voidPendingPaymentsFor() carries
+     * (audit T39-c): this path used to fail the old VA blind, so a family
+     * that paid at 10:00:00 and re-checked-out at 10:00:05 had their money
+     * vanish from the system into manual reconciliation.
+     *
      * @param  Collection<int, Bill>  $bills
      */
     private function supersedePendingPaymentsFor(Collection $bills): void
@@ -362,10 +391,16 @@ class CheckoutService
         Payment::whereIn('id', $paymentIds)
             ->whereIn('status', ['pending', 'processing'])
             ->get()
-            ->each(fn (Payment $stale) => $this->failAndExpire(
-                $stale,
-                'Digantikan oleh checkout baru untuk tagihan yang sama.',
-            ));
+            ->each(function (Payment $stale) {
+                if ($this->gateway instanceof BillingApiGateway) {
+                    $this->settleStaleIfAlreadyPaid($stale);
+                }
+
+                $this->failAndExpire(
+                    $stale,
+                    'Digantikan oleh checkout baru untuk tagihan yang sama.',
+                );
+            });
     }
 
     /**

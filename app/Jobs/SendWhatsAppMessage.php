@@ -55,6 +55,13 @@ class SendWhatsAppMessage implements ShouldQueue
          * of sending.
          */
         public ?string $notificationLogUlid = null,
+        /**
+         * Set for messages that carry a credential (an activation URL -
+         * audit T51-a): the plaintext then lives only in QueueSecret's
+         * encrypted, expiring store and `message` is an empty placeholder,
+         * so nothing sensitive serializes into jobs.payload.
+         */
+        public ?string $secretKey = null,
     ) {}
 
     public function middleware(): array
@@ -71,7 +78,28 @@ class SendWhatsAppMessage implements ShouldQueue
             return;
         }
 
-        $result = $gateway->sendMessage($this->phone, $this->message);
+        $message = $this->message;
+
+        if ($this->secretKey !== null) {
+            // Credential-bearing message (audit T51-a): the body comes from
+            // the encrypted store; if its window closed while this job
+            // waited, the invitation it announces is expired anyway.
+            $message = \App\Services\Security\QueueSecret::take($this->secretKey) ?? '';
+
+            if ($message === '') {
+                if ($this->notificationLogUlid) {
+                    NotificationLog::where('ulid', $this->notificationLogUlid)->update([
+                        'status' => 'failed',
+                        'error' => 'Pesan undangan kedaluwarsa sebelum sempat terkirim dari antrean.',
+                        'claimed_at' => null,
+                    ]);
+                }
+
+                return;
+            }
+        }
+
+        $result = $gateway->sendMessage($this->phone, $message);
 
         if ($this->notificationLogUlid) {
             NotificationLog::where('ulid', $this->notificationLogUlid)->update([

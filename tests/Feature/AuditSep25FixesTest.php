@@ -1581,4 +1581,92 @@ class AuditSep25FixesTest extends TestCase
         // Nothing rolled back - the promotion still stands.
         $this->assertSame('active', \App\Models\Enrollment::where('student_id', $student->id)->where('classroom_id', $target->id)->value('status'));
     }
+
+    // --------------------------------------------------------------- T39
+
+    public function test_two_stale_snapshots_cannot_both_settle_one_payment(): void
+    {
+        config(['services.qontak.spp_receipt_template_id' => 'tpl-receipt']);
+        Queue::fake();
+
+        $bill = $this->billedStudent();
+
+        $payment = Payment::create([
+            'payment_number' => 'PAY-SEP25-RACE',
+            'payer_guardian_id' => $bill->student->guardians->first()->id,
+            'amount' => 700000,
+            'method' => 'virtual_account',
+            'status' => 'processing',
+            'gateway_response' => ['provider' => 'bank_muamalat', 'va_number' => '80200126270000RC', 'bank_name' => 'Bank Muamalat'],
+        ]);
+        app(PaymentAllocator::class)->allocate($payment, [$bill->id => 700000]);
+
+        // The webhook and the poller each hold their own snapshot of the
+        // still-'processing' row (audit T39-a) - exactly how double receipts
+        // used to happen.
+        $webhookSnapshot = Payment::find($payment->id);
+        $pollerSnapshot = Payment::find($payment->id);
+
+        app(PaymentAllocator::class)->settle($webhookSnapshot, 'EXT-WEBHOOK');
+        app(PaymentAllocator::class)->settle($pollerSnapshot, 'EXT-POLLER');
+
+        $fresh = $payment->fresh();
+        $this->assertSame('completed', $fresh->status);
+        $this->assertSame('EXT-WEBHOOK', $fresh->external_transaction_id, 'pemenang klaim menulis id-nya');
+
+        // One receipt, one booking - the loser changed nothing.
+        $this->assertSame(1, NotificationLog::where('template', 'receipt_spp_school')->count());
+        $this->assertSame(700000.0, (float) $bill->fresh()->paid_amount);
+    }
+
+    public function test_rechecking_out_books_a_va_that_was_already_paid(): void
+    {
+        $bill = $this->billedStudent();
+        $guardian = $bill->student->guardians->first();
+
+        $wali = User::create(['name' => 'Wali Balapan Checkout', 'role' => 'orangtua', 'is_active' => true]);
+        $guardian->forceFill(['user_id' => $wali->id])->save();
+
+        // A live checkout whose VA was already paid at the bank - the bank
+        // knows, our snapshot does not (audit T39-c).
+        $pending = Payment::create([
+            'payment_number' => 'PAY-SEP25-STALE',
+            'payer_guardian_id' => $guardian->id,
+            'amount' => 700000,
+            'method' => 'virtual_account',
+            'status' => 'processing',
+            'metadata' => ['bill_ulids' => [$bill->ulid], 'bank_channel' => 'muamalat'],
+            'gateway_response' => ['provider' => 'bank_muamalat', 'va_number' => '80200126270000ST', 'bank_name' => 'Bank Muamalat'],
+        ]);
+        app(PaymentAllocator::class)->allocate($pending, [$bill->id => 700000]);
+
+        $this->app->bind(BillingApiClient::class, function () {
+            return new class extends BillingApiClient
+            {
+                public function __construct() {}
+
+                public function getByVaNumber(string $vaNumber): array
+                {
+                    return ['sisa' => 0];
+                }
+
+                public function createBilling(array $main, array $bmi, array $bsm): array
+                {
+                    return ['uuid' => 'new-uuid', 'status' => 'success'];
+                }
+            };
+        });
+
+        try {
+            app(CheckoutService::class)->start($wali, [$bill->ulid], 'virtual_account');
+            $this->fail('checkout di atas VA yang sudah dibayar harus digagalkan');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('sudah dibayar', $e->getMessage());
+        }
+
+        // The money was BOOKED under the payment that earned it, the bill
+        // closed - instead of vanishing into manual reconciliation.
+        $this->assertSame('completed', $pending->fresh()->status);
+        $this->assertSame('paid', $bill->fresh()->status);
+    }
 }

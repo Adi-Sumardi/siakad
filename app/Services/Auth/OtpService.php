@@ -201,7 +201,13 @@ class OtpService
             'notifiable_id' => $otp->id,
         ]);
 
-        SendOtpWhatsAppMessage::dispatch($phone, $code, $log->ulid);
+        // The code travels by reference, not by value (audit T51-a): the
+        // job carries the OTP's ULID and reads the code back from
+        // QueueSecret's encrypted store - jobs.payload stays credential-
+        // free. The stash lives exactly as long as the job's own horizon.
+        \App\Services\Security\QueueSecret::stash('otp:'.$otp->ulid, $code, now()->addMinutes(15));
+
+        SendOtpWhatsAppMessage::dispatch($phone, $otp->ulid, $log->ulid);
 
         return NotificationResult::ok(['mode' => 'queued']);
     }
