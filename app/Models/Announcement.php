@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Concerns\HasUlidKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Scope is read narrowest-first: a classroom set means one room, a unit set
@@ -62,7 +63,12 @@ class Announcement extends Model
         $classroomId = $student->currentEnrollment()?->classroom_id;
 
         return $query->where(function ($q) use ($student, $classroomId) {
+            // School-wide means EVERYONE - but a jenjang-targeted notice is
+            // not school-wide: its null columns are just "no single unit",
+            // and its audience is the ladder keys instead. Without the
+            // exclusion below, every student received every targeted notice.
             $q->whereNull('school_unit_id')->whereNull('classroom_id')
+                ->whereDoesntHave('targets', fn ($t) => $t->where('kind', 'jenjang'))
                 ->orWhere(function ($q2) use ($student) {
                     $q2->where('school_unit_id', $student->school_unit_id)->whereNull('classroom_id');
                 });
@@ -70,7 +76,33 @@ class Announcement extends Model
             if ($classroomId) {
                 $q->orWhere('classroom_id', $classroomId);
             }
+
+            // Jenjang targeting (Poin 8): the announcement carries ladder
+            // keys; a student matches when their own classroom's rung (or
+            // its coarse group) is among them. The key is computed in PHP
+            // and bound - never interpolated - and an unrecognized rung
+            // simply matches nothing, the same way an unplaced student
+            // never matches a classroom-scoped notice.
+            $jenjangKeys = [];
+            if ($classroom = $student->currentEnrollment()?->classroom) {
+                $classroom->loadMissing('schoolUnit');
+                if ($key = \App\Support\Jenjang::keyForClassroom($classroom)) {
+                    $jenjangKeys[] = $key;
+                    if ($group = \App\Support\Jenjang::groupOf($key)) {
+                        $jenjangKeys[] = $group;
+                    }
+                }
+            }
+
+            if ($jenjangKeys !== []) {
+                $q->orWhereHas('targets', fn ($t) => $t->where('kind', 'jenjang')->whereIn('value', $jenjangKeys));
+            }
         });
+    }
+
+    public function targets(): HasMany
+    {
+        return $this->hasMany(AnnouncementTarget::class);
     }
 
     /**

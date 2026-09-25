@@ -19,7 +19,7 @@ class AnnouncementController extends Controller
     {
         $announcements = Announcement::query()
             ->visibleTo($request->user())
-            ->with(['schoolUnit', 'classroom', 'createdBy'])
+            ->with(['schoolUnit', 'classroom', 'createdBy', 'targets'])
             ->orderByDesc('is_pinned')
             ->orderByDesc('created_at')
             ->get();
@@ -32,6 +32,15 @@ class AnnouncementController extends Controller
         $validated = $request->validated();
 
         [$unit, $classroom] = $this->resolveScope($request, $validated);
+
+        // Jenjang targeting is a central-admin move (Poin 8): a per-unit
+        // admin's audience is already their own unit - cross-unit rungs
+        // would reach families outside their authority.
+        if (! empty($validated['jenjang']) && $request->user()->isUnitScoped()) {
+            return response()->json([
+                'message' => 'Penargetan jenjang hanya untuk admin pusat - gunakan cakupan unit untuk pengumuman unit Anda.',
+            ], 422);
+        }
 
         $file = $request->hasFile('file') ? $request->file('file') : null;
 
@@ -50,9 +59,28 @@ class AnnouncementController extends Controller
             'created_by' => $request->user()->id,
         ]);
 
+        $this->syncJenjangTargets($announcement, $validated['jenjang'] ?? null);
+
         ActivityLog::record($request->user(), 'announcement.created', $announcement, ['title' => $announcement->title]);
 
-        return response()->json(['announcement' => new AnnouncementResource($announcement)], 201);
+        return response()->json(['announcement' => new AnnouncementResource($announcement->load('targets'))], 201);
+    }
+
+    /**
+     * Replace-safely sync of the ladder targets: null = untouched (the
+     * `sometimes` contract), an array = exactly that set, [] = cleared.
+     */
+    private function syncJenjangTargets(Announcement $announcement, ?array $jenjang): void
+    {
+        if ($jenjang === null) {
+            return;
+        }
+
+        $announcement->targets()->where('kind', 'jenjang')->delete();
+
+        foreach (array_values($jenjang) as $value) {
+            $announcement->targets()->create(['kind' => 'jenjang', 'value' => $value]);
+        }
     }
 
     public function update(UpdateAnnouncementRequest $request, string $ulid): JsonResponse
@@ -61,11 +89,19 @@ class AnnouncementController extends Controller
 
         $validated = $request->validated();
 
-        $announcement->update($validated);
+        if (! empty($validated['jenjang']) && $request->user()->isUnitScoped()) {
+            return response()->json([
+                'message' => 'Penargetan jenjang hanya untuk admin pusat.',
+            ], 422);
+        }
 
-        ActivityLog::record($request->user(), 'announcement.updated', $announcement, $validated);
+        $announcement->update(collect($validated)->except(['jenjang'])->all());
 
-        return response()->json(['announcement' => $announcement->fresh()]);
+        $this->syncJenjangTargets($announcement, $validated['jenjang'] ?? null);
+
+        ActivityLog::record($request->user(), 'announcement.updated', $announcement, collect($validated)->except(['jenjang'])->all());
+
+        return response()->json(['announcement' => $announcement->fresh('targets')]);
     }
 
     public function destroy(Request $request, string $ulid): JsonResponse

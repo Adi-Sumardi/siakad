@@ -16,6 +16,7 @@ import type { Announcement } from "@/lib/types/kesiswaan";
 const SCOPE_LABEL: Record<Announcement["scope"], string> = {
   school: "Seluruh Sekolah",
   unit: "Unit Sekolah",
+  jenjang: "Jenjang",
   classroom: "Kelas Khusus",
 };
 

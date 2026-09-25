@@ -35,6 +35,9 @@ class PaymentResource extends JsonResource
             'expires_at' => $this->expires_at,
             'paid_at' => $this->paid_at,
             'created_at' => $this->created_at,
+            // The shareable public receipt path (Poin 11C) - present only
+            // on settled payments that have minted their token.
+            'receipt_url' => $this->receipt_public_token ? "/receipt/{$this->receipt_public_token}" : null,
             'bills' => BillResource::collection($this->whenLoaded('bills')),
         ];
     }

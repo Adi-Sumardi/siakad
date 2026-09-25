@@ -177,9 +177,11 @@ export type Announcement = {
   ulid: string;
   title: string;
   body: string;
-  scope: "school" | "unit" | "classroom";
+  scope: "school" | "unit" | "classroom" | "jenjang";
   school_unit: string | null;
   classroom: string | null;
+  /** Ladder targets (Poin 8) - present when scope === "jenjang". */
+  jenjang_targets?: { key: string; label: string }[] | null;
   file_name: string | null;
   has_file: boolean;
   is_pinned: boolean;

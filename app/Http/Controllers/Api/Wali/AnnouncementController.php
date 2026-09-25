@@ -30,7 +30,7 @@ class AnnouncementController extends Controller
             ->unique();
 
         $list = Announcement::whereIn('id', $announcements)
-            ->with(['schoolUnit', 'classroom'])
+            ->with(['schoolUnit', 'classroom', 'targets'])
             ->orderByDesc('is_pinned')
             ->orderByDesc('published_at')
             ->get();

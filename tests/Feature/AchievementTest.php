@@ -86,22 +86,28 @@ class AchievementTest extends TestCase
 
     public function test_a_guru_recorded_achievement_is_verified_on_the_spot(): void
     {
+        // Renamed semantics (Poin 7): a teacher PROPOSES - the row lands
+        // pending, awaiting the child's wali kelas or an admin.
         $student = $this->student();
         $guru = $this->staff('guru');
 
         $response = $this->actingAs($guru)->postJson('/api/guru/achievements', $this->payload() + ['student_ulid' => $student->ulid]);
 
         $response->assertStatus(201)
-            ->assertJsonPath('achievement.status', 'verified')
+            ->assertJsonPath('achievement.status', 'pending')
             ->assertJsonPath('achievement.source', 'sekolah');
 
         $achievement = Achievement::first();
-        $this->assertSame($guru->id, $achievement->verified_by);
-        $this->assertNotNull($achievement->verified_at);
+        $this->assertNull($achievement->verified_by, 'belum ada yang memutuskan');
+        $this->assertNull($achievement->verified_at);
     }
 
     public function test_a_guru_can_award_points_at_creation_and_it_reaches_the_ledger(): void
     {
+        // Poin 7: points at proposal time are a SUGGESTION for the
+        // verifier - recorded as point_awarded, nothing hits the ledger
+        // until the decision (the ledger assertions moved to the
+        // AchievementFlowsTest homeroom lane).
         $student = $this->student();
         $guru = $this->staff('guru');
 
@@ -109,21 +115,14 @@ class AchievementTest extends TestCase
             'student_ulid' => $student->ulid, 'points_awarded' => 25,
         ])->assertStatus(201)->assertJsonPath('achievement.point_awarded', 25);
 
-        $achievement = Achievement::first();
-        $record = PointRecord::where('related_achievement_id', $achievement->id)->first();
-
-        $this->assertNotNull($record);
-        $this->assertSame(25, $record->points);
-        $this->assertSame('merit', $record->type);
+        $this->assertSame(0, \App\Models\PointRecord::count(), 'poin belum dicatat sampai diverifikasi');
     }
 
     public function test_guru_store_with_points_is_refused_rather_than_silently_dropped_when_no_term_is_active(): void
     {
-        // Same failure mode as Admin\AchievementController::verify(): the
-        // achievement used to save either way, with point_awarded quietly
-        // left null and the response still 201, whenever Term::current()
-        // (an admin-managed is_active flag, routinely null right after a
-        // semester ends) returned nothing.
+        // Poin 7 changed the semantics: a proposal NEVER writes points, so
+        // it succeeds regardless of term state - the guard now lives at
+        // decision time (verified below and in AchievementFlowsTest).
         $this->term->update(['is_active' => false]);
 
         $student = $this->student();
@@ -131,10 +130,10 @@ class AchievementTest extends TestCase
 
         $this->actingAs($guru)->postJson('/api/guru/achievements', $this->payload() + [
             'student_ulid' => $student->ulid, 'points_awarded' => 15,
-        ])->assertStatus(422);
+        ])->assertStatus(201);
 
-        $this->assertDatabaseCount('achievements', 0);
-        $this->assertDatabaseCount('point_records', 0);
+        $this->assertSame('pending', Achievement::first()->status);
+        $this->assertSame(0, \App\Models\PointRecord::count());
     }
 
     public function test_a_guardians_submission_starts_pending_with_no_points(): void
@@ -185,13 +184,11 @@ class AchievementTest extends TestCase
 
     public function test_verifying_with_points_is_refused_rather_than_silently_skipped_when_no_term_is_active(): void
     {
-        // Term::current() reads an admin-managed is_active flag, not a date
-        // range - routinely null right after a semester ends until someone
-        // activates the next term. Awarding points here used to fail silently
-        // (achievement verified, no points recorded, response still 200) -
-        // the whole request must now fail instead, so an admin who typed a
-        // point value is never told "verified" for a request that quietly
-        // dropped what they asked for.
+        // The refusal moved INTO the decision service (Poin 7): a verify
+        // with points while no term is active fails the whole request so
+        // the decider is never told "verified" for points that quietly
+        // vanished - the row stays pending. Status is 422 (state), carried
+        // by the service's RuntimeException.
         $this->term->update(['is_active' => false]);
 
         $student = $this->student();
@@ -249,15 +246,27 @@ class AchievementTest extends TestCase
 
     public function test_an_already_decided_achievement_cannot_be_decided_again(): void
     {
+        // Poin 7: a guru proposal starts PENDING now, so this exercises the
+        // same invariant through a real decision first - verify once,
+        // then every further decision is refused.
         $student = $this->student();
-        $guru = $this->staff('guru'); // already verified on creation
+        $guru = $this->staff('guru');
         $this->actingAs($guru)->postJson('/api/guru/achievements', $this->payload() + ['student_ulid' => $student->ulid]);
 
         $achievement = Achievement::first();
         $admin = $this->staff('admin_unit');
 
+        // First decision succeeds.
         $this->actingAs($admin)
             ->postJson("/api/admin/achievements/{$achievement->ulid}/verify", [])
+            ->assertOk();
+
+        // Every further decision is refused.
+        $this->actingAs($admin)
+            ->postJson("/api/admin/achievements/{$achievement->ulid}/verify", [])
+            ->assertStatus(422);
+        $this->actingAs($admin)
+            ->postJson("/api/admin/achievements/{$achievement->ulid}/reject", ['reason' => 'terlambat'])
             ->assertStatus(422);
     }
 

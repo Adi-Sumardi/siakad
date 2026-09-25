@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { API_BASE, api, ApiError } from "@/lib/api";
+import { JENJANG } from "@/lib/jenjang";
 import { tanggal } from "@/lib/format";
 import { useAuth } from "@/lib/auth/auth-context";
 import type { Announcement } from "@/lib/types/kesiswaan";
@@ -20,6 +21,7 @@ type Classroom = { ulid: string; name: string; school_unit: { code: string; labe
 const SCOPE_LABEL: Record<Announcement["scope"], string> = {
   school: "Seluruh Sekolah",
   unit: "Unit Sekolah",
+  jenjang: "Jenjang",
   classroom: "Kelas Khusus",
 };
 
@@ -36,9 +38,12 @@ function NewAnnouncementForm({
 }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [scope, setScope] = useState<"school" | "unit" | "classroom">(isCentral ? "school" : "unit");
+  const [scope, setScope] = useState<"school" | "unit" | "classroom" | "jenjang">(isCentral ? "school" : "unit");
   const [unitCode, setUnitCode] = useState(units[0]?.code ?? "");
   const [classroomUlid, setClassroomUlid] = useState("");
+  // Poin 8: multi-select ladder targeting (central admin only) - the
+  // structured audience the school asked for, stored as announcement_targets.
+  const [jenjangKeys, setJenjangKeys] = useState<string[]>([]);
   const [isPinned, setIsPinned] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,8 +57,12 @@ function NewAnnouncementForm({
     form.set("title", title);
     form.set("body", body);
     form.set("is_pinned", isPinned ? "1" : "0");
-    if (isCentral && scope !== "school") form.set("school_unit_code", unitCode);
+    if (isCentral && scope === "unit") form.set("school_unit_code", unitCode);
     if (scope === "classroom") form.set("classroom_ulid", classroomUlid);
+    if (isCentral && scope === "jenjang") {
+      form.delete("school_unit_code");
+      jenjangKeys.forEach((key) => form.append("jenjang[]", key));
+    }
 
     try {
       await api.post("/api/admin/announcements", form);
@@ -109,10 +118,44 @@ function NewAnnouncementForm({
               onChange={(e) => setScope(e.target.value as typeof scope)}
               className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:ring-2 focus:ring-primary"
             >
-              <option value="school">Seluruh Sekolah YAPI</option>
-              <option value="unit">Satu Unit Sekolah</option>
+              <option value="school">Semua (Seluruh Sekolah YAPI)</option>
+              <option value="unit">Per Unit</option>
+              <option value="jenjang">Per Jenjang Kelas</option>
               <option value="classroom">Satu Kelas Spesifik</option>
             </select>
+          </div>
+        )}
+
+        {scope === "jenjang" && (
+          <div className="sm:col-span-2">
+            <Label className="text-xs">Jenjang Tujuan (pilih satu atau lebih)</Label>
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {JENJANG.map((j) => (
+                <label
+                  key={j.key}
+                  className={`flex cursor-pointer select-none items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                    jenjangKeys.includes(j.key)
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border bg-card text-muted-foreground hover:bg-accent"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={jenjangKeys.includes(j.key)}
+                    onChange={(e) =>
+                      setJenjangKeys((prev) =>
+                        e.target.checked ? [...prev, j.key] : prev.filter((k) => k !== j.key),
+                      )
+                    }
+                  />
+                  {j.label}
+                </label>
+              ))}
+            </div>
+            {jenjangKeys.length === 0 && (
+              <p className="mt-1 text-[11px] text-warn">Pilih minimal satu jenjang.</p>
+            )}
           </div>
         )}
 
@@ -351,6 +394,7 @@ export default function AdminAnnouncementsPage() {
                   {SCOPE_LABEL[a.scope]}
                   {a.classroom && ` · Kelas ${a.classroom}`}
                   {!a.classroom && a.school_unit && ` · ${a.school_unit}`}
+                  {a.scope === "jenjang" && a.jenjang_targets && ` · ${a.jenjang_targets.map((j) => j.label).join(", ")}`}
                 </Badge>
                 {a.published_at && (
                   <span className="text-xs text-muted-foreground">{tanggal(a.published_at)}</span>

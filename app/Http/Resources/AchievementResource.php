@@ -11,11 +11,20 @@ class AchievementResource extends JsonResource
     {
         return [
             'ulid' => $this->ulid,
+            // Whose achievement this is (Poin 7): 'siswa' (default) or
+            // 'guru' - the teacher row rides along for the Prestasi Guru
+            // tab, the student row for the classic list.
+            'achiever_type' => $this->achiever_type ?? 'siswa',
             'student' => $this->whenLoaded('student', fn () => [
                 'ulid' => $this->student->ulid,
                 'nama_lengkap' => $this->student->nama_lengkap,
                 'nama_panggilan' => $this->student->nama_panggilan,
             ]),
+            'teacher' => $this->whenLoaded('teacher', fn () => $this->teacher ? [
+                'ulid' => $this->teacher->ulid,
+                'nama_lengkap' => $this->teacher->name,
+            ] : null),
+            'school_unit' => $this->whenLoaded('schoolUnit', fn () => $this->schoolUnit?->label),
             'nama_prestasi' => $this->nama_prestasi,
             'kategori' => $this->kategori,
             'tingkat' => $this->tingkat,

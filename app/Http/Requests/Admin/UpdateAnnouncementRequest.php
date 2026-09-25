@@ -16,6 +16,8 @@ class UpdateAnnouncementRequest extends FormRequest
         return [
             'title' => 'sometimes|string|max:200',
             'body' => 'sometimes|string|max:5000',
+            'jenjang' => 'nullable|array',
+            'jenjang.*' => ['string', 'distinct', \Illuminate\Validation\Rule::in(\App\Support\Jenjang::keys())],
             'is_pinned' => 'boolean',
             'published_at' => 'nullable|date',
         ];

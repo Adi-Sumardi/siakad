@@ -52,6 +52,13 @@ class Jenjang
     /** @var list<string> the six coarse groups, in ladder order */
     public const GROUPS = ['ra', 'pg', 'tk', 'sd', 'smp', 'sma'];
 
+    /** @return list<string> every valid key - granular and coarse alike. */
+    public static function keys(): array
+    {
+        return array_merge(array_column(self::ladder(), 'key'), self::GROUPS);
+    }
+
+    /** @return array{key: string, label: string, group: string, tingkat: ?int, name_tokens: list<string>}|null */
     /** @return array{key: string, label: string, group: string, tingkat: ?int, name_tokens: list<string>}|null */
     public static function entry(string $key): ?array
     {

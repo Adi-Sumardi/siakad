@@ -71,7 +71,7 @@ export default function AdminPointsPage() {
         .then((d) => setUnitOptions(d.school_units))
         .catch(() => {});
     }
-  }, [isCentral]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isCentral]);
 
   const flagged = rows?.filter((r) => r.threshold) ?? [];
 

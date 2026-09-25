@@ -7,6 +7,7 @@ use App\Models\Payment;
 use App\Models\PaymentAllocation;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 
@@ -96,11 +97,25 @@ class PaymentAllocator
             // surface then fell back to the internal payment_number instead
             // of the VA, the exact drift ad095e closed. Passing keys win,
             // everything already recorded survives.
+            // Merged first so the channel backfill below reads the union -
+            // the bank name often lives on the payment's OWN registration
+            // payload, not on the webhook/poller verification data.
+            $mergedResponse = array_merge($fresh->gateway_response ?? [], $gatewayResponse);
+
             $fresh->forceFill([
                 'status' => 'completed',
                 'paid_at' => $fresh->paid_at ?? now(),
                 'external_transaction_id' => $externalId ?? $fresh->external_transaction_id,
-                'gateway_response' => array_merge($fresh->gateway_response ?? [], $gatewayResponse),
+                'gateway_response' => $mergedResponse,
+                // The public receipt token is born atomically with the
+                // claim (feature batch Poin 11C): only a settled payment
+                // ever gets one, exactly once, and the settle dedup and the
+                // token mint share a single conditional UPDATE - there is
+                // no window where two lanes mint two tokens. The bank name
+                // backfill makes the channel filterable relationally later
+                // (gateway_response is never JSON-queried).
+                'receipt_public_token' => $fresh->receipt_public_token ?? Str::random(32),
+                'channel' => $fresh->channel ?? ($mergedResponse['bank_name'] ?? null),
             ])->save();
 
             return true;

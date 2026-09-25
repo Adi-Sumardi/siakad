@@ -9,6 +9,7 @@ use App\Http\Resources\AchievementResource;
 use App\Models\Achievement;
 use App\Models\ActivityLog;
 use App\Models\Term;
+use App\Services\Kesiswaan\AchievementDecisionService;
 use App\Services\Points\PointLedger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,8 +22,11 @@ class AchievementController extends Controller
     {
         $achievements = Achievement::query()
             ->visibleTo($request->user())
-            ->with(['student', 'recordedBy', 'verifiedBy'])
+            ->with(['student', 'recordedBy', 'verifiedBy', 'teacher', 'schoolUnit'])
             ->when($request->string('status')->value(), fn ($q, $status) => $q->where('status', $status))
+            // The Prestasi Guru tab filters by achiever (Poin 7): 'siswa'
+            // (default, the historical list) or 'guru'.
+            ->when($request->string('achiever_type')->value(), fn ($q, $type) => $q->where('achiever_type', $type))
             ->orderByRaw("CASE WHEN status = 'pending' THEN 0 ELSE 1 END")
             ->orderByDesc('created_at')
             ->get();
@@ -36,87 +40,71 @@ class AchievementController extends Controller
      * this win, really", made once, at the moment someone independent signs
      * off on it.
      */
-    public function verify(VerifyAchievementRequest $request, string $ulid, PointLedger $ledger): JsonResponse
+    public function verify(VerifyAchievementRequest $request, string $ulid, PointLedger $ledger, AchievementDecisionService $decisions): JsonResponse
     {
         $validated = $request->validated();
 
         $achievement = Achievement::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
-        // Term::current() depends on an admin-managed is_active flag, not a
-        // date range - right after a semester ends this is routinely null
-        // until someone activates the next term. Silently verifying without
-        // the points an admin explicitly asked for used to report success
-        // regardless (the frontend's toast unconditionally said "poin
-        // ditambahkan"), so the request never surfaced that nothing was
-        // actually credited.
-        if (! empty($validated['points_awarded']) && ! Term::current()) {
-            return response()->json([
-                'message' => 'Tidak ada semester (term) yang sedang aktif, jadi poin tidak dapat dicatat. Aktifkan term terlebih dahulu, atau verifikasi tanpa poin.',
-            ], 422);
+        if ($decisions->alreadyDecided($achievement)) {
+            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
         }
 
-        // One transaction: a point-award failure must not leave the
-        // achievement marked verified with nothing to show for it - the
-        // admin would see an error, retry, and be told "sudah diputuskan
-        // sebelumnya" for a request that never actually succeeded. The
-        // status flip inside is an ATOMIC CLAIM (audit T52): two admins
-        // clicking verify at the same moment must not both award points -
-        // only the update that still finds status='pending' proceeds.
+        // The two verification lanes (Poin 7): student achievements keep
+        // their historical admin/admin_unit deciders (scoped by visibleTo
+        // above); teacher achievements are an admin_unit-of-the-unit call -
+        // central admin sees the row and decides NOTHING (403 with a
+        // reason, not a hidden button).
         try {
-            $decided = DB::transaction(function () use ($achievement, $validated, $request, $ledger) {
-                $claimed = Achievement::query()
-                    ->whereKey($achievement->id)
-                    ->where('status', 'pending')
-                    ->update([
-                        'status' => 'verified',
-                        'verified_by' => $request->user()->id,
-                        'verified_at' => now(),
-                    ]);
-
-                if ($claimed === 0) {
-                    return false;
-                }
-
-                if (! empty($validated['points_awarded'])) {
-                    $ledger->awardForAchievement($achievement, Term::current(), $request->user(), (int) $validated['points_awarded']);
-                    $achievement->forceFill(['point_awarded' => $validated['points_awarded']])->save();
-                }
-
-                return true;
-            });
+            [$achievement, $decided] = $decisions->verify(
+                $achievement,
+                $request->user(),
+                ! empty($validated['points_awarded']) ? (int) $validated['points_awarded'] : null,
+                lane: 'admin',
+            );
         } catch (RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+            // Permission refusals are a 403; the no-active-term state
+            // failure keeps its historical 422 (both shapes matter).
+            $isTermMissing = str_contains($e->getMessage(), 'Tidak ada semester aktif');
+            return response()->json(['message' => $e->getMessage()], $isTermMissing ? 422 : 403);
         }
 
-        if (($decided ?? true) === false) {
+        if (! $decided) {
             return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
         }
 
         ActivityLog::record($request->user(), 'achievement.verified', $achievement, [
-            'student' => $achievement->student->nama_lengkap, 'points_awarded' => $validated['points_awarded'] ?? null,
+            // A teacher achievement has no student - the log names whoever
+            // achieved instead (Poin 7).
+            'student' => $achievement->student?->nama_lengkap ?? $achievement->teacher?->name,
+            'points_awarded' => $validated['points_awarded'] ?? null,
         ]);
 
         return response()->json(['achievement' => new AchievementResource($achievement->fresh())]);
     }
 
-    public function reject(RejectAchievementRequest $request, string $ulid): JsonResponse
+    public function reject(RejectAchievementRequest $request, string $ulid, AchievementDecisionService $decisions): JsonResponse
     {
         $validated = $request->validated();
 
         $achievement = Achievement::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
-        // Atomic claim, same shape as verify() (audit T52).
-        $claimed = Achievement::query()
-            ->whereKey($achievement->id)
-            ->where('status', 'pending')
-            ->update([
-                'status' => 'rejected',
-                'verified_by' => $request->user()->id,
-                'verified_at' => now(),
-                'rejection_reason' => $validated['reason'],
-            ]);
+        // The two verification lanes (feature batch Poin 7) live in one
+        // service so the gate cannot drift between callers. For an
+        // ADMIN-facing reject: teacher achievements are an admin_unit's
+        // call (central admin sees, decides nothing); student
+        // achievements stay decidable here as they always were.
+        if ($decisions->alreadyDecided($achievement)) {
+            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
+        }
 
-        if ($claimed === 0) {
+        try {
+            [$achievement, $decided] = $decisions->reject($achievement, $request->user(), $validated['reason'], lane: 'admin');
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        }
+
+        if (! $decided) {
             return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
         }
 

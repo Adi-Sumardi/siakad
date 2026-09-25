@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\Admin\ImportController;
 use App\Http\Controllers\Api\Admin\IntegrationEventController;
 use App\Http\Controllers\Api\Admin\NotificationFailureController;
 use App\Http\Controllers\Api\Admin\NotificationLogController;
+use App\Http\Controllers\Api\Admin\PaymentHistoryController;
 use App\Http\Controllers\Api\Admin\PointController as AdminPointController;
 use App\Http\Controllers\Api\Admin\PointRuleController;
 use App\Http\Controllers\Api\Admin\PointThresholdController;
@@ -44,6 +45,7 @@ use App\Http\Controllers\Api\Guru\GradeController as GuruGradeController;
 use App\Http\Controllers\Api\Guru\PointController as GuruPointController;
 use App\Http\Controllers\Api\Public\AttendancePresensiController;
 use App\Http\Controllers\Api\Public\DailyGateController;
+use App\Http\Controllers\Api\Public\ReceiptController;
 use App\Http\Controllers\Api\Wali\AchievementController as WaliAchievementController;
 use App\Http\Controllers\Api\Wali\AnnouncementController as WaliAnnouncementController;
 use App\Http\Controllers\Api\Wali\AttendanceController as WaliAttendanceController;
@@ -121,6 +123,11 @@ Route::prefix('absen')->middleware('throttle:300,1')->group(function () {
     Route::post('/{slug}/check-in', [DailyGateController::class, 'checkIn']);
 });
 
+// The public payment receipt (feature batch Poin 11C): 32 chars of CSPRNG
+// entropy are the only credential, throttled like every other public lane.
+// The payload is deliberately minimal - no NIS, no contacts, no ULIDs.
+Route::get('/receipt/{token}', [ReceiptController::class, 'show'])->middleware('throttle:60,1');
+
 Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(function () {
     Route::get('/students', [WaliDashboardController::class, 'index']);
 
@@ -181,6 +188,12 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
 
     // Trusted immediately, unlike a guardian's own submission of the same thing.
     Route::post('/achievements', [GuruAchievementController::class, 'store']);
+    // Poin 7: a teacher's OWN achievement (pending until admin_unit decides)
+    // and the homeroom lane for student achievements (verify/reject by the
+    // child's own wali kelas - 403 at the API, never a hidden button).
+    Route::post('/achievements/self', [GuruAchievementController::class, 'storeSelf']);
+    Route::post('/achievements/{ulid}/verify', [GuruAchievementController::class, 'verify']);
+    Route::post('/achievements/{ulid}/reject', [GuruAchievementController::class, 'reject']);
 
     Route::get('/classrooms/{ulid}/schedules/today', [GuruClassroomController::class, 'schedulesToday']);
     Route::post('/schedules/{ulid}/attendance-sessions', [GuruAttendanceSessionController::class, 'open']);
@@ -311,6 +324,13 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 
     Route::get('/points', [AdminPointController::class, 'index']);
     Route::get('/points/leaderboard', [AdminPointController::class, 'leaderboard']);
+
+    // The finance office's transaction ledger (feature batch Poin 11A/B/C):
+    // filterable payment history, the per-payment receipt PDF, and the
+    // lazy-minted public receipt link.
+    Route::get('/payments', [PaymentHistoryController::class, 'index']);
+    Route::get('/payments/{ulid}/receipt', [PaymentHistoryController::class, 'receiptPdf']);
+    Route::post('/payments/{ulid}/share-link', [PaymentHistoryController::class, 'shareLink']);
 
     Route::get('/achievements', [AdminAchievementController::class, 'index']);
     Route::post('/achievements/{ulid}/verify', [AdminAchievementController::class, 'verify']);
