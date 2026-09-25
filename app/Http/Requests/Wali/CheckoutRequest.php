@@ -20,7 +20,11 @@ class CheckoutRequest extends FormRequest
         return [
             'bill_ulids' => 'required|array|min:1|max:50',
             'bill_ulids.*' => 'required|string',
-            'method' => 'required|in:virtual_account,e_wallet,qris,bank_transfer,credit_card',
+            // VA is the only rail that exists (audit T55-c): the old list
+            // let qris/e_wallet/bank_transfer validate fine, then minted a
+            // VA anyway - payment.method then lied about itself on every
+            // receipt surface.
+            'method' => 'required|in:virtual_account',
             'bank' => 'nullable|in:muamalat,bsi',
             'custom_amounts' => 'nullable|array',
             'custom_amounts.*' => 'numeric|min:1',

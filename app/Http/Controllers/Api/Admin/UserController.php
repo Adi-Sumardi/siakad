@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ResetUserAccessRequest;
 use App\Http\Requests\Admin\StoreUserRequest;
 use App\Http\Requests\Admin\UpdateUserRequest;
+use App\Models\AccountInvitation;
 use App\Models\ActivityLog;
 use App\Models\Guardian;
 use App\Models\SchoolUnit;
@@ -222,6 +223,17 @@ class UserController extends Controller
 
         $user->fill(collect($validated)->except(['school_unit_ulid'])->all());
         $user->save();
+
+        // Deactivation consumes the account's outstanding invitations
+        // (audit T53-a): a link mailed before the deactivation was a
+        // still-working login credential for up to its 7-day TTL, and
+        // activate() would have signed the disabled account right back in.
+        if (array_key_exists('is_active', $validated) && ! $user->is_active) {
+            AccountInvitation::query()
+                ->where('user_id', $user->id)
+                ->whereNull('used_at')
+                ->update(['used_at' => now()]);
+        }
 
         // Note: deactivation needs no token revocation here - this app has no
         // personal access tokens (auth is Sanctum SPA cookie sessions; User

@@ -170,12 +170,33 @@ class ImportController extends Controller
                     $student->nisn = $data['nisn'];
                 }
                 $student->jenis_kelamin = $jk;
-                $student->status = ! empty($data['status']) ? strtolower($data['status']) : 'active';
+                // Only a NEW student takes the CSV's status (audit T48-a):
+                // re-importing an old roster used to flip every alumni row
+                // back to 'active', resurrecting graduated students straight
+                // into billing candidates and watchlists.
+                if ($isNew) {
+                    $student->status = ! empty($data['status']) ? strtolower($data['status']) : 'active';
+                }
                 $student->save();
 
                 // Handle Classroom & Enrollment
                 $kelasName = $data['kelas'] ?? '';
                 if (! empty($kelasName)) {
+                    // A closed enrollment for this (student, year) is a
+                    // decision - promoted/graduated/left - and an import
+                    // must never reopen it (audit T48-a): the old
+                    // updateOrCreate matched any status and flipped it back
+                    // to 'active' with a new classroom. Refuse the row and
+                    // name the official lane instead.
+                    $existingEnrollment = Enrollment::where('student_id', $student->id)
+                        ->where('academic_year_id', $academicYear->id)
+                        ->first();
+
+                    if ($existingEnrollment && $existingEnrollment->status !== 'active') {
+                        $errors[] = "Baris {$rowNum}: {$namaLengkap} sudah berstatus '{$existingEnrollment->status}' di TA {$academicYear->year} - impor tidak mengaktifkan ulang; perbaiki lewat alur kenaikan kelas atau edit manual.";
+                        continue;
+                    }
+
                     // Try to parse tingkat e.g. "1-A" -> 1, "7B" -> 7. A name
                     // with no number is only valid in the kindergarten
                     // jenjang, whose rung on the ladder is 0 ("TK-A" -> 0) -
@@ -203,17 +224,19 @@ class ImportController extends Controller
                         ]
                     );
 
-                    Enrollment::updateOrCreate(
-                        [
+                    if ($existingEnrollment) {
+                        // Active already: move the classroom in place, keep
+                        // the original joined_on (R10 - no history rewrite).
+                        $existingEnrollment->update(['classroom_id' => $classroom->id]);
+                    } else {
+                        Enrollment::create([
                             'student_id' => $student->id,
                             'academic_year_id' => $academicYear->id,
-                        ],
-                        [
                             'classroom_id' => $classroom->id,
                             'status' => 'active',
                             'joined_on' => $academicYear->starts_on ?? now(),
-                        ]
-                    );
+                        ]);
+                    }
                 }
 
                 // Handle Guardian
@@ -414,14 +437,22 @@ class ImportController extends Controller
 
                 $unitsTouched[$unit->code] = true;
 
-                // Match Academic Year
+                // Match Academic Year. A NEW year is derived from its own
+                // label (audit T48-c): hardcoded 2027 dates made every
+                // imported year start in 2027 whatever its name said,
+                // which then poisoned promotion's chronological guard
+                // (assertValidTarget compares starts_on) and every
+                // latest('starts_on') fallback. Same derivation as
+                // PmbHandoffProcessor::resolveYear().
                 $yearName = $data['academic_year'] ?? '2027/2028';
                 $year = $allYears->first(fn ($y) => $y->year === $yearName);
                 if (! $year) {
+                    $startYear = (int) mb_substr($yearName, 0, 4);
+
                     $year = AcademicYear::create([
                         'year' => $yearName,
-                        'starts_on' => '2027-07-01',
-                        'ends_on' => '2028-06-30',
+                        'starts_on' => "{$startYear}-07-01",
+                        'ends_on' => ($startYear + 1).'-06-30',
                         'is_active' => false,
                     ]);
                     $allYears->push($year);

@@ -91,6 +91,17 @@ class GradeController extends Controller
         $term = Term::current();
         abort_if(! $term, 422, 'Belum ada semester aktif.');
 
+        // The lit semester must belong to this classroom's year (audit
+        // T48-b): in the post-rollover window (new year active, promotion
+        // not yet run) old-year classrooms still pass canGrade, and grades
+        // filed then carried the NEW term id - surfacing in the new year's
+        // rapor for students who had not even been promoted yet.
+        abort_if(
+            $term->academic_year_id !== $classroom->academic_year_id,
+            422,
+            'Semester aktif bukan milik tahun ajaran kelas ini. Nilai kelas tahun lama dibekukan setelah pergantian tahun ajaran.',
+        );
+
         $validated = $request->validated();
 
         $ulids = collect($validated['entries'])->pluck('student_ulid');

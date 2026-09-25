@@ -6,10 +6,11 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * A semester row. Names are free text (the school says ganjil/genap, but a
- * unit running a short inter-session term should not have to fight the
- * validation), unique within its academic year so the picker never shows
- * two identical labels for one year.
+ * A semester row. The DB column is an enum('ganjil','genap') (migration
+ * 2026_08_14_000004), so the name is shape-checked here - the old free-text
+ * rule validated fine and then died as a 500 the moment anyone typed
+ * "Ganjil" with a capital G (audit T47). Unique within its academic year so
+ * the picker never shows two identical labels for one year.
  */
 class StoreTermRequest extends FormRequest
 {
@@ -28,8 +29,7 @@ class StoreTermRequest extends FormRequest
             ],
             'name' => [
                 'required',
-                'string',
-                'max:30',
+                Rule::in(['ganjil', 'genap']),
                 Rule::unique('terms', 'name')->where('academic_year_id', $this->academicYearId()),
             ],
             'starts_on' => 'required|date',

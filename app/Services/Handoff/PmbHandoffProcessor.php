@@ -239,6 +239,20 @@ class PmbHandoffProcessor
         }
 
         if ($existing) {
+            // Only a parent account is ever reused as a parent account
+            // (audit T53-b): staff registering their own child through PMB
+            // used to get the STAFF account attached as guardian - the wali
+            // portal then showed a staff-scoped login its students, and the
+            // actual parent never received an invitation of their own. Fail
+            // the event loudly for manual pairing instead of guessing; the
+            // same contact cannot simply mint a second account (unique
+            // email/phone), so this is a human decision by design.
+            if ($existing->role !== 'orangtua') {
+                throw new RuntimeException(
+                    'Kontak wali ('.($data['email'] ?? $data['no_hp'] ?? '-').") sudah dipakai akun staf ({$existing->role}) - pasangkan wali ini secara manual."
+                );
+            }
+
             return $existing;
         }
 
@@ -369,6 +383,14 @@ class PmbHandoffProcessor
 
                 if (! $stillEnrolled && $guardian->user) {
                     $guardian->user->forceFill(['is_active' => false])->save();
+
+                    // The deactivation eats any live invitation too (audit
+                    // T53-a): a link still in flight must not be able to
+                    // sign the now-disabled account back in for its TTL.
+                    \App\Models\AccountInvitation::query()
+                        ->where('user_id', $guardian->user->id)
+                        ->whereNull('used_at')
+                        ->update(['used_at' => now()]);
                 }
             }
         });

@@ -49,6 +49,16 @@ class TermController extends Controller
 
     public function activate(Request $request, Term $term): JsonResponse
     {
+        // A term may only go live under a live year (audit T47): activating
+        // an old year's term left Term::current() and AcademicYear::current()
+        // describing different worlds - grade writes filed under one while
+        // dashboards and the SPP generator read the other.
+        if (! $term->academicYear?->is_active) {
+            return response()->json([
+                'message' => 'Semester ini milik tahun ajaran yang tidak aktif. Aktifkan dulu tahun ajarannya (menu Kelola Tahun Ajaran) sebelum mengaktifkan semester.',
+            ], 422);
+        }
+
         $term->activate();
 
         ActivityLog::record($request->user(), 'term.activated', $term, ['term' => $term->label()]);

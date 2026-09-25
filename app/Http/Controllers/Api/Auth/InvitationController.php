@@ -36,6 +36,15 @@ class InvitationController extends Controller
 
         $user = $invitation->user;
 
+        // A deactivated account's link must not preview its data either
+        // (audit T53-a): the invitation outlived the deactivation by up to
+        // its 7-day TTL and used to hand out names and children.
+        if (! $user->is_active) {
+            return response()->json([
+                'message' => 'Akun ini telah dinonaktifkan. Hubungi pihak sekolah bila ini tidak seharusnya.',
+            ], 403);
+        }
+
         return response()->json([
             'name' => $user->name,
             'identifier' => $invitation->sent_to,
@@ -73,6 +82,16 @@ class InvitationController extends Controller
         }
 
         $user = $invitation->user;
+
+        // The OTP lane already refuses deactivated accounts; the invitation
+        // lane must not be the side door (audit T53-a). Deactivation also
+        // consumes live invitations where it happens, but a link issued
+        // before that sweep still ends here.
+        if (! $user->is_active) {
+            return response()->json([
+                'message' => 'Akun ini telah dinonaktifkan. Hubungi pihak sekolah bila ini tidak seharusnya.',
+            ], 403);
+        }
 
         $activated = DB::transaction(function () use ($invitation, $user) {
             // Atomic claim, not check-then-act (audit T52): two requests

@@ -155,7 +155,21 @@ class CheckoutService
         });
 
         // Outside the transaction: the gateway is a network call
-        return $this->gateway->createInvoice($payment, $bills, $guardian);
+        try {
+            return $this->gateway->createInvoice($payment, $bills, $guardian);
+        } catch (\Throwable $e) {
+            // The Payment row (and its allocations) are already committed;
+            // a production registration failure used to leave the row
+            // 'pending' forever - no VA for the poller to ask about, no
+            // expires_at to age it out, invisible to every sweep (audit
+            // T55-a). Failing it releases the basket and shows in the
+            // family's feed as a checkout that did not go through, which
+            // is exactly what happened. (Local dev's simulated-VA fallback
+            // returns instead of throwing and never lands here.)
+            $this->allocator->fail($payment, 'failed', 'Registrasi Virtual Account gagal: '.$e->getMessage());
+
+            throw $e;
+        }
     }
 
     /**

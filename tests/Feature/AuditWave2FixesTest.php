@@ -125,12 +125,16 @@ class AuditWave2FixesTest extends TestCase
 
     public function test_term_current_prefers_the_latest_start_when_two_rows_are_lit(): void
     {
-        // Bad data (a half-finished manual edit) - the pick must still be
-        // defensible, not "whichever row sat on top".
-        $this->term($this->year, 'genap', '2027-01-04', true);
+        // Two lit terms are now IMPOSSIBLE by engine (audit T47's partial
+        // unique index) - this test used to manufacture exactly that bad
+        // data to check the tiebreak. The invariant it guarded moved from
+        // "the pick is defensible" to "the data cannot exist": the second
+        // lit row is refused by the database itself, and the honest
+        // ordering (latest starts_on) is enforced in Term::current().
         $this->term($this->year, 'ganjil', '2026-07-01', true);
 
-        $this->assertSame('genap', Term::current()?->name);
+        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->term($this->year, 'genap', '2027-01-04', true);
     }
 
     // ---- One definition / previous term --------------------------------------

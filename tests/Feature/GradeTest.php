@@ -386,9 +386,11 @@ class GradeTest extends TestCase
         $oldTerm = $this->term;
         $newTerm = Term::create([
             'academic_year_id' => $this->year->id, 'name' => 'genap',
-            'starts_on' => '2027-01-01', 'ends_on' => '2027-06-30', 'is_active' => true,
+            'starts_on' => '2027-01-01', 'ends_on' => '2027-06-30',
         ]);
-        $oldTerm->update(['is_active' => false]);
+        // activate() (not a raw is_active write): exactly one lit term is a
+        // database invariant now (audit T47's partial unique index).
+        $newTerm->activate();
 
         // Current-term view is now empty (nothing graded in the new term)...
         $current = $this->actingAs($guardian)->getJson("/api/wali/students/{$student->ulid}/grades");

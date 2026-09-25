@@ -999,4 +999,414 @@ class AuditSep25FixesTest extends TestCase
 
         \Illuminate\Support\Facades\Log::shouldHaveReceived('critical')->once();
     }
+
+    // --------------------------------------------------------------- T47
+
+    public function test_two_active_academic_years_are_refused_by_the_database(): void
+    {
+        // setUp already created the active 2026/2027. A second active year
+        // (two admin tabs racing activate(), or a hand-edited row) used to
+        // stand - now the partial unique index refuses it at the engine
+        // (audit T47).
+        $this->expectException(\Illuminate\Database\QueryException::class);
+
+        AcademicYear::create([
+            'year' => '2025/2026', 'starts_on' => '2025-07-01', 'ends_on' => '2026-06-30', 'is_active' => true,
+        ]);
+    }
+
+    public function test_two_active_terms_are_refused_by_the_database(): void
+    {
+        \App\Models\Term::create([
+            'academic_year_id' => $this->year->id,
+            'name' => 'ganjil',
+            'starts_on' => '2026-07-01',
+            'ends_on' => '2026-12-31',
+        ])->activate();
+
+        $this->expectException(\Illuminate\Database\QueryException::class);
+
+        \App\Models\Term::create([
+            'academic_year_id' => $this->year->id,
+            'name' => 'genap',
+            'starts_on' => '2027-01-01',
+            'ends_on' => '2027-06-30',
+            'is_active' => true,
+        ]);
+    }
+
+    public function test_a_term_of_an_inactive_year_cannot_be_activated(): void
+    {
+        // The seeded upcoming year (2027/2028) is inactive by default.
+        $term = \App\Models\Term::create([
+            'academic_year_id' => AcademicYear::where('year', '2027/2028')->firstOrFail()->id,
+            'name' => 'ganjil',
+            'starts_on' => '2027-07-01',
+            'ends_on' => '2027-12-31',
+        ]);
+
+        $this->actingAs($this->admin)
+            ->postJson("/api/admin/terms/{$term->ulid}/activate")
+            ->assertStatus(422)
+            ->assertJsonPath('message', fn (string $m) => str_contains($m, 'tahun ajaran'));
+
+        $this->assertFalse((bool) $term->fresh()->is_active);
+    }
+
+    public function test_term_names_are_shape_checked_against_the_enum(): void
+    {
+        $response = $this->actingAs($this->admin)->postJson('/api/admin/terms', [
+            'academic_year_ulid' => $this->year->ulid,
+            'name' => 'Ganjil',
+            'starts_on' => '2026-07-01',
+            'ends_on' => '2026-12-31',
+        ]);
+
+        // Free text used to validate fine and then die as a 500 on the DB's
+        // enum('ganjil','genap') column (audit T47).
+        $response->assertStatus(422)->assertInvalid('name');
+    }
+
+    // --------------------------------------------------------------- T48
+
+    private function csvUpload(string $content, string $name = 'import.csv'): \Illuminate\Http\UploadedFile
+    {
+        return \Illuminate\Http\Testing\File::fake()->createWithContent($name, $content);
+    }
+
+    public function test_reimporting_an_old_roster_never_resurrects_alumni(): void
+    {
+        $adminUnit = User::create([
+            'name' => 'Admin Unit SD',
+            'role' => 'admin_unit',
+            'school_unit_id' => $this->sdUnit->id,
+            'is_active' => true,
+            'activated_at' => now(),
+        ]);
+
+        $student = Student::create([
+            'nama_lengkap' => 'Alumni Terimport',
+            'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->sdUnit->id,
+            'entry_year_id' => $this->year->id,
+            'status' => 'graduated',
+        ]);
+
+        \App\Models\Enrollment::create([
+            'student_id' => $student->id,
+            'academic_year_id' => $this->year->id,
+            'classroom_id' => \App\Models\Classroom::create([
+                'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $this->year->id,
+                'tingkat' => 6, 'name' => '6-A', 'is_active' => true,
+            ])->id,
+            'status' => 'graduated',
+            'joined_on' => '2026-07-01',
+        ]);
+
+        $csv = "nama_lengkap,jenis_kelamin,kelas,status\nAlumni Terimport,L,6-A,active\n";
+
+        $response = $this->actingAs($adminUnit)
+            ->post('/api/admin/import/students', ['file' => $this->csvUpload($csv)])
+            ->assertOk();
+
+        // The row is refused and names the state - the old updateOrCreate
+        // flipped the enrollment back to 'active' and the student back to
+        // 'active' with it (audit T48-a).
+        $this->assertNotEmpty($response->json('errors'));
+        $this->assertStringContainsString('graduated', (string) $response->json('errors.0'));
+
+        $this->assertSame('graduated', $student->fresh()->status);
+        $this->assertSame(
+            'graduated',
+            \App\Models\Enrollment::where('student_id', $student->id)->where('academic_year_id', $this->year->id)->value('status'),
+        );
+    }
+
+    public function test_a_newly_imported_year_derives_its_dates_from_its_label(): void
+    {
+        $csv = "fee_type_code,unit_code,tingkat,academic_year,amount,due_day,late_fee_amount\n"
+            ."spp,SD-13,,2030/2031,650000,10,0\n";
+
+        $this->actingAs($this->admin)
+            ->post('/api/admin/import/fee-rates', ['file' => $this->csvUpload($csv, 'tarif.csv')])
+            ->assertOk();
+
+        // Hardcoded 2027 dates made "2030/2031" start in 2027 - poisoning
+        // promotion's chronological guard and every latest('starts_on')
+        // fallback (audit T48-c).
+        $year = AcademicYear::where('year', '2030/2031')->first();
+        $this->assertNotNull($year);
+        $this->assertSame('2030-07-01', $year->starts_on->toDateString());
+        $this->assertSame('2031-06-30', $year->ends_on->toDateString());
+    }
+
+    public function test_grades_refuse_a_classroom_from_another_year_than_the_lit_term(): void
+    {
+        $guru = User::create([
+            'name' => 'Guru Tahun Lama',
+            'role' => 'guru',
+            'school_unit_id' => $this->sdUnit->id,
+            'is_active' => true,
+            'activated_at' => now(),
+        ]);
+
+        $classroom = \App\Models\Classroom::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $this->year->id,
+            'tingkat' => 1, 'name' => '1-A', 'is_active' => true,
+        ]);
+        $subject = \App\Models\Subject::create(['code' => 'mtk', 'name' => 'Matematika']);
+
+        \App\Models\ClassSchedule::create([
+            'classroom_id' => $classroom->id, 'subject_id' => $subject->id, 'teacher_id' => $guru->id,
+            'day_of_week' => 1, 'start_time' => '07:00', 'end_time' => '08:00',
+        ]);
+
+        $student = Student::create([
+            'nama_lengkap' => 'Siswa Tahun Lama', 'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'status' => 'active',
+        ]);
+        \App\Models\Enrollment::create([
+            'student_id' => $student->id, 'academic_year_id' => $this->year->id,
+            'classroom_id' => $classroom->id, 'status' => 'active', 'joined_on' => '2026-07-01',
+        ]);
+
+        // Rollover: next year active (the seeded 2027/2028), its semester
+        // lit - but promotion has not moved this classroom anywhere yet.
+        $nextYear = AcademicYear::where('year', '2027/2028')->firstOrFail();
+        $nextYear->activate();
+        \App\Models\Term::create([
+            'academic_year_id' => $nextYear->id, 'name' => 'ganjil',
+            'starts_on' => '2027-07-01', 'ends_on' => '2027-12-31',
+        ])->activate();
+
+        // The write used to succeed - filing old-year grades under the NEW
+        // term, where the new year's rapor would show them (audit T48-b).
+        $this->actingAs($guru)
+            ->postJson("/api/guru/classrooms/{$classroom->ulid}/subjects/{$subject->ulid}/grades", [
+                'category' => 'tugas',
+                'entries' => [['student_ulid' => $student->ulid, 'score' => 90]],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', fn (string $m) => str_contains($m, 'tahun ajaran'));
+
+        $this->assertSame(0, \App\Models\Grade::count());
+    }
+
+    // --------------------------------------------------------------- T53
+
+    public function test_a_deactivated_account_cannot_use_a_live_invitation(): void
+    {
+        $user = User::create([
+            'name' => 'Wali Dinonaktifkan',
+            'email' => 'off@yapinet.id',
+            'role' => 'orangtua',
+            'is_active' => false,
+        ]);
+
+        $token = \App\Models\AccountInvitation::generateToken();
+
+        \App\Models\AccountInvitation::create([
+            'user_id' => $user->id,
+            'token_hash' => \App\Models\AccountInvitation::hashToken($token),
+            'channel' => 'email',
+            'sent_to' => 'baru@yapinet.id',
+            'purpose' => 'reset',
+            'expires_at' => now()->addDays(7),
+        ]);
+
+        // Neither the preview nor the activation may run for a disabled
+        // account - the link outlived the deactivation by up to 7 days
+        // (audit T53-a).
+        $this->getJson("/api/invitations/{$token}")->assertStatus(403);
+        $this->postJson("/api/invitations/{$token}/activate")->assertStatus(403);
+        $this->assertNotNull(\App\Models\AccountInvitation::where('user_id', $user->id)->first()->fresh()->used_at === null ? 'unused' : null);
+    }
+
+    public function test_deactivating_a_user_consumes_their_live_invitations(): void
+    {
+        $user = User::create([
+            'name' => 'Wali Dimatikan',
+            'email' => 'off2@yapinet.id',
+            'role' => 'orangtua',
+            'is_active' => true,
+        ]);
+
+        for ($i = 0; $i < 2; $i++) {
+            \App\Models\AccountInvitation::create([
+                'user_id' => $user->id,
+                'token_hash' => \App\Models\AccountInvitation::hashToken(\App\Models\AccountInvitation::generateToken()),
+                'channel' => 'email',
+                'sent_to' => "x{$i}@yapinet.id",
+                'purpose' => 'activation',
+                'expires_at' => now()->addDays(7),
+            ]);
+        }
+
+        $this->actingAs($this->admin)
+            ->patchJson("/api/admin/users/{$user->ulid}", ['is_active' => false])
+            ->assertOk();
+
+        $this->assertSame(
+            0,
+            \App\Models\AccountInvitation::where('user_id', $user->id)->whereNull('used_at')->count(),
+            'semua undangan hidup harus ikut terkonsumsi saat akun dinonaktifkan',
+        );
+    }
+
+    public function test_a_staff_contact_never_becomes_a_guardian_via_pmb(): void
+    {
+        // A teacher enrolling their own child through PMB (the common case):
+        // the staff account must not be attached as the child's wali.
+        $guru = User::create([
+            'name' => 'Guru Punya Anak',
+            'email' => 'guru.anak@yapinet.id',
+            'role' => 'guru',
+            'school_unit_id' => $this->sdUnit->id,
+            'is_active' => true,
+        ]);
+
+        $event = \App\Models\IntegrationEvent::create([
+            'source' => 'pmb',
+            'event_type' => 'student.enrolled',
+            'event_id' => 'evt-t53-'.uniqid(),
+            'payload' => [
+                'event' => 'student.enrolled',
+                'occurred_at' => now()->toIso8601String(),
+                'student' => [
+                    'pmb_ulid' => '01JCT53STUDENT00000000001',
+                    'no_pendaftaran' => 'PMB-2026-T53',
+                    'nama_lengkap' => 'Anak Guru',
+                    'jenis_kelamin' => 'P',
+                    'tanggal_lahir' => '2019-05-01',
+                    'unit_code' => 'SD-13',
+                    'academic_year' => '2026/2027',
+                ],
+                'guardians' => [
+                    [
+                        'nama' => 'Guru Punya Anak',
+                        'hubungan' => 'ibu',
+                        'email' => 'guru.anak@yapinet.id',
+                        'is_primary' => true,
+                    ],
+                ],
+            ],
+            'status' => 'received',
+        ]);
+
+        try {
+            app(\App\Services\Handoff\PmbHandoffProcessor::class)->process($event);
+            $this->fail('kecocokan kontak staf harus melempar agar event gagal terlihat');
+        } catch (\RuntimeException $e) {
+            // process() marks the event failed, then rethrows for the queue.
+            $this->assertStringContainsString('akun staf', $e->getMessage());
+        }
+
+        // The event fails LOUDLY for manual pairing - never a silent staff-
+        // as-guardian attachment (audit T53-b).
+        $this->assertSame('failed', $event->fresh()->status);
+        $this->assertStringContainsString('akun staf', (string) $event->fresh()->error);
+        $this->assertNull($guru->fresh()->guardian);
+    }
+
+    // --------------------------------------------------------------- T55
+
+    public function test_a_failed_va_registration_fails_the_payment_instead_of_leaving_it_dangling(): void
+    {
+        $bill = $this->billedStudent();
+        $guardian = $bill->student->guardians->first();
+
+        $wali = User::create(['name' => 'Wali VA Gagal', 'role' => 'orangtua', 'is_active' => true]);
+        $guardian->forceFill(['user_id' => $wali->id])->save();
+
+        // Production's behaviour on a registration failure: the gateway
+        // throws AFTER the Payment row committed.
+        $this->app->bind(\App\Services\Payment\PaymentGateway::class, function () {
+            return new class implements \App\Services\Payment\PaymentGateway
+            {
+                public function createInvoice(Payment $payment, \Illuminate\Support\Collection $bills, Guardian $payer): Payment
+                {
+                    throw new \RuntimeException('e-SPP unreachable in production');
+                }
+            };
+        });
+
+        try {
+            app(CheckoutService::class)->start($wali, [$bill->ulid], 'virtual_account');
+            $this->fail('kegagalan registrasi harus diteruskan');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('e-SPP unreachable', $e->getMessage());
+        }
+
+        // Not pending-forever: failed with a reason, basket released (audit
+        // T55-a) - the row no longer dangles outside every poller query.
+        $payment = Payment::sole();
+        $this->assertSame('failed', $payment->status);
+        $this->assertStringContainsString('Registrasi Virtual Account gagal', (string) $payment->rejection_reason);
+        $this->assertSame('unpaid', $bill->fresh()->status);
+    }
+
+    public function test_the_receipt_period_label_uses_the_bills_own_period_month(): void
+    {
+        config(['services.qontak.spp_receipt_template_id' => 'tpl-receipt']);
+        Queue::fake();
+
+        // July's SPP, printed late in September: the receipt must say the
+        // month the family was BILLED for, not the printing date (audit
+        // T55-b).
+        $bill = $this->billedStudent([
+            'period_month' => 7,
+            'issued_at' => now()->setMonth(9)->setDay(15),
+        ]);
+
+        $payment = Payment::create([
+            'payment_number' => 'PAY-SEP25-PER',
+            'payer_guardian_id' => $bill->student->guardians->first()->id,
+            'amount' => 700000,
+            'method' => 'virtual_account',
+            'status' => 'completed',
+            'paid_at' => now(),
+            'gateway_response' => ['provider' => 'bank_muamalat', 'va_number' => '80200126270000PP', 'bank_name' => 'Bank Muamalat'],
+        ]);
+        app(PaymentAllocator::class)->allocate($payment, [$bill->id => 700000]);
+
+        app(\App\Services\Billing\PaymentReceiptSender::class)->send($payment);
+
+        Queue::assertPushed(\App\Jobs\SendQontakTemplateMessage::class, fn ($job) => $job->bodyValues[1] === 'Juli 2026');
+    }
+
+    public function test_an_identical_manual_bill_double_submit_is_refused(): void
+    {
+        $student = Student::create([
+            'nama_lengkap' => 'Siswa Tagihan Manual', 'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'status' => 'active',
+        ]);
+
+        $payload = [
+            'student_ulid' => $student->ulid,
+            'fee_type_ulid' => $this->spp->ulid,
+            'description' => 'SPP tertunggak bulan Agustus',
+            'amount' => 650000,
+            'due_date' => now()->addDays(10)->toDateString(),
+        ];
+
+        $this->actingAs($this->admin)->postJson('/api/admin/bills/manual', $payload)->assertCreated();
+
+        // The identical payload again (a double click, a retried request):
+        // refused as a duplicate, not minted as a second real bill whose
+        // checkout would supersede the first family VA (audit T55-d).
+        $this->actingAs($this->admin)
+            ->postJson('/api/admin/bills/manual', $payload)
+            ->assertStatus(422)
+            ->assertJsonPath('message', fn (string $m) => str_contains($m, 'sama'));
+
+        // A genuinely different bill still goes through.
+        $changed = $payload;
+        $changed['amount'] = 350000;
+
+        $this->actingAs($this->admin)
+            ->postJson('/api/admin/bills/manual', $changed)
+            ->assertCreated();
+
+        $this->assertSame(2, Bill::where('student_id', $student->id)->count());
+    }
 }

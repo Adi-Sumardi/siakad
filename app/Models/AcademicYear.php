@@ -31,7 +31,11 @@ class AcademicYear extends Model
 
     public static function current(): ?self
     {
-        return static::where('is_active', true)->first();
+        // Deterministic on bad data (audit T47): a race that left two active
+        // rows (now impossible - partial unique index - but the read must
+        // stay honest anyway) resolves to the one that starts latest, the
+        // same tiebreak Term::current() uses.
+        return static::where('is_active', true)->orderByDesc('starts_on')->first();
     }
 
     /**

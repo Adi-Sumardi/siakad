@@ -19,8 +19,10 @@ use App\Services\Billing\BillPdfService;
 use App\Services\Billing\BillingApiClient;
 use App\Services\Billing\CheckoutService;
 use App\Services\Billing\VaIssuedNotifier;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -110,27 +112,62 @@ class BillController extends Controller
 
         $amount = round((float) $validated['amount'], 2);
 
-        $bill = Bill::create([
-            'bill_number' => Bill::generateNumber($feeType, $year->year),
-            'student_id' => $student->id,
-            'fee_type_id' => $feeType->id,
-            'academic_year_id' => $year->id,
-            'term_id' => Term::current()?->id,
-            'dedup_key' => 'manual:'.$student->id.':'.uniqid(),
-            'description' => $validated['description'],
-            'subtotal' => $amount,
-            'discount_amount' => 0,
-            'late_fee' => 0,
-            'total_amount' => $amount,
-            'paid_amount' => 0,
-            'remaining_amount' => $amount,
-            'status' => 'unpaid',
-            'due_date' => $validated['due_date'],
-            'allow_installment' => (bool) $feeType->allow_installment,
-            'issued_at' => now(),
-            'issued_by' => $request->user()->id,
-            'notes' => 'Diterbitkan manual oleh '.$request->user()->name,
-        ]);
+        // Double-submit guard (audit T55-d): the manual lane has no
+        // generator-style unique key - dedup_key was manual:{id}:{uniqid},
+        // so a double click minted two real bills (and the second checkout
+        // superseded the first family VA). An IDENTICAL payload within a
+        // short window is a double click, not a second legitimate bill -
+        // those differ in at least an amount or a description, and the UI
+        // already warns explicitly about same-year cambridge bills.
+        $fingerprint = 'manual-bill:'.md5(
+            $student->id.'|'.$feeType->id.'|'.$amount.'|'.$validated['description'].'|'.$validated['due_date']
+        );
+
+        if (Cache::has($fingerprint)) {
+            return response()->json([
+                'message' => 'Tagihan manual dengan rincian yang sama baru saja dibuat - muat ulang daftar tagihan.',
+            ], 422);
+        }
+
+        Cache::put($fingerprint, true, 60);
+
+        // Concurrent numbering: generateNumber() reads the max sequence,
+        // so two simultaneous submits can pick the same number - retry the
+        // way BillGenerator::issue() does instead of surfacing a constraint
+        // violation.
+        $bill = null;
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            try {
+                $bill = Bill::create([
+                    'bill_number' => Bill::generateNumber($feeType, $year->year),
+                    'student_id' => $student->id,
+                    'fee_type_id' => $feeType->id,
+                    'academic_year_id' => $year->id,
+                    'term_id' => Term::current()?->id,
+                    'dedup_key' => 'manual:'.$student->id.':'.uniqid(),
+                    'description' => $validated['description'],
+                    'subtotal' => $amount,
+                    'discount_amount' => 0,
+                    'late_fee' => 0,
+                    'total_amount' => $amount,
+                    'paid_amount' => 0,
+                    'remaining_amount' => $amount,
+                    'status' => 'unpaid',
+                    'due_date' => $validated['due_date'],
+                    'allow_installment' => (bool) $feeType->allow_installment,
+                    'issued_at' => now(),
+                    'issued_by' => $request->user()->id,
+                    'notes' => 'Diterbitkan manual oleh '.$request->user()->name,
+                ]);
+
+                break;
+            } catch (UniqueConstraintViolationException $e) {
+                if ($attempt === 2) {
+                    throw $e;
+                }
+            }
+        }
 
         // With an itemised breakdown (cambridge + buku on one bill) each row
         // becomes its own line; without one the description stays the single

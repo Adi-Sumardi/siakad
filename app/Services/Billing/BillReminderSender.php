@@ -427,7 +427,13 @@ class BillReminderSender
         $muamalatVa = $va['muamalat']['va_number'] ?? '';
         $bsiVa = $va['bsi']['va_number'] ?? '';
         $bsiPaymentCode = mb_strlen($bsiVa) > 4 ? mb_substr($bsiVa, 4) : $bsiVa;
-        $period = $bill->issued_at?->translatedFormat('F Y') ?? $bill->due_date->translatedFormat('F Y');
+        // The bill's OWN period month when it has one (audit T55-b):
+        // issued_at is a printing date, so a late-issued SPP reminded as
+        // the wrong month. Year follows the printing date, correct for
+        // every month of the academic year.
+        $period = $bill->period_month
+            ? \Illuminate\Support\Carbon::create(($bill->issued_at ?? $bill->due_date)->year, (int) $bill->period_month, 1)->translatedFormat('F Y')
+            : ($bill->issued_at?->translatedFormat('F Y') ?? $bill->due_date->translatedFormat('F Y'));
         $amount = number_format((float) $bill->remaining_amount, 0, ',', '.');
 
         return [
