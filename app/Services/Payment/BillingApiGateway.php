@@ -24,7 +24,14 @@ class BillingApiGateway implements PaymentGateway
         private PaymentAllocator $allocator,
     ) {}
 
-    public function createInvoice(Payment $payment, Collection $bills, Guardian $payer): Payment
+    /**
+     * Optional $expiresAt overrides the config va_due_days window - used by
+     * ensureReminderVaPair() so a reminder's VA stays payable through the
+     * bill's own due date instead of dying mid-beat (audit T62-b). Optional
+     * extra parameters on an interface implementation are signature-
+     * compatible, so PaymentGateway itself stays unchanged.
+     */
+    public function createInvoice(Payment $payment, Collection $bills, Guardian $payer, ?Carbon $expiresAt = null): Payment
     {
         $primaryBill = $bills->first();
         $student = $primaryBill?->student;
@@ -56,7 +63,7 @@ class BillingApiGateway implements PaymentGateway
         $bankId = (string) ($bankConfig['bank_id'] ?? '1');
 
         $dueDays = (int) config('services.billing_api.va_due_days', 3);
-        $dueDate = now()->addDays($dueDays);
+        $dueDate = $expiresAt ?? now()->addDays($dueDays);
 
         // Synchronize payment_number with fee type and student code if not already formatted
         $studentCode = BillingApiClient::formatStudentCode($student);
@@ -203,10 +210,12 @@ class BillingApiGateway implements PaymentGateway
      * SAFETY: two simultaneously live VAs for one bill is a real change to
      * this app's payment model - if the family pays BOTH by mistake, both
      * would independently reach `completed` status without anything here
-     * stopping the second one. The other half of the safety net is
-     * PollBillingVaPayments::handle(), which supersedes the sibling VA the
-     * moment either one settles - this method alone is not sufficient on
-     * its own, the two must ship together.
+     * stopping the second one. The other half of the safety net lives in
+     * PaymentAllocator::settle() itself (audit 25-9): the moment any lane
+     * settles one of the pair, every other still-live payment on those
+     * bills is failed - no metadata.source filter, because this method
+     * deliberately REUSES an already-live checkout VA as one half of its
+     * pair, and that half carries no reminder marker at all.
      *
      * @return array{muamalat: array{va_number: string, bank_name: string}, bsi: array{va_number: string, bank_name: string}}
      */
@@ -237,7 +246,16 @@ class BillingApiGateway implements PaymentGateway
 
                 $this->allocator->allocate($payment, [$bill->id => round((float) $bill->remaining_amount, 2)]);
 
-                $payment = $this->createInvoice($payment, collect([$bill]), $payer);
+                // Reminder VAs must outlive the beat that minted them (audit
+                // T62-b): a 3-day va_due_days window dies mid-flight for an
+                // H-7 beat, leaving days 4-5 holding a number the bank
+                // already refuses. The window stretches to the bill's own
+                // due date when that is further out; nearer due dates (H-1,
+                // overdue) keep the plain va_due_days floor.
+                $window = now()->addDays((int) config('services.billing_api.va_due_days', 3));
+                $expiresAt = $bill->due_date->endOfDay()->gt($window) ? $bill->due_date->endOfDay() : $window;
+
+                $payment = $this->createInvoice($payment, collect([$bill]), $payer, $expiresAt);
             }
 
             $result[$bank] = [
@@ -247,34 +265,6 @@ class BillingApiGateway implements PaymentGateway
         }
 
         return $result;
-    }
-
-    /**
-     * The other bank's live VA for the same bill, if this settled payment
-     * was one half of an ensureReminderVaPair() pair - null for an ordinary
-     * single-VA checkout payment, which never has a sibling to begin with.
-     */
-    public function siblingReminderVaFor(Payment $settled): ?Payment
-    {
-        if (($settled->metadata['source'] ?? null) !== 'spp_reminder') {
-            return null;
-        }
-
-        $billIds = $settled->allocations()->pluck('bill_id');
-
-        if ($billIds->isEmpty()) {
-            return null;
-        }
-
-        $siblingPaymentIds = PaymentAllocation::whereIn('bill_id', $billIds)
-            ->pluck('payment_id')
-            ->unique()
-            ->reject(fn ($id) => $id === $settled->id);
-
-        return Payment::whereIn('id', $siblingPaymentIds)
-            ->whereIn('status', ['pending', 'processing'])
-            ->whereIn('gateway_response->provider', ['bank_muamalat', 'bank_bsi'])
-            ->first();
     }
 
     /** An already-registered, still-payable VA for this bank+bill, or null. */

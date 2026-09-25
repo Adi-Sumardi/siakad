@@ -154,10 +154,13 @@ class BillReminderSender
      */
     public function resend(NotificationLog $log): NotificationResult
     {
-        // The Qontak template lane rebuilds straight from the row's own
-        // payload (audit T43): every body value the template needs was
-        // stored at queue time, so a failed reminder_spp row is re-queued
-        // through the same throttled job instead of dying unresendable.
+        // The Qontak template lane (audit T43, rebuilt audit T59): values are
+        // rebuilt FRESH from the bill, not replayed from the row's frozen
+        // payload - a resend can happen hours after the failure, by which time
+        // the VA pair may have expired at e-SPP or the bill may have been
+        // part-paid. Sending the frozen payload would hand the family a dead
+        // VA number (or a paid bill's old balance), so the same guard applies
+        // as the non-SPP lane below: still open, or no send at all.
         if ($log->template === 'reminder_spp') {
             $templateId = config('services.qontak.spp_reminder_template_id');
 
@@ -165,17 +168,42 @@ class BillReminderSender
                 return NotificationResult::fail('Template reminder SPP belum dikonfigurasi atau penerima kosong.');
             }
 
+            $bill = $log->notifiable;
+
+            if (! $bill instanceof Bill) {
+                return NotificationResult::fail('Tagihan untuk pengingat ini sudah tidak ada.');
+            }
+
+            $bill->refresh();
+
+            if (! $bill->isOpen()) {
+                return NotificationResult::fail('Tagihan sudah tidak terbuka (lunas/dibatalkan) - pengingat tidak lagi relevan.');
+            }
+
+            $guardian = $this->billingContactFor($bill);
+
+            if (! $guardian) {
+                return NotificationResult::fail('Tagihan tanpa kontak penagihan.');
+            }
+
+            $built = $this->buildSppReminderValues($bill, $guardian);
+
+            if (isset($built['error'])) {
+                return NotificationResult::fail($built['error']);
+            }
+
+            // Same row, fresh payload - the delivery still owns exactly one
+            // line of history; applyResult() flips it to queued and counts
+            // the attempt.
+            $log->update([
+                'payload' => $built['payload'],
+            ]);
+
             SendQontakTemplateMessage::dispatch(
                 phone: $log->recipient,
-                toName: 'Orang Tua/Wali',
+                toName: $guardian->nama ?: 'Orang Tua/Wali',
                 templateId: (string) $templateId,
-                bodyValues: [
-                    (string) ($log->payload['student_name'] ?? ''),
-                    (string) ($log->payload['period'] ?? ''),
-                    (string) ($log->payload['amount'] ?? ''),
-                    (string) ($log->payload['va_muamalat'] ?? ''),
-                    (string) ($log->payload['va_bsi_payment_code'] ?? ''),
-                ],
+                bodyValues: $built['values'],
                 notificationLogUlid: $log->ulid,
             );
 
@@ -314,27 +342,38 @@ class BillReminderSender
      * Registers both banks' VA for this bill (idempotent - see
      * BillingApiGateway::ensureReminderVaPair()) and queues the approved
      * template with both numbers. Body variables, in order: nama anak, bulan
-     * tagihan, jumlah, VA Muamalat, kode bayar BSI (the VA minus its fixed
-     * "3656" institution-code prefix).
+     * tagihan, jumlah, VA Muamalat, kode bayar BSI (the VA minus its
+     * 4-digit institution code - 7895 for SPP).
      */
     private function queueSppReminderTemplate(Bill $bill, Guardian $guardian, string $phone): NotificationResult
     {
-        try {
-            $va = $this->billingApi->ensureReminderVaPair($bill, $guardian);
-        } catch (\Throwable $e) {
-            Log::warning('[BillReminderSender] Failed to register VA pair for SPP reminder', [
-                'bill' => $bill->bill_number,
-                'error' => $e->getMessage(),
+        $built = $this->buildSppReminderValues($bill, $guardian);
+
+        if (isset($built['error'])) {
+            // The beat must not burn silently (audit T59): the BillReminder
+            // claim above already marks this (bill, kind, channel) as done,
+            // so without a row here the reminder was never sent, never
+            // retried (the sweep only reads notification_logs), and never
+            // shown on the failure dashboard - e-SPP being down for half an
+            // hour at sweep time erased the whole cohort's reminder. A
+            // failed row re-enters through the existing retry lane, whose
+            // resend() rebuilds the VA pair fresh once e-SPP is back.
+            NotificationLog::create([
+                'channel' => 'whatsapp',
+                'template' => 'reminder_spp',
+                'recipient' => $phone,
+                'payload' => [
+                    'student_name' => $bill->student->nama_lengkap,
+                    'note' => 'Pendaftaran VA gagal saat antre - nilai dibangun ulang saat dikirim kembali.',
+                ],
+                'status' => 'failed',
+                'error' => $built['error'],
+                'notifiable_type' => Bill::class,
+                'notifiable_id' => $bill->id,
             ]);
 
-            return NotificationResult::fail('Gagal mendaftarkan Virtual Account: '.$e->getMessage());
+            return NotificationResult::fail($built['error']);
         }
-
-        $muamalatVa = $va['muamalat']['va_number'] ?? '';
-        $bsiVa = $va['bsi']['va_number'] ?? '';
-        $bsiPaymentCode = mb_strlen($bsiVa) > 4 ? mb_substr($bsiVa, 4) : $bsiVa;
-        $period = $bill->issued_at?->translatedFormat('F Y') ?? $bill->due_date->translatedFormat('F Y');
-        $amount = number_format((float) $bill->remaining_amount, 0, ',', '.');
 
         // The row rides the job (audit T43): SendQontakTemplateMessage now
         // takes the log ulid and flips this row to sent/failed itself - a
@@ -344,13 +383,7 @@ class BillReminderSender
             'channel' => 'whatsapp',
             'template' => 'reminder_spp',
             'recipient' => $phone,
-            'payload' => [
-                'student_name' => $bill->student->nama_lengkap,
-                'period' => $period,
-                'amount' => $amount,
-                'va_muamalat' => $muamalatVa,
-                'va_bsi_payment_code' => $bsiPaymentCode,
-            ],
+            'payload' => $built['payload'],
             'status' => 'queued',
             'notifiable_type' => Bill::class,
             'notifiable_id' => $bill->id,
@@ -362,10 +395,50 @@ class BillReminderSender
             phone: $phone,
             toName: $guardian->nama ?: 'Orang Tua/Wali',
             templateId: config('services.qontak.spp_reminder_template_id'),
-            bodyValues: [$bill->student->nama_lengkap, $period, $amount, $muamalatVa, $bsiPaymentCode],
+            bodyValues: $built['values'],
             notificationLogUlid: $log->ulid,
         )->delay(now()->addSeconds(random_int(0, 300)));
 
         return NotificationResult::ok(['mode' => 'queued']);
+    }
+
+    /**
+     * Everything a reminder_spp delivery needs, derived from the bill as it
+     * stands right now. Shared by the queue-time send and the resend lane so
+     * the two can never drift - a resend hours later must reflect the bill's
+     * CURRENT balance and a freshly registered VA pair, not queue-time
+     * snapshots (audit T59).
+     *
+     * @return array{error: string}|array{values: list<string>, payload: array<string, string>}
+     */
+    private function buildSppReminderValues(Bill $bill, Guardian $guardian): array
+    {
+        try {
+            $va = $this->billingApi->ensureReminderVaPair($bill, $guardian);
+        } catch (\Throwable $e) {
+            Log::warning('[BillReminderSender] Failed to register VA pair for SPP reminder', [
+                'bill' => $bill->bill_number,
+                'error' => $e->getMessage(),
+            ]);
+
+            return ['error' => 'Gagal mendaftarkan Virtual Account: '.$e->getMessage()];
+        }
+
+        $muamalatVa = $va['muamalat']['va_number'] ?? '';
+        $bsiVa = $va['bsi']['va_number'] ?? '';
+        $bsiPaymentCode = mb_strlen($bsiVa) > 4 ? mb_substr($bsiVa, 4) : $bsiVa;
+        $period = $bill->issued_at?->translatedFormat('F Y') ?? $bill->due_date->translatedFormat('F Y');
+        $amount = number_format((float) $bill->remaining_amount, 0, ',', '.');
+
+        return [
+            'values' => [$bill->student->nama_lengkap, $period, $amount, $muamalatVa, $bsiPaymentCode],
+            'payload' => [
+                'student_name' => $bill->student->nama_lengkap,
+                'period' => $period,
+                'amount' => $amount,
+                'va_muamalat' => $muamalatVa,
+                'va_bsi_payment_code' => $bsiPaymentCode,
+            ],
+        ];
     }
 }

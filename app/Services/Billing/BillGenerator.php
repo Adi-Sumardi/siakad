@@ -190,6 +190,23 @@ class BillGenerator
             ];
         }
 
+        // Dead-bill backstop (audit T61): rate storage now refuses a
+        // (type, unit) combination with no VA prefix, but a rate created
+        // before that guard - or a legacy import - would still bill here,
+        // and with the VA-only payment model (T33) no lane could ever
+        // settle what gets issued. Skipped and named, like every other
+        // "cannot bill this student honestly" case. Wholly prefix-less
+        // types (seragam, buku) keep their documented cash-desk behaviour
+        // and are NOT caught by this guard.
+        if (BillingApiClient::resolvePrefix($type->code) !== null
+            && BillingApiClient::resolvePrefix($type->code, $student->schoolUnit) === null) {
+            return $base + [
+                'reason' => 'Unit tanpa prefix VA',
+                'detail' => $type->name.' untuk '.($student->schoolUnit?->label ?? 'unit ini')
+                    .' tidak punya nomor Virtual Account - tagihan tidak bisa dibayar lewat sistem.',
+            ];
+        }
+
         $selection = null;
 
         if ($type->requires_selection) {

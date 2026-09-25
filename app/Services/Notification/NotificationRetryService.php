@@ -97,6 +97,17 @@ class NotificationRetryService
 
             $attempts = $this->applyResult($log, $result);
 
+            // Inline WhatsApp sends bypass the 'whatsapp-messages' limiter -
+            // it only arms on queued jobs - so an unspaced loop here would
+            // replay exactly the burst the limiter exists to prevent the
+            // moment a gateway recovers and dozens of failed rows come due
+            // at once (audit T59). One second per physical send matches the
+            // limiter's own 60/min; re-queued rows sent nothing inline and
+            // skip the pause.
+            if ($log->channel === 'whatsapp' && ($result->raw['mode'] ?? null) !== 'queued') {
+                usleep(1_000_000);
+            }
+
             $stats['retried']++;
             $result->success ? $stats['sent']++ : $stats['still_failed']++;
 
@@ -175,12 +186,27 @@ class NotificationRetryService
     {
         // A resend that re-QUEUED the send (the Qontak template lanes, audit
         // T43) hands the row back to the job: the job makes the physical
-        // attempt, owns the outcome, and counts its own attempt - counting
-        // it here too would double-increment for one send.
-        if ($result->success && ($result->data['mode'] ?? null) === 'queued') {
-            $log->update(['status' => 'queued', 'error' => null]);
+        // attempt and owns the outcome. The re-queue itself IS one attempt -
+        // the senders return NotificationResult::ok(['mode' => 'queued'])
+        // with the payload in ->raw (audit T58: this branch read ->data, a
+        // property that does not exist, so the ?? silently fell through to
+        // the generic branch, marked the row 'sent' without anything being
+        // delivered, and the job then skipped it as already-sent). Counting
+        // here does not double-count: the freshly dispatched job starts at
+        // attempt 1 and only self-increments from attempt 2 on (audit T44),
+        // so without this increment nothing would ever raise the count again
+        // and a deterministically failing row would be re-queued by every
+        // 30-minute sweep until the 24h window closed (~48 sends).
+        if ($result->success && ($result->raw['mode'] ?? null) === 'queued') {
+            $attempts = $log->attempts + 1;
 
-            return $log->attempts;
+            $log->update([
+                'status' => 'queued',
+                'error' => null,
+                'attempts' => $attempts,
+            ]);
+
+            return $attempts;
         }
 
         $attempts = $log->attempts + 1;

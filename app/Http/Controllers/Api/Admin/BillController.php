@@ -16,6 +16,7 @@ use App\Models\FeeType;
 use App\Models\Student;
 use App\Models\Term;
 use App\Services\Billing\BillPdfService;
+use App\Services\Billing\BillingApiClient;
 use App\Services\Billing\CheckoutService;
 use App\Services\Billing\VaIssuedNotifier;
 use Illuminate\Http\JsonResponse;
@@ -86,6 +87,18 @@ class BillController extends Controller
         if ($request->user()->isUnitScoped()) {
             abort_unless($feeType->code === FeeSettingController::UNIT_MANAGED_FEE_CODE, 403,
                 'Admin unit hanya boleh menerbitkan tagihan manual jenis Cambridge.');
+        }
+
+        // Same dead-bill guard as rate storage and the generator (audit
+        // T61): a type that is VA-capable elsewhere but has no prefix for
+        // THIS student's unit must not be issued manually either - no
+        // payment lane could ever settle it (VA-only since T33).
+        if (BillingApiClient::resolvePrefix($feeType->code) !== null
+            && BillingApiClient::resolvePrefix($feeType->code, $student->schoolUnit) === null) {
+            return response()->json([
+                'message' => "Jenis biaya '{$feeType->name}' tidak punya nomor Virtual Account untuk unit "
+                    .($student->schoolUnit?->label ?? 'siswa ini').' - tagihan tidak akan bisa dibayar lewat sistem.',
+            ], 422);
         }
 
         $year = AcademicYear::where('is_active', true)->first()

@@ -45,6 +45,13 @@ class BillPdfService
             // (or take money for a different basket's registration).
             'vaNumber' => $this->vaFor($bill)['number'] ?? null,
             'vaBankName' => $this->vaFor($bill)['bank_name'] ?? null,
+            // The amount e-SPP actually registered for that VA (audit
+            // T62-a): a custom-partial checkout leaves a live VA whose
+            // registered amount is BELOW the bill's remaining balance, and
+            // printing the number next to "Sisa Kewajiban" without this
+            // sent parents to transfer the paper's bigger figure into a
+            // smaller registration - rejected at the bank.
+            'vaAmount' => $this->vaFor($bill)['amount'] ?? null,
             'money' => fn (float $amount) => 'Rp '.number_format($amount, 0, ',', '.'),
         ])->setPaper('a4');
     }
@@ -63,9 +70,9 @@ class BillPdfService
      * way). Comes from the live payment's own gateway_response so the paper
      * can never advertise a number the bank doesn't know (audit T40-c).
      *
-     * @return array{number: string, bank_name: string}|null
+     * @return array{number: string, bank_name: string, amount: float|null}|null
      */
-    private function vaFor(Bill $bill): ?array
+    public function vaFor(Bill $bill): ?array
     {
         if ($bill->status === 'paid') {
             return null;
@@ -86,6 +93,9 @@ class BillPdfService
         return [
             'number' => $va,
             'bank_name' => (string) ($payment->gateway_response['bank_name'] ?? 'Bank Muamalat'),
+            'amount' => isset($payment->gateway_response['amount'])
+                ? (float) $payment->gateway_response['amount']
+                : null,
         ];
     }
 

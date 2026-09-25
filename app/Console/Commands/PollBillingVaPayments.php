@@ -74,20 +74,10 @@ class PollBillingVaPayments extends Command
                     $settledCount++;
                     $this->info("Payment {$payment->payment_number} (VA: {$vaLookup}) settled!");
 
-                    // Only ever non-null for a BillingApiGateway::ensureReminderVaPair()
-                    // pair (the SPP reminder's dual Muamalat+BSI VA) - an
-                    // ordinary single-VA checkout payment has no sibling to
-                    // begin with. Failed and expired immediately so the
-                    // sibling can never ALSO settle if the family pays both
-                    // by mistake - see ensureReminderVaPair()'s own docblock
-                    // for why this half of the safety net is not optional.
-                    $sibling = $gateway->siblingReminderVaFor($payment);
-
-                    if ($sibling) {
-                        $allocator->fail($sibling, 'failed', 'Digantikan - tagihan yang sama sudah lunas lewat VA bank lain.');
-                        $gateway->expireVa($sibling);
-                        $this->info("Sibling payment {$sibling->payment_number} superseded (same bill settled via a different bank's VA).");
-                    }
+                    // Sibling-VAs of a settled payment are superseded inside
+                    // PaymentAllocator::settle() itself (audit 25-9) - the
+                    // same choke point the webhook settles through, so both
+                    // lanes and every metadata.source carry the guard.
                 } elseif ($payment->expires_at && $payment->expires_at->isPast()) {
                     $allocator->fail($payment, 'expired', 'Virtual Account telah kedaluwarsa.');
                     $this->warn("Payment {$payment->payment_number} (VA: {$vaLookup}) marked as expired.");

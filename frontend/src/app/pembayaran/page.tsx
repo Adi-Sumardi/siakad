@@ -52,6 +52,18 @@ function tanggal(dateStr: string): string {
   }).format(new Date(dateStr));
 }
 
+// Date-only fields (the VA window's due_date is a bare "Y-m-d"): rendering
+// those through tanggal() parsed them as UTC midnight and printed a phantom
+// "pukul 07.00" in WIB (audit T62-c).
+function tanggalSaja(dateStr: string): string {
+  if (!dateStr) return "-";
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(dateStr));
+}
+
 function PaymentsContent() {
   const { user, loading } = useRequireRole("orangtua");
   const searchParams = useSearchParams();
@@ -385,7 +397,7 @@ function PaymentsContent() {
                     {(selectedPayment.virtual_account?.due_date || selectedPayment.gateway_response?.due_date) && (
                       <p className="text-[11px] text-emerald-900 dark:text-emerald-200">
                         ⏳ Batas Waktu Pembayaran:{" "}
-                        <strong>{tanggal(selectedPayment.virtual_account?.due_date || selectedPayment.gateway_response?.due_date || "")}</strong>
+                        <strong>{tanggalSaja(selectedPayment.virtual_account?.due_date || selectedPayment.gateway_response?.due_date || "")}</strong>
                       </p>
                     )}
                   </div>
@@ -399,13 +411,13 @@ function PaymentsContent() {
                     {isBsi ? (
                       <div className="space-y-1.5 text-[11px] text-muted-foreground leading-relaxed pl-5 list-decimal">
                         <div>
-                          <strong>1. Byond by BSI:</strong> Menu <em>Bayar/Beli</em> &rarr; <em>Akademik</em> &rarr; Kode Biller <strong>3656</strong> (YAPI) &rarr; Masukkan Nomor Bayar <strong>{activeVaNumber?.slice(4)}</strong> &rarr; Konfirmasi PIN.
+                          <strong>1. Byond by BSI:</strong> Menu <em>Bayar/Beli</em> &rarr; <em>Akademik</em> &rarr; Kode Biller <strong>{activeVaNumber?.slice(0, 4)}</strong> (YAPI) &rarr; Masukkan Nomor Bayar <strong>{activeVaNumber?.slice(4)}</strong> &rarr; Konfirmasi PIN.
                         </div>
                         <div>
-                          <strong>2. ATM BSI:</strong> Bayar &amp; Beli &rarr; Akademik/Institusi &rarr; Masukkan kode pembayaran <strong>3656{activeVaNumber?.slice(4)}</strong> &rarr; Konfirmasi.
+                          <strong>2. ATM BSI:</strong> Bayar &amp; Beli &rarr; Akademik/Institusi &rarr; Masukkan kode pembayaran <strong>{activeVaNumber}</strong> &rarr; Konfirmasi.
                         </div>
                         <div>
-                          <strong>3. Transfer Antar Bank (BCA/Mandiri/BRI/Muamalat/dll):</strong> Pilih <em>Transfer Antar Bank</em> &rarr; Pilih <strong>Bank BSI (Kode: 451)</strong> &rarr; Nomor rekening tujuan: ketik <strong>900</strong> + <strong>3656</strong> + nomor bayar &rarr; <strong>9003656{activeVaNumber?.slice(4)}</strong> &rarr; Masukkan nominal ({rupiah(selectedPayment.amount)}) &rarr; Konfirmasi.
+                          <strong>3. Transfer Antar Bank (BCA/Mandiri/BRI/Muamalat/dll):</strong> Pilih <em>Transfer Antar Bank</em> &rarr; Pilih <strong>Bank BSI (Kode: 451)</strong> &rarr; Nomor rekening tujuan: ketik <strong>900</strong> + <strong>{activeVaNumber?.slice(0, 4)}</strong> + nomor bayar &rarr; <strong>900{activeVaNumber}</strong> &rarr; Masukkan nominal ({rupiah(selectedPayment.amount)}) &rarr; Konfirmasi.
                         </div>
                       </div>
                     ) : (

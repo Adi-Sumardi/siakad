@@ -120,7 +120,15 @@ class BillingApiClient
                 str_contains($unitCode, 'SD') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD),
                 str_contains($unitCode, 'SMP-12') || str_contains($unitCode, 'SMP12') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_smp12", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP12 : self::PREFIX_EKSKUL_SMP12),
                 str_contains($unitCode, 'SMP-55') || str_contains($unitCode, 'SMP55') => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_smp55", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SMP55 : self::PREFIX_EKSKUL_SMP55),
-                default => (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD),
+                // Unknown unit stays null (audit T61), mirroring cambridge
+                // below: the old ekskul_sd default quietly minted RA/PG/SMA
+                // ekskul VAs under the SD prefix - a number e-SPP associates
+                // with a different unit's range. A missing unit still falls
+                // back to the SD prefix so catalogue listings can show the
+                // type as VA-capable.
+                default => $unitCode === ''
+                    ? (string) config("services.billing_api.banks.{$bankKey}.va_prefixes.ekskul_sd", $bankKey === 'bsi' ? self::PREFIX_BSI_EKSKUL_SD : self::PREFIX_EKSKUL_SD)
+                    : null,
             };
         }
 

@@ -29,15 +29,23 @@ type FeeTypeOption = {
   name: string;
   is_active: boolean;
   has_va_prefix: boolean;
+  /** Units whose students can never pay this type by VA (audit T61). */
+  units_without_va_prefix?: string[];
 };
 
-type StudentHit = { ulid: string; nama_lengkap: string; nis: string | null; unit: { label: string } | null };
+type StudentHit = {
+  ulid: string;
+  nama_lengkap: string;
+  nis: string | null;
+  unit: { code: string; label: string } | null;
+};
 
 /** Module-scope so the component render stays pure - fresh defaults per open. */
 function emptyManualForm() {
   return {
     student_search: "",
     student_ulid: "",
+    student_unit_code: "",
     fee_type_ulid: "",
     description: "",
     amount: "",
@@ -637,6 +645,7 @@ function AdminBillsContent() {
                           setManual({
                             ...manual,
                             student_ulid: s.ulid,
+                            student_unit_code: s.unit?.code ?? "",
                             student_search: `${s.nama_lengkap} (${s.unit?.label ?? "-"})`,
                           });
                           setStudentHits([]);
@@ -695,6 +704,15 @@ function AdminBillsContent() {
                   terdaftar di e-SPP.
                 </p>
               )}
+
+              {selectedFeeType &&
+                manual.student_unit_code &&
+                (selectedFeeType.units_without_va_prefix ?? []).includes(manual.student_unit_code) && (
+                  <p className="rounded-lg border border-warn/30 bg-warn-soft px-3 py-2 text-[11px] font-medium text-warn">
+                    Unit siswa ini tidak mengikuti “{selectedFeeType.name}” — belum ada nomor Virtual Account untuk
+                    unit tersebut, sehingga tagihannya tidak bisa dibayar lewat sistem.
+                  </p>
+                )}
 
               {manualIsCambridge && existingCambridge && (
                 <p className="rounded-lg border border-warn/30 bg-warn-soft px-3 py-2 text-[11px] font-medium text-warn">

@@ -61,6 +61,16 @@ class FeeSettingController extends Controller
                     // manual bill of a type without one is payable at the
                     // front desk only, and the UI must say so up front.
                     'has_va_prefix' => BillingApiClient::resolvePrefix($type->code) !== null,
+                    // Which units specifically cannot mint this type's VA
+                    // (audit T61): cambridge and ekskul resolve PER UNIT, so
+                    // the global flag above overstates them. The manual-bill
+                    // form checks the chosen student's unit against this
+                    // list instead of warning on the type alone.
+                    'units_without_va_prefix' => SchoolUnit::query()->orderBy('id')->get()
+                        ->filter(fn (SchoolUnit $unit) => BillingApiClient::resolvePrefix($type->code, $unit) === null)
+                        ->pluck('code')
+                        ->values()
+                        ->all(),
                 ]),
         ]);
     }
@@ -167,6 +177,20 @@ class FeeSettingController extends Controller
             // Cambridge) could never pay the resulting bills - refuse early
             // instead of letting a dead rate onto the catalogue.
             abort_if(BillingApiClient::resolvePrefix(self::UNIT_MANAGED_FEE_CODE, $unit) === null, 403, "Unit {$unit->label} tidak mengikuti program Cambridge.");
+        }
+
+        // The same dead-rate guard for every other role and fee (audit T61):
+        // a type that IS VA-capable somewhere (cambridge, ekskul - prefixes
+        // exist per unit) must not gain a rate for a unit with no prefix,
+        // because billing runs would then issue bills no payment lane can
+        // ever settle (VA-only since T33). Wholly prefix-less types (seragam,
+        // buku - no prefix at ANY unit) stay catalogable exactly as before:
+        // that limitation is uniform, documented, and waiting on e-SPP.
+        if (BillingApiClient::resolvePrefix($type->code) !== null
+            && BillingApiClient::resolvePrefix($type->code, $unit) === null) {
+            return response()->json([
+                'message' => "Jenis biaya '{$type->name}' tidak punya nomor Virtual Account untuk unit {$unit->label} - tagihan dari tarif ini tidak akan bisa dibayar lewat sistem.",
+            ], 422);
         }
 
         // The unique index would catch this anyway, but a 422 naming the clash

@@ -218,6 +218,13 @@
             <div style="margin-top: 6px; padding: 8px 10px; background-color: #FFFFFF; border: 1.5px solid #166534; border-radius: 4px;">
                 <span style="font-size: 13pt; font-weight: bold; letter-spacing: 0.06em; color: #14532D;">{{ $vaNumber }}</span>
             </div>
+            @if (($vaAmount ?? null) !== null && abs($vaAmount - (float) $bill->remaining_amount) > 0.009)
+                <div class="bank-item" style="margin-top: 6px; color: #991B1B;">
+                    <strong>Nominal yang terdaftar untuk nomor Virtual Account ini: {{ $money($vaAmount) }}</strong> —
+                    berbeda dengan Sisa Kewajiban di atas karena berasal dari pembayaran kustom sebelumnya.
+                    Transfer tepat sesuai nominal terdaftar, atau buat pembayaran baru di portal untuk nominal lain.
+                </div>
+            @endif
             <div class="bank-item" style="margin-top: 8px;">
                 Transfer dari bank/e-wallet mana pun ke nomor Virtual Account di atas. Nomor ini tetap sama untuk
                 pembayaran berikutnya jenis biaya yang sama.

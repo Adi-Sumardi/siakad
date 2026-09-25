@@ -121,7 +121,7 @@ class PaymentReceiptSender
                 $payment->referenceNumber(),
             ],
             notificationLogUlid: $log->ulid,
-        );
+        )->delay(now()->addSeconds(random_int(0, 300)));
     }
 
     /**

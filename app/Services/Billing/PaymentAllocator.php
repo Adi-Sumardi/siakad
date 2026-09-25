@@ -95,6 +95,30 @@ class PaymentAllocator
 
         $this->recomputeFor($payment->allocations()->pluck('bill_id')->all());
 
+        // The sibling-VA choke point (audit 25-9, sharpens T39): settling
+        // one live VA must kill every OTHER still-live payment sharing these
+        // bills, whatever lane created them and whatever settles first. The
+        // reminder flow deliberately runs two banks at once
+        // (BillingApiGateway::ensureReminderVaPair), and it reuses an
+        // already-live checkout VA as one half of its pair - so the settled
+        // payment often carries no 'spp_reminder' marker at all, which is
+        // why this guard may not key off metadata.source (the old poller-
+        // only, source-matched guard let exactly that case through: family
+        // pays the checkout Muamalat VA, webhook settles it, nothing kills
+        // the BSI half, family pays that too - two completed payments, one
+        // bill, the overpayment swallowed by max(0, ...) in recompute()).
+        // Webhook and poller both land here, so one implementation covers
+        // every settle lane. Best-effort on purpose: the money is already
+        // booked, and a sibling cleanup hiccup must never fail the settle
+        // itself.
+        try {
+            $this->supersedeSiblingVaPayments($payment);
+        } catch (Throwable $e) {
+            Log::warning('[PaymentAllocator] Sibling VA supersede after settle failed: '.$e->getMessage(), [
+                'payment' => $payment->payment_number,
+            ]);
+        }
+
         // Best-effort by design, and each channel on its own: money that
         // already arrived is never rolled back because a gateway hiccuped,
         // and the email receipt failing never silences the WhatsApp one (or
@@ -132,6 +156,53 @@ class PaymentAllocator
         ])->save();
 
         $this->recomputeFor($payment->allocations()->pluck('bill_id')->all());
+    }
+
+    /**
+     * Fails (and best-effort expires at the bank) every OTHER still-pending
+     * or still-processing payment allocated to the bills this settle touched
+     * - see settle()'s own comment for why this is the choke point and why
+     * it must not filter on metadata.source. Resolved from the container
+     * rather than constructor injection: PaymentAllocator is constructed
+     * inside BillingApiGateway's own dependency graph, so taking the
+     * gateway by injection here would be circular.
+     */
+    private function supersedeSiblingVaPayments(Payment $settled): void
+    {
+        $billIds = $settled->allocations()->pluck('bill_id')->all();
+
+        if ($billIds === []) {
+            return;
+        }
+
+        $siblingIds = PaymentAllocation::whereIn('bill_id', $billIds)
+            ->pluck('payment_id')
+            ->unique()
+            ->reject(fn ($id) => $id === $settled->id);
+
+        if ($siblingIds->isEmpty()) {
+            return;
+        }
+
+        Payment::whereIn('id', $siblingIds)
+            ->whereIn('status', ['pending', 'processing'])
+            ->where(function ($q) {
+                $q->whereIn('gateway_response->provider', ['bank_muamalat', 'bank_bsi'])
+                    ->orWhereNotNull('gateway_response->va_number');
+            })
+            ->get()
+            ->each(function (Payment $sibling) {
+                $this->fail($sibling, 'failed', 'Digantikan - tagihan yang sama sudah lunas lewat VA bank lain.');
+
+                // Same best-effort shrink at e-SPP as every other supersede
+                // lane: unreachable banks must not block the local fail,
+                // which is what actually stops double-issuing here.
+                $provider = $sibling->gateway_response['provider'] ?? null;
+
+                if (in_array($provider, ['bank_muamalat', 'bank_bsi'], true)) {
+                    app(\App\Services\Payment\BillingApiGateway::class)->expireVa($sibling);
+                }
+            });
     }
 
     /** @param  list<int>  $billIds */
