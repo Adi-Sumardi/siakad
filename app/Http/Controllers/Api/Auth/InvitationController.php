@@ -146,10 +146,19 @@ class InvitationController extends Controller
                 // (UserController::store): parents carry theirs on Guardian,
                 // staff on StaffProfile - and the revoked channel's mirror is
                 // cleared too, so reminders stop reaching the dead contact.
+                // The cleared channel's HASH is nulled explicitly (audit
+                // T60-a): setAttribute() skips hash-sync on null, so a stale
+                // blind index kept matching the next PMB handoff's lookup -
+                // which then wrote the dead contact straight back onto the
+                // guardian, un-revoking it for every reminder lane.
                 if ($user->role === 'orangtua' && $user->guardian) {
+                    $kept = $invitation->channel === 'email' ? 'email' : 'no_hp';
+                    $cleared = $invitation->channel === 'email' ? 'no_hp' : 'email';
+
                     $user->guardian->forceFill([
-                        ($invitation->channel === 'email' ? 'email' : 'no_hp') => $invitation->sent_to,
-                        ($invitation->channel === 'email' ? 'no_hp' : 'email') => null,
+                        $kept => $invitation->sent_to,
+                        $cleared => null,
+                        $cleared.'_hash' => null,
                     ])->save();
                 }
             }

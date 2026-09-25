@@ -13,6 +13,7 @@ use App\Services\Auth\OtpThrottled;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
@@ -63,6 +64,27 @@ class OtpController extends Controller
         ]);
 
         if (! $user || ! $user->is_active) {
+            // Mirror the known-account resend cooldown (audit T66-a): a
+            // double-tap under 60s used to return 429 for a real account
+            // and a flat 200 for an unknown one - a differential that
+            // answers "does this family attend the school" without ever
+            // needing the code. Same shape, same message, same status.
+            $cooldownKey = 'otp:unknown-cooldown:'.$identifier;
+            $lastRequestAt = Cache::get($cooldownKey);
+
+            if ($lastRequestAt) {
+                $wait = (int) max(0, LoginOtp::RESEND_COOLDOWN_SECONDS - now()->diffInSeconds($lastRequestAt));
+
+                if ($wait > 0) {
+                    return response()->json([
+                        'message' => "Tunggu {$wait} detik sebelum meminta kode lagi.",
+                        'retry_after_seconds' => $wait,
+                    ], 429);
+                }
+            }
+
+            Cache::put($cooldownKey, now(), LoginOtp::RESEND_COOLDOWN_SECONDS);
+
             // Deliberately silent to the caller, loud in the log: a burst of
             // these is what an enumeration attempt looks like.
             Log::info('[OTP] Requested for unknown or inactive account', [

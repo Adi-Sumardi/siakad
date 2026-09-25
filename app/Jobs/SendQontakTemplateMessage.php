@@ -63,7 +63,8 @@ class SendQontakTemplateMessage implements ShouldQueue
 
     public function handle(QontakWhatsAppGateway $gateway): void
     {
-        if ($this->alreadyDelivered()) {
+        // Atomic claim (audit T64-b) - see SendWhatsAppMessage::handle().
+        if (! NotificationLog::claimDelivery($this->notificationLogUlid)) {
             return;
         }
 
@@ -72,8 +73,14 @@ class SendQontakTemplateMessage implements ShouldQueue
         if ($this->notificationLogUlid) {
             NotificationLog::where('ulid', $this->notificationLogUlid)->update([
                 'status' => $result->success ? 'sent' : 'failed',
-                'error' => $result->success ? null : $result->message,
+                'error' => $result->success
+                    ? ((($result->raw['mode'] ?? null) === 'log-only')
+                        ? 'Mode log-only: kredensial gateway kosong - pesan TIDAK benar-benar terkirim.'
+                        : null)
+                    : $result->message,
                 'sent_at' => $result->success ? now() : null,
+                // The outcome releases the delivery claim (audit T64-b).
+                'claimed_at' => null,
                 // See SendWhatsAppMessage::handle(): retries only (audit T44).
                 ...(($this->attempts ?? 1) > 1 ? ['attempts' => NotificationLog::rawAttemptIncrement()] : []),
             ]);
@@ -98,19 +105,8 @@ class SendQontakTemplateMessage implements ShouldQueue
                 'status' => 'failed',
                 'error' => $e?->getMessage() ?? 'Pengiriman gagal setelah seluruh percobaan.',
                 'sent_at' => null,
+                'claimed_at' => null,
             ]);
         }
-    }
-
-    /**
-     * A previous attempt of this job - or the retry sweep, or a manual
-     * resend - may have delivered this very row while this attempt waited
-     * in backoff (audit T44). A row already 'sent' must never be sent again
-     * by a stale attempt; whoever lands 'sent' first wins.
-     */
-    private function alreadyDelivered(): bool
-    {
-        return $this->notificationLogUlid !== null
-            && NotificationLog::where('ulid', $this->notificationLogUlid)->value('status') === 'sent';
     }
 }

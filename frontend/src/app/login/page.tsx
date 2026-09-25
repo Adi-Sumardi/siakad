@@ -21,6 +21,17 @@ import { homePathFor, useAuth, type OtpChallenge } from "@/lib/auth/auth-context
  * so there is no second form to fall back to and no "forgot password" to
  * support. Two steps: who you are, then the code.
  */
+/**
+ * Only same-app paths survive the ?redirect= parameter (audit T66-b):
+ * /login?redirect=https://evil.example (or //evil.example) navigated the
+ * fresh session straight off-site. A relative path starting with exactly
+ * one slash is a real route here; anything else falls back to the role
+ * home.
+ */
+function safeRedirect(raw: string | null, fallback: string): string {
+  return raw && /^\/(?!\/)/.test(raw) ? raw : fallback;
+}
+
 function LoginForm() {
   const { user, loading, requestOtp, verifyOtp } = useAuth();
   const router = useRouter();
@@ -38,7 +49,7 @@ function LoginForm() {
   // form again.
   useEffect(() => {
     if (loading || !user) return;
-    router.replace(params.get("redirect") ?? homePathFor(user.role));
+    router.replace(safeRedirect(params.get("redirect"), homePathFor(user.role)));
   }, [loading, user, router, params]);
 
   useEffect(() => {
@@ -79,7 +90,7 @@ function LoginForm() {
     try {
       const user = await verifyOtp(identifier.trim(), value);
       toast.success(`Selamat datang, ${user.name}`);
-      router.replace(params.get("redirect") ?? homePathFor(user.role));
+      router.replace(safeRedirect(params.get("redirect"), homePathFor(user.role)));
     } catch (err) {
       setError(readError(err, "code"));
       setCode("");

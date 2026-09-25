@@ -41,6 +41,13 @@ class WatchlistService
      */
     public function identify(Collection $students, Collection $enrollments, Collection $grades, Collection $points, ?Term $term, ?Term $prevTerm): Collection
     {
+        // Population = ACTIVE students only (audit T63-b): a graduated or
+        // transferred student still carries this term's grade/point rows,
+        // and without this filter they kept appearing on the "Perlu
+        // Perhatian" tile and drill-down while the active-student KPI
+        // excluded them - the dashboard arguing with itself.
+        $students = $students->where('status', 'active');
+
         $current = $this->perStudentAverages($grades, $term?->id);
         $previous = $this->perStudentAverages($grades, $prevTerm?->id);
         $enrollmentByStudent = $enrollments->groupBy('student_id');

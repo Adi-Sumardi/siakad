@@ -64,11 +64,10 @@ class SendWhatsAppMessage implements ShouldQueue
 
     public function handle(WhatsAppGateway $gateway): void
     {
-        // A previous attempt - or the retry sweep racing this job's backoff -
-        // may already have delivered this row (audit T44); a stale attempt
-        // must not send it twice.
-        if ($this->notificationLogUlid
-            && NotificationLog::where('ulid', $this->notificationLogUlid)->value('status') === 'sent') {
+        // Atomic claim (audit T64-b): the read-then-send guard let a sweep
+        // re-queue racing this job's backoff both pass as 'not sent yet'
+        // and physically deliver twice.
+        if (! NotificationLog::claimDelivery($this->notificationLogUlid)) {
             return;
         }
 
@@ -77,8 +76,10 @@ class SendWhatsAppMessage implements ShouldQueue
         if ($this->notificationLogUlid) {
             NotificationLog::where('ulid', $this->notificationLogUlid)->update([
                 'status' => $result->success ? 'sent' : 'failed',
-                'error' => $result->message,
+                'error' => self::successError($result),
                 'sent_at' => $result->success ? now() : null,
+                // The outcome releases the delivery claim (audit T64-b).
+                'claimed_at' => null,
                 // The row's attempts already counts the send that created
                 // it (column default 1) - only the job's own retries add to
                 // it (audit T44).
@@ -109,7 +110,24 @@ class SendWhatsAppMessage implements ShouldQueue
                 'status' => 'failed',
                 'error' => $e?->getMessage() ?? 'Pengiriman gagal setelah seluruh percobaan.',
                 'sent_at' => null,
+                'claimed_at' => null,
             ]);
         }
+    }
+
+    /**
+     * A successful result still carries a warning when the gateway ran in
+     * its log-only mode (blank credentials - audit T64-a): the row reads
+     * 'sent' either way, but the error column must say the message never
+     * physically left the building, or a misconfigured production box
+     * looks fully green for weeks.
+     */
+    private static function successError(\App\Services\Notification\NotificationResult $result): ?string
+    {
+        if (($result->raw['mode'] ?? null) === 'log-only') {
+            return 'Mode log-only: kredensial gateway kosong - pesan TIDAK benar-benar terkirim.';
+        }
+
+        return null;
     }
 }

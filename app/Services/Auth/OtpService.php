@@ -100,7 +100,14 @@ class OtpService
         }
 
         if (! hash_equals($otp->code_hash, LoginOtp::hashCode($code))) {
-            $otp->increment('attempts');
+            // The cap folded into the increment itself (audit T66-c): the
+            // old read-then-increment let N parallel guesses all see
+            // attempts=0 and each earn a try; the conditional update is
+            // the only judge now, so MAX_ATTEMPTS holds under concurrency.
+            LoginOtp::query()
+                ->whereKey($otp->id)
+                ->where('attempts', '<', LoginOtp::MAX_ATTEMPTS)
+                ->increment('attempts');
 
             return null;
         }

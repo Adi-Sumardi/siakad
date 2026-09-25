@@ -15,6 +15,20 @@ class Student extends Model
 {
     use HasEncryptedAttributes, HasFactory, HasUlidKey, SoftDeletes;
 
+    protected static function booted(): void
+    {
+        // One timestamp for every status transition, whichever lane wrote
+        // it - promotion, admin edit, PMB handoff, CSV import (audit
+        // T63-c): the column used to be filled by the PMB processor alone,
+        // so "when did this student graduate/leave" was blank for every
+        // other writer. Explicit status_changed_at writes pass through.
+        static::updating(function (self $student) {
+            if ($student->isDirty('status') && ! $student->isDirty('status_changed_at')) {
+                $student->status_changed_at = now();
+            }
+        });
+    }
+
     protected $fillable = [
         'pmb_student_ulid',
         'no_pendaftaran',

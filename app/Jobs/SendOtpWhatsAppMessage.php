@@ -55,10 +55,8 @@ class SendOtpWhatsAppMessage implements ShouldQueue
 
     public function handle(QontakWhatsAppGateway $gateway): void
     {
-        // See SendWhatsAppMessage::handle() (audit T44): never re-send a row
-        // another lane already delivered.
-        if ($this->notificationLogUlid
-            && NotificationLog::where('ulid', $this->notificationLogUlid)->value('status') === 'sent') {
+        // Atomic claim (audit T64-b) - see SendWhatsAppMessage::handle().
+        if (! NotificationLog::claimDelivery($this->notificationLogUlid)) {
             return;
         }
 
@@ -67,8 +65,14 @@ class SendOtpWhatsAppMessage implements ShouldQueue
         if ($this->notificationLogUlid) {
             NotificationLog::where('ulid', $this->notificationLogUlid)->update([
                 'status' => $result->success ? 'sent' : 'failed',
-                'error' => $result->message,
+                'error' => $result->success
+                    ? ((($result->raw['mode'] ?? null) === 'log-only')
+                        ? 'Mode log-only: kredensial gateway kosong - pesan TIDAK benar-benar terkirim.'
+                        : null)
+                    : $result->message,
                 'sent_at' => $result->success ? now() : null,
+                // The outcome releases the delivery claim (audit T64-b).
+                'claimed_at' => null,
                 // See SendWhatsAppMessage::handle(): retries only - the row's
                 // default-1 already counts the creating send (audit T44).
                 ...(($this->attempts ?? 1) > 1 ? ['attempts' => NotificationLog::rawAttemptIncrement()] : []),
@@ -93,6 +97,7 @@ class SendOtpWhatsAppMessage implements ShouldQueue
                 'status' => 'failed',
                 'error' => $e?->getMessage() ?? 'Pengiriman OTP gagal setelah seluruh percobaan.',
                 'sent_at' => null,
+                'claimed_at' => null,
             ]);
         }
     }

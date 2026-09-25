@@ -8,7 +8,13 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
 
-type ClassroomOption = { ulid: string; name: string; tingkat: number; school_unit: { code: string; label: string } };
+type ClassroomOption = {
+  ulid: string;
+  name: string;
+  tingkat: number;
+  school_unit: { code: string; label: string };
+  academic_year?: string | null;
+};
 type AcademicYearOption = { ulid: string; year: string; is_active: boolean };
 type RosterStudent = { ulid: string; nama_lengkap: string; nis: string | null };
 type Outcome = "promoted" | "repeated" | "graduated" | "left";
@@ -36,8 +42,20 @@ export default function KenaikanKelasPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    api.get<{ classrooms: ClassroomOption[] }>("/api/admin/classrooms").then((d) => setClassrooms(d.classrooms));
-    api.get<{ academic_years: AcademicYearOption[] }>("/api/admin/academic-years").then((d) => setYears(d.academic_years));
+    // Source picker stays inside the ACTIVE academic year (audit T63-a):
+    // unfiltered, the picker showed every year's classrooms with identical
+    // labels, and picking an old-year source sailed right past the
+    // target-year guard (only target <= source is refused - the reverse
+    // re-closed a closed year and re-issued the current one).
+    api
+      .get<{ academic_years: AcademicYearOption[] }>("/api/admin/academic-years")
+      .then((d) => {
+        setYears(d.academic_years);
+        const active = d.academic_years.find((y) => y.is_active);
+        const query = active ? `?academic_year_ulid=${active.ulid}` : "";
+        return api.get<{ classrooms: ClassroomOption[] }>(`/api/admin/classrooms${query}`);
+      })
+      .then((d) => setClassrooms(d.classrooms));
   }, []);
 
   // No sync reset-to-null inside the effects: "empty" is derived during
@@ -148,7 +166,10 @@ export default function KenaikanKelasPage() {
             >
               <option value="">Pilih kelas</option>
               {classrooms.map((c) => (
-                <option key={c.ulid} value={c.ulid}>{c.school_unit.label} · {c.name} (tingkat {c.tingkat})</option>
+                <option key={c.ulid} value={c.ulid}>
+                  {c.school_unit.label} · {c.name} (tingkat {c.tingkat}
+                  {c.academic_year ? ` · TA ${c.academic_year}` : ""})
+                </option>
               ))}
             </select>
           )}

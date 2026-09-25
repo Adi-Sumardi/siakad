@@ -420,4 +420,361 @@ class AuditSep25FixesTest extends TestCase
         $pdf = app(BillPdfService::class)->render($bill->fresh());
         $this->assertStringContainsString('%PDF', $pdf->output());
     }
+
+    // --------------------------------------------------------------- T60
+
+    public function test_resetting_via_email_clears_the_guardian_phone_blind_index(): void
+    {
+        $user = User::create([
+            'name' => 'Wali Reset Email',
+            'email' => 'lama@yapinet.id',
+            'phone' => '081200000099',
+            'role' => 'orangtua',
+            'is_active' => true,
+        ]);
+
+        $guardian = Guardian::create([
+            'user_id' => $user->id,
+            'nama' => $user->name,
+            'hubungan' => 'wali',
+            'no_hp' => '081200000099',
+            'email' => 'lama@yapinet.id',
+        ]);
+
+        // Sanity: the blind index resolves before the reset.
+        $this->assertNotNull(Guardian::findByEncrypted('no_hp', '081200000099'));
+
+        $token = \App\Models\AccountInvitation::generateToken();
+
+        \App\Models\AccountInvitation::create([
+            'user_id' => $user->id,
+            'token_hash' => \App\Models\AccountInvitation::hashToken($token),
+            'channel' => 'email',
+            'sent_to' => 'baru@yapinet.id',
+            'purpose' => 'reset',
+            'expires_at' => now()->addDays(7),
+        ]);
+
+        $this->postJson("/api/invitations/{$token}/activate")->assertOk();
+
+        $this->assertSame('baru@yapinet.id', $user->fresh()->email);
+        $this->assertNull($user->fresh()->phone);
+
+        // The mirror followed the reset - and the dead phone's blind index
+        // is GONE. The stale hash used to match the next PMB handoff's
+        // lookup, which then wrote the revoked number straight back onto
+        // the guardian (audit T60-a).
+        $guardian = $guardian->fresh();
+        $this->assertSame('baru@yapinet.id', $guardian->email);
+        $this->assertNull($guardian->no_hp);
+        $this->assertNull(\DB::table('guardians')->where('id', $guardian->id)->value('no_hp_hash'));
+        $this->assertNull(Guardian::findByEncrypted('no_hp', '081200000099'));
+    }
+
+    public function test_editing_a_parent_phone_mirrors_to_the_guardian(): void
+    {
+        $user = User::create([
+            'name' => 'Wali Ganti HP',
+            'email' => 'ganti@yapinet.id',
+            'phone' => '081200000099',
+            'role' => 'orangtua',
+            'is_active' => true,
+        ]);
+
+        $guardian = Guardian::create([
+            'user_id' => $user->id,
+            'nama' => $user->name,
+            'hubungan' => 'wali',
+            'no_hp' => '081200000099',
+        ]);
+
+        $this->actingAs($this->admin)
+            ->patchJson("/api/admin/users/{$user->ulid}", ['phone' => '081299900022'])
+            ->assertOk();
+
+        // OTP login reads users.phone, but reminders/VA notices/receipts all
+        // read guardians.no_hp - both homes must carry the new number
+        // (audit T60-b).
+        $this->assertSame('081299900022', $user->fresh()->phone);
+        $this->assertSame('081299900022', $guardian->fresh()->no_hp);
+    }
+
+    // --------------------------------------------------------------- T63
+
+    public function test_the_watchlist_only_considers_active_students(): void
+    {
+        $active = Student::create([
+            'nama_lengkap' => 'Siswa Aktif', 'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'status' => 'active',
+        ]);
+
+        $graduated = Student::create([
+            'nama_lengkap' => 'Alumni Semester Ini', 'jenis_kelamin' => 'P',
+            'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'status' => 'graduated',
+        ]);
+
+        // Both carry a point violation from this term - only the active
+        // student belongs on the "Perlu Perhatian" population.
+        $points = collect([
+            (object) ['student_id' => $active->id, 'points' => -10],
+            (object) ['student_id' => $graduated->id, 'points' => -10],
+        ]);
+
+        $flagged = app(\App\Services\Academic\WatchlistService::class)
+            ->identify(collect([$active, $graduated]), collect(), collect(), $points, null, null);
+
+        $this->assertTrue($flagged->has($active->id));
+        $this->assertFalse($flagged->has($graduated->id), 'alumni tidak boleh masuk populasi perlu-perhatian');
+    }
+
+    public function test_a_status_change_records_when_it_happened(): void
+    {
+        $student = Student::create([
+            'nama_lengkap' => 'Siswa Keluar', 'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'status' => 'active',
+        ]);
+
+        $this->assertNull($student->status_changed_at);
+
+        // Whichever lane writes the transition (promotion, admin edit, PMB,
+        // CSV import), the model itself stamps it (audit T63-c).
+        $student->forceFill(['status' => 'transferred'])->save();
+
+        $this->assertNotNull($student->fresh()->status_changed_at);
+    }
+
+    public function test_the_admin_lane_cannot_assign_an_inactive_or_off_year_ekskul(): void
+    {
+        $student = Student::create([
+            'nama_lengkap' => 'Siswa Ekskul', 'jenis_kelamin' => 'L',
+            'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'status' => 'active',
+        ]);
+
+        $inactive = \App\Models\Extracurricular::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $this->year->id,
+            'name' => 'Futsal', 'is_active' => false,
+        ]);
+
+        // The schema itself seeds the two upcoming academic years
+        // (2026_08_20_000031) - reuse one instead of colliding with it.
+        $otherYear = AcademicYear::where('year', '2027/2028')->firstOrFail();
+        $offYear = \App\Models\Extracurricular::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $otherYear->id,
+            'name' => 'Robotik', 'is_active' => true,
+        ]);
+
+        $graduated = Student::create([
+            'nama_lengkap' => 'Alumni Ekskul', 'jenis_kelamin' => 'P',
+            'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'status' => 'graduated',
+        ]);
+
+        $healthy = \App\Models\Extracurricular::create([
+            'school_unit_id' => $this->sdUnit->id, 'academic_year_id' => $this->year->id,
+            'name' => 'Dokter Kecil', 'is_active' => true,
+        ]);
+
+        $service = app(\App\Services\Academic\ExtracurricularService::class);
+
+        try {
+            $service->assignStudent($inactive, $student, $this->admin);
+            $this->fail('ekskul nonaktif harus ditolak');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('tidak aktif', $e->getMessage());
+        }
+
+        try {
+            $service->assignStudent($offYear, $student, $this->admin);
+            $this->fail('ekskul tahun lain harus ditolak');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('tahun ajaran', $e->getMessage());
+        }
+
+        try {
+            $service->assignStudent($healthy, $graduated, $this->admin);
+            $this->fail('siswa non-aktif harus ditolak');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('bukan siswa aktif', $e->getMessage());
+        }
+
+        $this->assertDatabaseCount('extracurricular_members', 0);
+    }
+
+    // --------------------------------------------------------------- T64
+
+    public function test_only_one_job_can_claim_a_delivery(): void
+    {
+        $row = NotificationLog::create([
+            'channel' => 'whatsapp',
+            'template' => 'bill_reminder',
+            'recipient' => '081200000700',
+            'payload' => [],
+            'status' => 'queued',
+        ]);
+
+        // The sweep's re-queue racing the original job's backoff: the first
+        // conditional UPDATE wins, the second is refused without a send
+        // (audit T64-b) - the read-then-send guard let both through.
+        $this->assertTrue(NotificationLog::claimDelivery($row->ulid));
+        $this->assertFalse(NotificationLog::claimDelivery($row->ulid));
+        $this->assertNotNull($row->fresh()->claimed_at);
+
+        // Writing the outcome releases the claim, so the job's own retry
+        // (or the sweep's) re-claims cleanly; a sent row never claims
+        // again, and callers without a row send as before.
+        $row->fresh()->forceFill(['status' => 'failed', 'claimed_at' => null])->save();
+        $this->assertTrue(NotificationLog::claimDelivery($row->ulid));
+        $row->fresh()->forceFill(['status' => 'sent', 'claimed_at' => null])->save();
+        $this->assertFalse(NotificationLog::claimDelivery($row->ulid));
+
+        // A stale claim (worker died hard mid-send) expires on its own.
+        $row->fresh()->forceFill(['status' => 'queued', 'claimed_at' => now()->subMinutes(31)])->save();
+        $this->assertTrue(NotificationLog::claimDelivery($row->ulid));
+        $this->assertTrue(NotificationLog::claimDelivery(null));
+    }
+
+    public function test_the_sweep_picks_up_a_row_whose_claim_went_stale(): void
+    {
+        $stuck = NotificationLog::create([
+            'channel' => 'email',
+            'template' => 'bill_reminder',
+            'recipient' => 'x@example.com',
+            'payload' => ['kind' => 'h7'],
+            'status' => 'queued',
+            'notifiable_type' => Bill::class,
+            'notifiable_id' => 999999,
+        ]);
+        $stuck->forceFill(['claimed_at' => now()->subMinutes(31)])->saveQuietly();
+
+        $live = NotificationLog::create([
+            'channel' => 'email',
+            'template' => 'bill_reminder',
+            'recipient' => 'y@example.com',
+            'payload' => ['kind' => 'h7'],
+            'status' => 'queued',
+            'claimed_at' => now(),
+            'notifiable_type' => Bill::class,
+            'notifiable_id' => 999999,
+        ]);
+
+        $due = app(NotificationRetryService::class)->due();
+
+        // A worker that died hard leaves a fresh claim behind with no
+        // outcome - once stale, the row re-enters the retry lane; a freshly
+        // claimed row is still somebody's in-flight delivery and an
+        // untouched queued row belongs to its original job.
+        $this->assertTrue($due->contains('ulid', $stuck->ulid));
+        $this->assertFalse($due->contains('ulid', $live->ulid));
+    }
+
+    public function test_a_log_only_send_is_flagged_on_the_row(): void
+    {
+        config([
+            'services.qontak.spp_reminder_template_id' => 'tpl-reminder-spp',
+            'services.qontak.base_url' => null,
+            'services.qontak.channel_integration_id' => null,
+            'services.qontak.client_id' => null,
+            'services.qontak.client_secret' => null,
+        ]);
+
+        $row = NotificationLog::create([
+            'channel' => 'whatsapp',
+            'template' => 'reminder_spp',
+            'recipient' => '081200000700',
+            'payload' => [],
+            'status' => 'queued',
+        ]);
+
+        (new \App\Jobs\SendQontakTemplateMessage(
+            phone: '081200000700',
+            toName: 'Ibu Naila',
+            templateId: 'tpl-reminder-spp',
+            bodyValues: ['Naila', 'September 2026', '700.000', '8020012627999', '012627999'],
+            notificationLogUlid: $row->ulid,
+        ))->handle(app(\App\Services\Notification\QontakWhatsAppGateway::class));
+
+        // Status stays 'sent' (behaviour unchanged), but the error column
+        // says the message never physically left the building - a
+        // misconfigured production box no longer looks fully green
+        // (audit T64-a).
+        $fresh = $row->fresh();
+        $this->assertSame('sent', $fresh->status);
+        $this->assertStringContainsString('log-only', (string) $fresh->error);
+    }
+
+    public function test_a_double_settle_sends_the_whatsapp_receipt_once(): void
+    {
+        config(['services.qontak.spp_receipt_template_id' => 'tpl-receipt']);
+        Queue::fake();
+
+        $bill = $this->billedStudent();
+
+        $payment = Payment::create([
+            'payment_number' => 'PAY-SEP25-R',
+            'payer_guardian_id' => $bill->student->guardians->first()->id,
+            'amount' => 700000,
+            'method' => 'virtual_account',
+            'status' => 'completed',
+            'paid_at' => now(),
+            'gateway_response' => ['provider' => 'bank_muamalat', 'va_number' => '80200126270000RR', 'bank_name' => 'Bank Muamalat'],
+        ]);
+        app(PaymentAllocator::class)->allocate($payment, [$bill->id => 700000]);
+
+        $sender = app(\App\Services\Billing\PaymentReceiptSender::class);
+
+        // The webhook and a stale poller snapshot can both land here for one
+        // payment (audit T64-c) - only one receipt row may exist.
+        $sender->send($payment);
+        $sender->send($payment);
+
+        $this->assertSame(
+            1,
+            NotificationLog::where('template', 'receipt_spp_school')->count(),
+            'kuitansi WhatsApp harus idempoten per pembayaran'
+        );
+    }
+
+    // --------------------------------------------------------------- T66
+
+    public function test_an_unknown_identifier_double_tap_throttles_like_a_known_one(): void
+    {
+        // First tap: the generic 200, same as always for an unknown account.
+        $this->postJson('/api/auth/otp/request', ['identifier' => 'tidak.ada@yapinet.id'])
+            ->assertOk()
+            ->assertJsonStructure(['channel', 'identifier', 'expires_in_minutes', 'resend_after_seconds']);
+
+        // Second tap inside the cooldown: 429 with the SAME message shape a
+        // real account gets. The old flat-200-here vs 429-for-real accounts
+        // differential answered "does this family attend the school"
+        // without ever needing the code (audit T66-a).
+        $this->postJson('/api/auth/otp/request', ['identifier' => 'tidak.ada@yapinet.id'])
+            ->assertStatus(429)
+            ->assertJsonStructure(['message', 'retry_after_seconds']);
+    }
+
+    public function test_wrong_guesses_can_never_push_attempts_past_the_cap(): void
+    {
+        $user = User::create([
+            'name' => 'Wali Tebak Kode',
+            'email' => 'tebak@yapinet.id',
+            'role' => 'orangtua',
+            'is_active' => true,
+        ]);
+
+        app(\App\Services\Auth\OtpService::class)->issue($user, 'tebak@yapinet.id');
+
+        $otp = \App\Models\LoginOtp::latest('id')->first();
+
+        // Ten wrong guesses, sequentially: the column must land exactly on
+        // the cap and never overshoot - the increment is conditional now,
+        // so even guesses that all read the same pre-increment value (the
+        // parallel case) cannot each earn a try (audit T66-c).
+        $service = app(\App\Services\Auth\OtpService::class);
+
+        for ($i = 0; $i < 10; $i++) {
+            $this->assertNull($service->verify('tebak@yapinet.id', '999999'));
+        }
+
+        $this->assertSame(5, $otp->fresh()->attempts);
+        $this->assertFalse($otp->fresh()->isUsable());
+    }
 }

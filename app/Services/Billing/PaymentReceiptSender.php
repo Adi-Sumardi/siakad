@@ -80,6 +80,26 @@ class PaymentReceiptSender
             return;
         }
 
+        // One WhatsApp receipt per (payment, student) (audit T64-c):
+        // settle() is not atomic against the poller's stale in-memory model
+        // (it loads its list, then loops one HTTP call per VA - a webhook
+        // settling the payment mid-loop re-enters here with a 'processing'
+        // snapshot), and unlike the email lane this sender had no dedup, so
+        // the family got two receipts and monitoring got two rows. The
+        // notifiable bill scopes the payment_ulid to one student, so
+        // siblings settled by the same payment still each get theirs.
+        $alreadyDelivered = NotificationLog::query()
+            ->where('channel', 'whatsapp')
+            ->where('template', 'receipt_spp_school')
+            ->where('status', '!=', 'failed')
+            ->where('payload->payment_ulid', $payment->ulid)
+            ->where('notifiable_id', $bill->id)
+            ->exists();
+
+        if ($alreadyDelivered) {
+            return;
+        }
+
         // The gateway owns the 62-prefix conversion now (audit T42-b).
         $bankName = $payment->gateway_response['bank_name'] ?? null;
         $method = $bankName ? "VA {$bankName}" : ucfirst(str_replace('_', ' ', (string) $payment->method));
@@ -101,6 +121,8 @@ class PaymentReceiptSender
                 'method' => $method,
                 'reference' => $payment->referenceNumber(),
                 'bill_ids' => $bills->pluck('id')->all(),
+                // The dedup key for the WhatsApp lane (audit T64-c).
+                'payment_ulid' => $payment->ulid,
             ],
             'status' => 'queued',
             'notifiable_type' => Bill::class,

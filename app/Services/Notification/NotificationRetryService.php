@@ -56,7 +56,18 @@ class NotificationRetryService
     public function due(): Collection
     {
         return NotificationLog::query()
-            ->where('status', 'failed')
+            // Grouped as one disjunction BEFORE the caps below: a bare
+            // orWhere() would let a plain 'failed' row bypass the attempt
+            // cap and the 24h window entirely (AND binds tighter than OR).
+            ->where(fn ($q) => $q
+                ->where('status', 'failed')
+                // A 'queued' row whose delivery claim has gone stale means
+                // its worker died hard mid-send (no outcome, no failed()
+                // handler) - once the claim expires the row is retryable
+                // again (audit T64-b).
+                ->orWhere(fn ($q2) => $q2
+                    ->where('status', 'queued')
+                    ->where('claimed_at', '<', now()->subMinutes(30))))
             ->whereNotIn('template', array_keys(self::EXCLUDED_TEMPLATES))
             ->where('attempts', '<', self::MAX_ATTEMPTS)
             ->where('created_at', '>=', now()->subHours(self::WINDOW_HOURS))

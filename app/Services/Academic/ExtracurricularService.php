@@ -2,6 +2,7 @@
 
 namespace App\Services\Academic;
 
+use App\Models\AcademicYear;
 use App\Models\Extracurricular;
 use App\Models\ExtracurricularMember;
 use App\Models\Student;
@@ -28,6 +29,25 @@ class ExtracurricularService
     {
         return DB::transaction(function () use ($ekskul, $student, $actor) {
             $ekskul = Extracurricular::whereKey($ekskul->id)->lockForUpdate()->first();
+
+            // Same eligibility gates the wali self-enroll lane checks
+            // (audit T63-d), enforced here so the admin/pembina lane can
+            // never diverge from them: a dead roster row, another year's
+            // activity, or a graduated student all used to assign cleanly
+            // and then silently miss that year's billing sweep.
+            if (! $ekskul->is_active) {
+                throw new RuntimeException("{$ekskul->name} sedang tidak aktif.");
+            }
+
+            $activeYear = AcademicYear::where('is_active', true)->first();
+
+            if (! $activeYear || $ekskul->academic_year_id !== $activeYear->id) {
+                throw new RuntimeException("{$ekskul->name} bukan kegiatan tahun ajaran berjalan.");
+            }
+
+            if ($student->status !== 'active') {
+                throw new RuntimeException("{$student->nama_lengkap} bukan siswa aktif.");
+            }
 
             if ($ekskul->school_unit_id !== null && $ekskul->school_unit_id !== $student->school_unit_id) {
                 throw new RuntimeException("{$student->nama_lengkap} bukan siswa unit yang sama dengan {$ekskul->name}.");

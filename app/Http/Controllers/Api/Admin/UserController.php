@@ -245,6 +245,22 @@ class UserController extends Controller
             $user->guardian->forceFill(['email' => $user->email])->save();
         }
 
+        // ...and the guardian's PHONE mirror (audit T60-b), same rule: OTP
+        // login reads users.phone, but every billing lane (reminders, VA
+        // notices, receipts) reads guardians.no_hp - an edited phone that
+        // only reached the user row split one contact into two homes and
+        // kept nagging the old number. Clearing the phone also clears its
+        // blind index (setAttribute skips hash-sync on null).
+        if (array_key_exists('phone', $validated) && $user->role === 'orangtua' && $user->guardian) {
+            $mirror = ['no_hp' => $user->phone];
+
+            if (blank((string) $user->phone)) {
+                $mirror['no_hp_hash'] = null;
+            }
+
+            $user->guardian->forceFill($mirror)->save();
+        }
+
         ActivityLog::record($request->user(), 'user.updated', $user, $validated);
 
         return response()->json(['user' => $user->fresh('schoolUnit')]);
