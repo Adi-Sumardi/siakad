@@ -19,6 +19,13 @@ return new class extends Migration
         // Backfill, raw on purpose: the model now DECRYPTS on read, so the
         // still-plaintext rows cannot pass back through Eloquent - the same
         // constraint the guardians.email backfill documented.
+        //
+        // FIXED (2026-09-28): where('id', ...), not whereKey() - the query
+        // builder has no whereKey and its __call silently rewrites the
+        // unknown method into WHERE key = ?, which matched nothing: the
+        // original form of this migration no-op'd its own backfill. The
+        // 2026_09_28_000006 sweep completes what already-migrated databases
+        // are still missing.
         $encrypter = app(\App\Services\Security\FieldEncrypter::class);
 
         DB::table('notification_logs')
@@ -26,7 +33,7 @@ return new class extends Migration
             ->orderBy('id')
             ->each(function ($row) use ($encrypter) {
                 DB::table('notification_logs')
-                    ->whereKey($row->id)
+                    ->where('id', $row->id)
                     ->update(['recipient' => $encrypter->encrypt($row->recipient)]);
             });
     }

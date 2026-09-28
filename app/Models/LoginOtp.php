@@ -2,13 +2,15 @@
 
 namespace App\Models;
 
+use App\Concerns\HasEncryptedAttributes;
 use App\Concerns\HasUlidKey;
+use App\Services\Security\FieldEncrypter;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LoginOtp extends Model
 {
-    use HasUlidKey;
+    use HasEncryptedAttributes, HasUlidKey;
 
     /** Long enough to arrive and be typed, short enough that a stolen code goes stale. */
     public const TTL_MINUTES = 10;
@@ -19,9 +21,20 @@ class LoginOtp extends Model
     /** Minimum gap between sends, so "kirim ulang" cannot be used to spam someone. */
     public const RESEND_COOLDOWN_SECONDS = 60;
 
+    /**
+     * Encrypted at rest (T51-b): the email/phone a code went to is PII,
+     * and a leak of this table must not hand over the contact list. The
+     * blind index is what the verify() lookup keys on - the trait keeps
+     * it in step on every write.
+     */
+    protected $encrypted = ['identifier'];
+
+    protected $encryptedHashes = ['identifier' => 'identifier_hash'];
+
     protected $fillable = [
         'user_id',
         'identifier',
+        'identifier_hash',
         'channel',
         'code_hash',
         'expires_at',
@@ -45,6 +58,12 @@ class LoginOtp extends Model
     public static function hashCode(string $code): string
     {
         return hash_hmac('sha256', $code, (string) config('app.key'));
+    }
+
+    /** The blind index of a (normalised) identifier - what verify() looks rows up by. */
+    public static function blindIndexIdentifier(string $identifier): string
+    {
+        return app(FieldEncrypter::class)->blindIndex($identifier);
     }
 
     public function isUsable(): bool

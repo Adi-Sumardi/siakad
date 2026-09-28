@@ -90,7 +90,9 @@ class OtpService
      */
     public function verify(string $identifier, string $code): ?User
     {
-        $otp = LoginOtp::where('identifier', $identifier)
+        // The identifier column is ciphertext now (T51-b) - the lookup
+        // rides its deterministic blind index instead.
+        $otp = LoginOtp::where('identifier_hash', LoginOtp::blindIndexIdentifier($identifier))
             ->whereNull('consumed_at')
             ->latest('id')
             ->first();

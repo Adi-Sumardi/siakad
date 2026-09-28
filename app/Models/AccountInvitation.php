@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Concerns\HasEncryptedAttributes;
 use App\Concerns\HasUlidKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -15,7 +16,14 @@ use Illuminate\Support\Str;
  */
 class AccountInvitation extends Model
 {
-    use HasUlidKey;
+    use HasEncryptedAttributes, HasUlidKey;
+
+    /**
+     * Encrypted at rest (T51-b): the invitation's target email/phone is
+     * PII. Nothing ever looks a row up by sent_to - the single-use token
+     * hash is the key - so no blind index is needed here.
+     */
+    protected $encrypted = ['sent_to'];
 
     protected $fillable = [
         'user_id',

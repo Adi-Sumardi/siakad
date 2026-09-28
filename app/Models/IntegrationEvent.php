@@ -23,7 +23,10 @@ class IntegrationEvent extends Model
     ];
 
     protected $casts = [
-        'payload' => 'array',
+        // Encrypted JSON at rest (T51-b): PMB handoff payloads carry
+        // children's and guardians' PII. Rows are keyed by source+event_id
+        // and never looked up by payload content, so no blind index.
+        'payload' => 'encrypted:array',
         'processed_at' => 'datetime',
         'attempts' => 'integer',
     ];

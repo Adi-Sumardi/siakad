@@ -12,6 +12,7 @@ use App\Services\Billing\BillPdfService;
 use App\Services\Billing\CheckoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -110,6 +111,57 @@ class BillController extends Controller
             ->paginate($request->integer('per_page', 50));
 
         return response()->json(['payments' => PaymentResource::collection($payments)->response()->getData(true)]);
+    }
+
+    /**
+     * The bell's 60-second poll (T67-c): a handful of integers instead of
+     * the open-bill rows + payments page it used to drag down just to
+     * decide whether the badge changed. The client compares the returned
+     * signature (counts + latest_change_at) and only refetches the heavy
+     * lists when something actually moved - or when the dropdown opens.
+     *
+     * The 7-day receipts window mirrors the frontend's
+     * RECEIPT_WINDOW_DAYS; keeping the constant here too is deliberate,
+     * since the count and the list must agree about what "recent" means.
+     */
+    public function bellSummary(Request $request): JsonResponse
+    {
+        $open = Bill::query()
+            ->visibleTo($request->user())
+            ->open()
+            ->get(['id', 'status', 'remaining_amount', 'updated_at']);
+
+        $recentPayments = Payment::query()
+            ->visibleTo($request->user())
+            ->where('status', 'completed')
+            ->whereNotNull('paid_at')
+            ->where('paid_at', '>=', now()->subDays(7)->startOfDay());
+
+        $receiptsCount = (clone $recentPayments)->count();
+        $latestPaymentAt = (clone $recentPayments)->max('paid_at');
+
+        $latestChangeAt = collect([$open->max('updated_at'), $latestPaymentAt])->filter()->max();
+
+        $since = $request->string('since')->value();
+        $changedSince = null;
+
+        if ($since !== '') {
+            try {
+                $changedSince = $latestChangeAt === null ? false : $latestChangeAt->isAfter(Carbon::parse($since));
+            } catch (\Carbon\Exceptions\InvalidFormatException) {
+                // A malformed ?since= is ignored rather than failing the
+                // poll - the signature comparison still works without it.
+            }
+        }
+
+        return response()->json([
+            'open_count' => $open->count(),
+            'overdue_count' => $open->where('status', 'overdue')->count(),
+            'outstanding' => (float) $open->sum('remaining_amount'),
+            'receipts_count' => $receiptsCount,
+            'latest_change_at' => $latestChangeAt?->toIso8601String(),
+            'changed_since' => $changedSince,
+        ]);
     }
 
     /**

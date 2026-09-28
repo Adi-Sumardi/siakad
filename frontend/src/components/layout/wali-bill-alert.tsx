@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Bell, CheckCircle2, ChevronRight } from "lucide-react";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -11,6 +11,18 @@ import { cn } from "@/lib/utils";
 
 /** How long a settled payment stays listed as good news in the bell. */
 const RECEIPT_WINDOW_DAYS = 7;
+
+/** The light poll's payload (T67-c): counts + a change signature. */
+type BellSummary = {
+  open_count: number;
+  overdue_count: number;
+  outstanding: number;
+  receipts_count: number;
+  latest_change_at: string | null;
+  changed_since: boolean | null;
+};
+
+type BellDetail = { bills: Bill[]; summary: BillSummary; receipts: Payment[] };
 
 /**
  * The wali navbar's notification bell, left of the profile avatar. Two kinds
@@ -23,61 +35,87 @@ const RECEIPT_WINDOW_DAYS = 7;
  *   not read-tracked - a receipt needs no action, so a badge nagging over it
  *   would be noise), linking to the payment's own invoice modal.
  *
- * Both recompute their urgency from what the bills/payments pages already
- * return (status, days_to_due) rather than inventing their own idea of
- * "owing", and refresh every 60s so money the school just recorded shows up
- * without a reload - same cadence as the guru dashboard's schedule chips.
+ * The 60s poll hits /api/wali/bell-summary - a handful of integers (T67-c) -
+ * and only refetches the heavy bill/payment rows when the signature actually
+ * moved while the dropdown is open, or when the dropdown opens. Money the
+ * school just recorded still shows up without a reload; a closed bell no
+ * longer drags the whole list down every minute.
  */
 export function WaliBillAlert() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
-  const [bills, setBills] = useState<Bill[] | null>(null);
-  const [summary, setSummary] = useState<BillSummary | null>(null);
-  const [receipts, setReceipts] = useState<Payment[]>([]);
+  const [summary, setSummary] = useState<BellSummary | null>(null);
+  const [detail, setDetail] = useState<BellDetail | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  // Refs, not state: the poll compares against the last signature without
+  // re-subscribing, and knows whether the dropdown can currently be seen.
+  const signatureRef = useRef<string | null>(null);
+  const openRef = useRef(false);
+
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
+  const loadDetail = useCallback(() => {
+    Promise.all([
+      // status=open keeps the payload to the bill rows the bell can list;
+      // summary is still computed over exactly those rows.
+      api.get<{ bills: Bill[]; summary: BillSummary }>("/api/wali/bills?status=open").catch(() => null),
+      // The first page is plenty for the bell's recent-receipts window -
+      // it stays light while the history page paginates (audit T54-6).
+      api.get<{ payments: { data: Payment[] } }>("/api/wali/payments?per_page=10").catch(() => null),
+    ]).then(([freshBills, freshPayments]) => {
+      // A failed refresh keeps the last known state; the tagihan page
+      // remains the authoritative surface for errors.
+      if (!freshBills) return;
+
+      const cutoff = Date.now() - RECEIPT_WINDOW_DAYS * 86_400_000;
+
+      setDetail((prev) => ({
+        bills: freshBills.bills,
+        summary: freshBills.summary,
+        receipts: freshPayments
+          ? freshPayments.payments.data
+              .filter((p) => p.status === "completed" && p.paid_at && new Date(p.paid_at).getTime() >= cutoff)
+              .slice(0, 3)
+          : (prev?.receipts ?? []),
+      }));
+    });
+  }, []);
 
   useEffect(() => {
     if (user?.role !== "orangtua") return;
 
     let cancelled = false;
 
-    const load = () => {
-      Promise.all([
-        // status=open keeps the payload to the bill rows the bell can list;
-        // summary is still computed over exactly those rows.
-        api.get<{ bills: Bill[]; summary: BillSummary }>("/api/wali/bills?status=open").catch(() => null),
-        // The first page is plenty for the bell's recent-receipts window -
-        // it stays light while the history page paginates (audit T54-6).
-        api.get<{ payments: { data: Payment[] } }>("/api/wali/payments?per_page=10").catch(() => null),
-      ]).then(([freshBills, freshPayments]) => {
-        if (cancelled) return;
-        // A failed refresh keeps the last known state; the tagihan page
-        // remains the authoritative surface for errors.
-        if (freshBills) {
-          setBills(freshBills.bills);
-          setSummary(freshBills.summary);
-        }
+    const poll = () => {
+      api
+        .get<BellSummary>("/api/wali/bell-summary")
+        .then((fresh) => {
+          if (cancelled) return;
+          setSummary(fresh);
 
-        if (freshPayments) {
-          const cutoff = Date.now() - RECEIPT_WINDOW_DAYS * 86_400_000;
+          const signature = `${fresh.open_count}:${fresh.overdue_count}:${fresh.outstanding}:${fresh.receipts_count}:${fresh.latest_change_at ?? ""}`;
+          const changed = signature !== signatureRef.current;
+          signatureRef.current = signature;
 
-          setReceipts(
-            freshPayments.payments.data
-              .filter((p) => p.status === "completed" && p.paid_at && new Date(p.paid_at).getTime() >= cutoff)
-              .slice(0, 3),
-          );
-        }
-      });
+          // The rows are only worth fetching while someone can see the
+          // dropdown - a closed bell loads them the moment it opens.
+          if (changed && openRef.current) {
+            loadDetail();
+          }
+        })
+        .catch(() => {});
     };
 
-    load();
-    const interval = setInterval(load, 60_000);
+    poll();
+    const interval = setInterval(poll, 60_000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [user]);
+  }, [user, loadDetail]);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -87,15 +125,16 @@ export function WaliBillAlert() {
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-  if (bills === null || summary === null) return null;
+  if (summary === null) return null;
 
   const openCount = summary.open_count;
-  if (openCount === 0 && receipts.length === 0) return null;
+  const receipts = detail?.receipts ?? [];
+  if (openCount === 0 && summary.receipts_count === 0) return null;
 
   // The API lists open bills first, most urgent due_date ahead - exactly the
   // order worth previewing.
-  const preview = bills.slice(0, 3);
-  const rest = bills.length - preview.length;
+  const preview = (detail?.bills ?? []).slice(0, 3);
+  const rest = (detail?.bills.length ?? 0) - preview.length;
 
   function dueClass(bill: Bill): string {
     if (bill.status === "overdue" || (bill.days_to_due ?? 0) < 0) return "text-bad";
@@ -106,7 +145,13 @@ export function WaliBillAlert() {
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          const next = !open;
+          setOpen(next);
+          // Opening is the user asking to see the news - always bring the
+          // rows fresh, however old the last fetch is.
+          if (next) loadDetail();
+        }}
         className={cn(
           "relative flex size-9 items-center justify-center rounded-xl transition-colors",
           summary.overdue_count > 0
@@ -152,27 +197,33 @@ export function WaliBillAlert() {
 
           {openCount > 0 && (
             <>
-              <ul className="max-h-64 divide-y divide-border overflow-y-auto">
-                {preview.map((bill) => (
-                  <li key={bill.ulid} className="flex items-start justify-between gap-3 px-3.5 py-2.5">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-foreground">{bill.description}</p>
-                      <p className="truncate text-xs text-muted-foreground">{bill.student?.nama_lengkap}</p>
-                      <p className={cn("text-[11px] font-semibold", dueClass(bill))}>
-                        {dueLabel(bill.days_to_due)}
-                      </p>
-                    </div>
-                    <p className="tabular shrink-0 text-sm font-bold text-foreground">
-                      {rupiah(bill.remaining_amount)}
-                    </p>
-                  </li>
-                ))}
-              </ul>
+              {detail === null ? (
+                <p className="px-3.5 py-4 text-center text-xs text-muted-foreground">Memuat tagihan…</p>
+              ) : (
+                <>
+                  <ul className="max-h-64 divide-y divide-border overflow-y-auto">
+                    {preview.map((bill) => (
+                      <li key={bill.ulid} className="flex items-start justify-between gap-3 px-3.5 py-2.5">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-foreground">{bill.description}</p>
+                          <p className="truncate text-xs text-muted-foreground">{bill.student?.nama_lengkap}</p>
+                          <p className={cn("text-[11px] font-semibold", dueClass(bill))}>
+                            {dueLabel(bill.days_to_due)}
+                          </p>
+                        </div>
+                        <p className="tabular shrink-0 text-sm font-bold text-foreground">
+                          {rupiah(bill.remaining_amount)}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
 
-              {rest > 0 && (
-                <p className="border-t border-border px-3.5 py-2 text-xs text-muted-foreground">
-                  +{rest} tagihan lainnya belum lunas
-                </p>
+                  {rest > 0 && (
+                    <p className="border-t border-border px-3.5 py-2 text-xs text-muted-foreground">
+                      +{rest} tagihan lainnya belum lunas
+                    </p>
+                  )}
+                </>
               )}
             </>
           )}

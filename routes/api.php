@@ -136,6 +136,9 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
     Route::get('/bills/{ulid}/pdf', [WaliBillController::class, 'pdf']);
     Route::post('/checkout', [WaliBillController::class, 'checkout'])->middleware('throttle:20,1');
     Route::get('/payments', [WaliBillController::class, 'payments']);
+    // The bell's light 60s poll (T67-c): counts + a change signature, not
+    // the bill/payment rows behind them.
+    Route::get('/bell-summary', [WaliBillController::class, 'bellSummary']);
 
     Route::get('/students/{ulid}/points', [WaliPointController::class, 'index']);
     Route::get('/students/{ulid}/attendance', [WaliAttendanceController::class, 'index']);
