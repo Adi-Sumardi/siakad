@@ -183,6 +183,11 @@ class AchievementDecisionService
                 'rejection_reason' => $reason,
                 'verified_by' => $actor->id,
                 'verified_at' => now(),
+                // Symmetric with verify() (audit 2026-09-28): a rejected row
+                // awards nothing, so a guru proposal's suggested points
+                // must die with the decision - not linger as a "+15 poin
+                // diberikan" the wali pages used to render.
+                'point_awarded' => null,
             ]) === 1;
 
         return [$achievement->fresh(), $decided];

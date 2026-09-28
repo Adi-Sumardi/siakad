@@ -79,19 +79,39 @@ class Achievement extends Model
      * cards that each carry their own points at verify time. Name + event
      * date identify "the same win"; the verifier can still differentiate
      * genuinely different wins by naming them differently.
+     *
+     * Audit 2026-09-28 hardening: a blank date on EITHER side counts as a
+     * match (wali filed it dated, guru filed it undated - still the same
+     * win), and an already-VERIFIED identical win also blocks (re-filing
+     * a decided win minted a fresh achievement row with a fresh merit;
+     * the unique index is per-row and never saw it). Re-filing after a
+     * REJECTION stays allowed - that is "better evidence, try again".
      */
     public static function pendingDuplicateExists(?int $studentId, ?int $teacherUserId, string $namaPrestasi, ?string $tanggalEvent): bool
     {
         return static::query()
-            ->where('status', 'pending')
-            ->when($studentId, fn ($q) => $q->where('student_id', $studentId), fn ($q) => $q->whereNull('student_id'))
-            ->when($teacherUserId, fn ($q) => $q->where('teacher_user_id', $teacherUserId))
             ->where('nama_prestasi', $namaPrestasi)
-            // whereDate, never a bare string comparison: the model casts
-            // tanggal_event to datetime, so SQLite stores '2026-08-20
-            // 00:00:00' and `= '2026-08-20'` silently matches nothing -
-            // the same trap that made the old seeder stack duplicates.
-            ->when($tanggalEvent, fn ($q) => $q->whereDate('tanggal_event', $tanggalEvent), fn ($q) => $q->whereNull('tanggal_event'))
+            ->where(fn ($q) => $q
+                ->when($studentId, fn ($sq) => $sq->where('student_id', $studentId), fn ($sq) => $sq->whereNull('student_id'))
+                ->when($teacherUserId, fn ($tq) => $tq->where('teacher_user_id', $teacherUserId)))
+            ->where(function ($q) use ($tanggalEvent) {
+                $q->whereIn('status', ['pending', 'verified']);
+                // Blank date on EITHER side = same win, different filing
+                // thoroughness: an undated filing matches any stored date,
+                // and a dated filing also matches undated stored rows. A
+                // date only distinguishes when both sides carry one.
+                // whereDate, never a bare string comparison: the model
+                // casts tanggal_event to datetime, so SQLite stores
+                // '2026-08-20 00:00:00' and `= '2026-08-20'` silently
+                // matches nothing - the trap that stacked the old seeder's
+                // clones.
+                $q->when(
+                    $tanggalEvent,
+                    fn ($dq) => $dq->where(fn ($tq) => $tq
+                        ->whereNull('tanggal_event')
+                        ->orWhereDate('tanggal_event', $tanggalEvent)),
+                );
+            })
             ->exists();
     }
 

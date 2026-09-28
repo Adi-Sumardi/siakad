@@ -77,7 +77,20 @@ export default function GenerateBillsPage() {
 
   const isMonthly = feeTypes?.find((t) => t.code === feeTypeCode)?.recurrence === "monthly";
 
+  // A stale preview is a live grenade (audit 2026-09-28): execute() rebuilds
+  // its body from the CURRENT parameters, so the button used to promise
+  // "Eksekusi 300 Tagihan" while actually billing whatever was selected at
+  // click time. Any parameter change voids the preview and the last result.
+  useEffect(() => {
+    setPreview(null);
+    setResult(null);
+  }, [feeTypeCode, month, issuedAt]);
+
   async function runPreview() {
+    // feeTypes gates the run (audit 2026-09-28): isMonthly is undefined
+    // while the list loads, the month silently drops out of the body, and
+    // the run's term-wide dedup key then blocks every later SPP month.
+    if (feeTypes === null) return;
     setLoading(true);
     setError(null);
     setResult(null);
@@ -96,7 +109,7 @@ export default function GenerateBillsPage() {
   }
 
   async function execute() {
-    if (!preview || preview.eligible === 0) return;
+    if (!preview || preview.eligible === 0 || feeTypes === null) return;
     setRunning(true);
     setError(null);
 
@@ -185,7 +198,7 @@ export default function GenerateBillsPage() {
         </div>
 
         <div className="mt-4">
-          <Button onClick={runPreview} disabled={loading} className="w-full sm:w-auto gap-2 shadow-xs">
+          <Button onClick={runPreview} disabled={loading || feeTypes === null} className="w-full sm:w-auto gap-2 shadow-xs">
             <Sparkles className="size-4" />
             <span>{loading ? "Menghitung Pratinjau..." : "Hitung Pratinjau Tagihan"}</span>
           </Button>

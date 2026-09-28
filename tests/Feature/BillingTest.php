@@ -161,7 +161,10 @@ class BillingTest extends TestCase
 
         $bill = Bill::first();
         $this->assertSame('spp:2026-2027:08', $bill->dedup_key);
-        $this->assertSame('unpaid', $bill->status);
+        // Born-overdue (audit 2026-09-28): month 8's due day has already
+        // passed at issue time, and the stored status says so immediately
+        // instead of waiting for the nightly sweep.
+        $this->assertSame('overdue', $bill->status);
         $this->assertEquals(650000.0, (float) $bill->remaining_amount);
         // A plain fee still gets a line, so every bill prints the same way.
         $this->assertCount(1, $bill->lines);

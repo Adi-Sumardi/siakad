@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CreditCard, Download, FilePlus2, Filter, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -11,7 +11,8 @@ import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError, API_BASE } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { downloadApiFile as downloadApiFileShared } from "@/lib/download";
 import { useAuth } from "@/lib/auth/auth-context";
 import { dueLabel, rupiah, tanggal, todayJakarta } from "@/lib/format";
 import { isOpen, OPEN_STATUSES, type Bill, type Payment } from "@/lib/types/billing";
@@ -165,8 +166,12 @@ function AdminBillsContent() {
           d.rates.find((r) => r.academic_year === activeYear && r.tingkat === null)
           ?? d.rates.find((r) => r.academic_year === activeYear)
           ?? d.rates[0];
-        if (rate && !manual.amount) {
-          setManual((m) => ({ ...m, amount: String(rate.amount) }));
+        // The emptiness check lives INSIDE the updater (audit 2026-09-28):
+        // reading manual.amount from the closure guarded against the value
+        // at effect time, so a rate response landing after the user had
+        // already typed an amount overwrote what they typed.
+        if (rate) {
+          setManual((m) => (m.amount === "" ? { ...m, amount: String(rate.amount) } : m));
         }
       })
       .catch(() => {});
@@ -212,10 +217,17 @@ function AdminBillsContent() {
     setCreatingManual(true);
     try {
       // With itemised rows the total IS the rows' sum (the input is locked to
-      // it); without them the typed amount stands.
+      // it); without them the typed amount stands. Guarded client-side too
+      // (audit 2026-09-28): an empty amount used to serialize as null and
+      // surface as a generic 422 instead of a clear instruction.
       const lines = manualLines
         .filter((l) => l.name.trim() && parseInt(l.qty, 10) > 0 && parseFloat(l.unit_price) > 0)
         .map((l) => ({ name: l.name.trim(), qty: parseInt(l.qty, 10), unit_price: parseFloat(l.unit_price) }));
+
+      if (lines.length === 0 && !(parseFloat(manual.amount) > 0)) {
+        toast.error("Isi nominal tagihan (atau tambahkan baris komponen) terlebih dahulu.");
+        return;
+      }
 
       const res = await api.post<{ bill: Bill }>("/api/admin/bills/manual", {
         student_ulid: manual.student_ulid,
@@ -251,10 +263,16 @@ function AdminBillsContent() {
     return () => clearTimeout(timer);
   }, [q]);
 
+  // Out-of-order guard (audit 2026-09-28): a slow EARLIER fetch landing
+  // after a newer one used to overwrite the fresh list with the old
+  // filter's rows.
+  const loadRequestId = useRef(0);
+
   // .then() chains (not async/await) so setState only ever runs in an async
   // callback - the effect below calls this synchronously, and awaiting first
   // still trips react-hooks/set-state-in-effect's analysis.
   const load = useCallback(() => {
+    const requestId = ++loadRequestId.current;
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (debouncedQ) params.set("q", debouncedQ);
@@ -267,8 +285,14 @@ function AdminBillsContent() {
 
     api
       .get<{ bills: Paginated<Bill> }>(`/api/admin/bills?${params}`)
-      .then((d) => setBills(d.bills))
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan."));
+      .then((d) => {
+        if (requestId !== loadRequestId.current) return;
+        setBills(d.bills);
+      })
+      .catch((err) => {
+        if (requestId !== loadRequestId.current) return;
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan.");
+      });
   }, [status, debouncedQ, unitCode, academicYear, feeTypeCode, month, page]);
 
   useEffect(() => {
@@ -294,30 +318,12 @@ function AdminBillsContent() {
       .catch(() => {});
   }, []);
 
-  // Download endpoints live on the API origin, so a plain <a href="/api/...">
-  // would hit Next.js itself and 404 in development. Fetch with the Sanctum
-  // session cookie and hand the browser a blob instead - same pattern as the
-  // bill PDF downloads.
-  async function downloadApiFile(path: string, filename: string) {
-    try {
-      const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
-
-      if (!res.ok) {
-        throw new Error("Gagal mengunduh file. Pastikan sesi Anda masih aktif.");
-      }
-
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Gagal mengunduh file.");
-    }
+  // The one shared blob-download (src/lib/download.ts) since audit
+  // 2026-09-28 - this page's local copy lacked the 401-specific message.
+  function downloadApiFile(path: string, filename: string) {
+    downloadApiFileShared(path, filename).catch((err) =>
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh file."),
+    );
   }
 
   function openAction(bill: Bill, kind: Action["kind"]) {
@@ -841,7 +847,15 @@ function AdminBillsContent() {
                 <Button type="button" variant="ghost" onClick={() => setShowManualModal(false)} disabled={creatingManual}>
                   Batal
                 </Button>
-                <Button type="submit" disabled={creatingManual || !manual.student_ulid} className="font-bold shadow-xs">
+                <Button
+                  type="submit"
+                  disabled={
+                    creatingManual ||
+                    !manual.student_ulid ||
+                    (manualLines.length === 0 && !(parseFloat(manual.amount) > 0))
+                  }
+                  className="font-bold shadow-xs"
+                >
                   {creatingManual ? "Menerbitkan…" : "Terbitkan Tagihan"}
                 </Button>
               </div>

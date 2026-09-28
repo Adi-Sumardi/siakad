@@ -167,7 +167,10 @@ class AdminBillingTest extends TestCase
             ->postJson("/api/admin/bills/{$bill->ulid}/waive", ['reason' => 'coba-coba'])
             ->assertStatus(404);
 
-        $this->assertSame('unpaid', $bill->fresh()->status);
+        // Born-overdue (audit 2026-09-28): generateAll() bills past-due
+        // months, which now land as 'overdue' immediately - the refusal
+        // under test (404, status untouched) is unaffected.
+        $this->assertSame('overdue', $bill->fresh()->status);
     }
 
     public function test_a_unit_admin_may_read_but_not_set_prices(): void

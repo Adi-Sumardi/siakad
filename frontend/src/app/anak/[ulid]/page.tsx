@@ -136,8 +136,14 @@ function AchievementCard({ achievement }: { achievement: Achievement }) {
         </p>
       )}
 
-      {achievement.point_awarded && (
+      {/* Gated on status (audit 2026-09-28): a pending row's point_awarded
+          is the guru's proposal, not points given - and a rejected row
+          awards nothing at all. */}
+      {achievement.status === "verified" && !!achievement.point_awarded && (
         <p className="text-xs font-bold text-good">+{achievement.point_awarded} poin apresiasi diberikan</p>
+      )}
+      {achievement.status === "pending" && !!achievement.point_awarded && (
+        <p className="text-xs text-muted-foreground">Usulan poin: {achievement.point_awarded} (belum diberikan)</p>
       )}
 
       {achievement.has_sertifikat && (
@@ -350,21 +356,12 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
   async function downloadRapor() {
     setDownloadingRapor(true);
     try {
+      // The shared blob-download (audit 2026-09-28): the local copy used to
+      // report an expired session as "belum ada semester aktif".
       const query = selectedTermUlid ? `?term_ulid=${selectedTermUlid}` : "";
-      const res = await fetch(`${API_BASE}/api/wali/students/${ulid}/rapor${query}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Gagal mengunduh rapor.");
-
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `Rapor-${points?.student.nama_lengkap ?? "siswa"}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch {
-      toast.error("Gagal mengunduh rapor - mungkin belum ada semester aktif.");
+      await downloadApiFile(`/api/wali/students/${ulid}/rapor${query}`, `Rapor-${points?.student.nama_lengkap ?? "siswa"}.pdf`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh rapor - mungkin belum ada semester aktif.");
     } finally {
       setDownloadingRapor(false);
     }

@@ -35,12 +35,29 @@ export function CreatableCombobox({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // Keyboard support (audit 2026-09-28): arrows walk the list, Enter picks
+  // the highlighted row (and must not submit the surrounding form), Escape
+  // closes. Highlight index -1 = the "create new" row when it shows.
+  const [highlight, setHighlight] = useState(-1);
 
   const needle = value.trim().toLowerCase();
   const matches = needle
     ? suggestions.filter((s) => s.toLowerCase().includes(needle))
     : suggestions;
   const exactExists = suggestions.some((s) => s.toLowerCase() === needle);
+  const createRow = value.trim() !== "" && !exactExists;
+  // Row 0 is the create row (when present), then the matches.
+  const rows: (string | null)[] = [...(createRow ? [null] : []), ...matches];
+
+  function pick(row: string | null) {
+    if (row === null) {
+      onChange(value.trim());
+    } else {
+      onChange(row);
+    }
+    setOpen(false);
+    setHighlight(-1);
+  }
 
   return (
     <div className="relative">
@@ -54,11 +71,37 @@ export function CreatableCombobox({
           required={required}
           disabled={disabled}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setHighlight(-1);
+          }}
           onFocus={() => setOpen(true)}
-          onBlur={() => setOpen(false)}
+          onBlur={() => {
+            setOpen(false);
+            setHighlight(-1);
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Escape") setOpen(false);
+            if (!open) {
+              if (e.key === "ArrowDown") setOpen(true);
+              return;
+            }
+            if (e.key === "Escape") {
+              setOpen(false);
+              return;
+            }
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              setHighlight((h) => {
+                const last = rows.length - 1;
+                if (h === -1) return e.key === "ArrowDown" ? 0 : last;
+                return e.key === "ArrowDown" ? (h === last ? -1 : h + 1) : (h === 0 ? -1 : h - 1);
+              });
+              return;
+            }
+            if (e.key === "Enter" && highlight >= 0 && rows[highlight] !== undefined) {
+              e.preventDefault();
+              pick(rows[highlight]);
+            }
           }}
           className={cn(
             "flex h-10 w-full rounded-lg border border-input bg-card py-2 pl-9 pr-3 text-sm",
@@ -78,35 +121,37 @@ export function CreatableCombobox({
           onMouseDown={(e) => e.preventDefault()}
           className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-input bg-card p-1 shadow-lg"
         >
-          {value.trim() !== "" && !exactExists && (
-            <button
-              type="button"
-              onClick={() => onChange(value.trim())}
-              className="flex w-full items-center gap-2 rounded-md bg-primary/10 px-3 py-2 text-left text-xs font-semibold text-primary"
-            >
-              <Plus className="size-3.5 shrink-0" />
-              <span>
-                Tambah baru: &quot;{value.trim()}&quot;
-              </span>
-            </button>
+          {rows.map((row, i) =>
+            row === null ? (
+              <button
+                key="__create"
+                type="button"
+                onClick={() => pick(null)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md bg-primary/10 px-3 py-2 text-left text-xs font-semibold text-primary",
+                  highlight === i && "ring-2 ring-ring",
+                )}
+              >
+                <Plus className="size-3.5 shrink-0" />
+                <span>
+                  Tambah baru: &quot;{value.trim()}&quot;
+                </span>
+              </button>
+            ) : (
+              <button
+                key={row}
+                type="button"
+                onClick={() => pick(row)}
+                className={cn(
+                  "block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted/60",
+                  row === value && "font-semibold text-primary",
+                  highlight === i && "bg-muted/60",
+                )}
+              >
+                {row}
+              </button>
+            ),
           )}
-
-          {matches.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => {
-                onChange(s);
-                setOpen(false);
-              }}
-              className={cn(
-                "block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted/60",
-                s === value && "font-semibold text-primary",
-              )}
-            >
-              {s}
-            </button>
-          ))}
 
           {matches.length === 0 && value.trim() === "" && (
             <p className="px-3 py-2 text-xs text-muted-foreground">

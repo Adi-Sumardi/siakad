@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, Award, ScrollText, Search, ShieldAlert, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -39,6 +39,10 @@ export default function AdminPointsPage() {
   const [listJenjang, setListJenjang] = useState("");
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [page, setPage] = useState(1);
+  // Out-of-order guard (audit 2026-09-28): a slow EARLIER fetch landing
+  // after a newer one used to permanently overwrite the list, the meta and
+  // the KPI summary with the old filter's scope.
+  const listRequestId = useRef(0);
 
   // Poin 6: one shared unit+jenjang filter pair driving BOTH boards.
   const [boardUnit, setBoardUnit] = useState("");
@@ -65,6 +69,7 @@ export default function AdminPointsPage() {
   }
 
   function loadStudents(targetPage = page) {
+    const requestId = ++listRequestId.current;
     const params = new URLSearchParams();
     if (search.trim()) params.set("search", search.trim());
     if (listUnit) params.set("unit", listUnit);
@@ -75,11 +80,15 @@ export default function AdminPointsPage() {
     api
       .get<{ term: string | null; summary: { total: number; flagged: number }; students: { data: Row[]; meta: PageMeta } }>(`/api/admin/points?${params}`)
       .then((d) => {
+        if (requestId !== listRequestId.current) return;
         setTerm(d.term);
-        setSummary(d.summary ?? { total: d.students.meta.total, flagged: 0 });
+        setSummary(d.summary ?? { total: d.students.meta?.total ?? 0, flagged: 0 });
         setPaged(d.students);
       })
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data poin."));
+      .catch((err) => {
+        if (requestId !== listRequestId.current) return;
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat data poin.");
+      });
   }
 
   // Debounced like the tagihan tab: typing narrows without hammering the

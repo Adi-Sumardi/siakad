@@ -568,8 +568,10 @@ export default function AdminDailyAttendancePage() {
 
       {/* The date-range recap (moved here from Laporan Keuangan - an
           attendance summary belongs on the attendance tab, not a financial
-          report). Follows the unit this page's operational half shows. */}
-      <AttendanceRecapCard unitUlid={unitUlid} />
+          report). Follows the unit this page's operational half shows; for
+          a central admin it WAITS for that unit pick, so the first paint is
+          never a silently campus-mixed aggregate (audit 2026-09-28). */}
+      <AttendanceRecapCard unitUlid={unitUlid} waitForUnit={isCentral} />
 
       {isCentral && <HolidayCalendarCard />}
     </div>
@@ -583,19 +585,30 @@ export default function AdminDailyAttendancePage() {
  * the ?unit= parameter clips the recap to the unit selected above on this
  * page; an admin_unit is scoped by the API itself (visibleTo).
  */
-function AttendanceRecapCard({ unitUlid }: { unitUlid: string }) {
+function AttendanceRecapCard({ unitUlid, waitForUnit = false }: { unitUlid: string; waitForUnit?: boolean }) {
   const [from, setFrom] = useState(todayJakarta().slice(0, 7) + "-01");
   const [to, setTo] = useState(todayJakarta());
   const [recap, setRecap] = useState<AttendanceRecap | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  // Central admin: no fetch until a unit is picked (waitForUnit) - an empty
+  // unitUlid would otherwise aggregate every campus while the picker loads.
+  // An admin_unit sends no unit param at all; the API scopes them itself.
+  const ready = !waitForUnit || unitUlid !== "";
 
   useEffect(() => {
+    if (!ready) return;
+    setFailed(false);
     const params = new URLSearchParams({ from, to });
     if (unitUlid) params.set("unit", unitUlid);
     api
       .get<AttendanceRecap>(`/api/admin/reports/attendance?${params.toString()}`)
       .then(setRecap)
-      .catch(() => setRecap(null));
-  }, [from, to, unitUlid]);
+      .catch(() => {
+        setRecap(null);
+        setFailed(true);
+      });
+  }, [from, to, unitUlid, ready]);
 
   return (
     <Card className="p-5">
@@ -634,7 +647,15 @@ function AttendanceRecapCard({ unitUlid }: { unitUlid: string }) {
         </div>
       </div>
 
-      {recap === null ? (
+      {!ready ? (
+        <p className="mt-4 rounded-lg border border-border p-4 text-xs text-muted-foreground">
+          Pilih unit terlebih dahulu untuk melihat rekap presensi.
+        </p>
+      ) : failed && recap === null ? (
+        <p className="mt-4 rounded-lg border border-border p-4 text-xs text-muted-foreground">
+          Gagal memuat rekap — coba ubah rentang tanggal atau segarkan halaman.
+        </p>
+      ) : recap === null ? (
         <Skeleton className="mt-4 h-32 w-full" />
       ) : recap.summary.total_records === 0 ? (
         <p className="mt-4 rounded-lg border border-border p-6 text-center text-sm text-muted-foreground">

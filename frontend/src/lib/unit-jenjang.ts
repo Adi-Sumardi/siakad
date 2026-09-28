@@ -54,8 +54,13 @@ export function jenjangKeysForUnit(map: UnitJenjangMap, unitCode: string | null)
   return map[unitCode] ?? [];
 }
 
-/** Units that actually run the picked jenjang; all units when nothing is picked. */
-export function unitsWithJenjang<T extends { code: string }>(units: T[], map: UnitJenjangMap, jenjang: string | null): T[] {
-  if (!jenjang) return units;
+/**
+ * Units that actually run the picked jenjang; all units when nothing is
+ * picked OR the map is still unknown (null - failed or still loading):
+ * filtering on an unknown map would empty the dropdown and strand the
+ * selection (audit 2026-09-28).
+ */
+export function unitsWithJenjang<T extends { code: string }>(units: T[], map: UnitJenjangMap | null, jenjang: string | null): T[] {
+  if (!jenjang || map === null) return units;
   return units.filter((u) => (map[u.code] ?? []).includes(jenjang));
 }

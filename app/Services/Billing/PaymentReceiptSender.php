@@ -193,15 +193,13 @@ class PaymentReceiptSender
     private function periodLabel(Collection $bills): string
     {
         $months = $bills
-            // The bill's OWN period month when it has one (audit T55-b):
-            // issued_at is a printing date, so an SPP issued late (July's
-            // bill printed in September) used to be receipted as
-            // "September" - the parent's receipt named a month they have
-            // not been billed for. The year still comes from the printing
-            // date, which is correct for every month of an academic year.
-            ->map(fn (Bill $bill) => $bill->period_month
-                ? Carbon::create(($bill->issued_at ?? $bill->due_date)->year, (int) $bill->period_month, 1)
-                : ($bill->issued_at ?? $bill->due_date)->copy()->startOfMonth())
+            // The bill's OWN period when it has one (audit T55-b, year
+            // fixed 2026-09-28 via Bill::periodDate): issued_at is a
+            // printing date - both the month AND the year must come from
+            // the billing period, or a pre-printed January bill receipts
+            // as the previous calendar year.
+            ->map(fn (Bill $bill) => $bill->periodDate()
+                ?? ($bill->issued_at ?? $bill->due_date)->copy()->startOfMonth())
             ->unique(fn (Carbon $date) => $date->format('Y-m'))
             ->sortBy(fn (Carbon $date) => $date->format('Y-m'))
             ->values();

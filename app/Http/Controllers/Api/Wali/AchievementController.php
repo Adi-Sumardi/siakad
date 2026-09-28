@@ -45,28 +45,36 @@ class AchievementController extends Controller
         // time, which is exactly how points looked "added repeatedly".
         if (Achievement::pendingDuplicateExists($student->id, null, $validated['nama_prestasi'], $validated['tanggal_event'] ?? null)) {
             return response()->json([
-                'message' => 'Pengajuan prestasi yang sama (nama & tanggal event identik) untuk anak ini masih menunggu verifikasi - tidak perlu diajukan dua kali.',
+                'message' => 'Prestasi dengan nama yang sama untuk anak ini sudah diajukan (masih menunggu verifikasi atau sudah tercatat) - tidak perlu diajukan dua kali.',
             ], 422);
         }
 
-        $achievement = Achievement::create([
-            'student_id' => $student->id,
-            'nama_prestasi' => $validated['nama_prestasi'],
-            'kategori' => $validated['kategori'],
-            'tingkat' => $validated['tingkat'],
-            'juara' => $validated['juara'] ?? null,
-            'nama_event' => $validated['nama_event'] ?? null,
-            'penyelenggara' => $validated['penyelenggara'] ?? null,
-            'tanggal_event' => $validated['tanggal_event'] ?? null,
-            'tempat_event' => $validated['tempat_event'] ?? null,
-            'sertifikat_path' => $request->hasFile('sertifikat') ? $request->file('sertifikat')->store('achievements/certificates', 'local') : null,
-            'sertifikat_name' => $request->file('sertifikat')?->getClientOriginalName(),
-            'foto_kegiatan_path' => $request->hasFile('foto_kegiatan') ? $request->file('foto_kegiatan')->store('achievements/photos', 'local') : null,
-            'foto_kegiatan_name' => $request->file('foto_kegiatan')?->getClientOriginalName(),
-            'source' => 'sekolah',
-            'status' => 'pending',
-            'recorded_by' => $request->user()->id,
-        ]);
+        try {
+            $achievement = Achievement::create([
+                'student_id' => $student->id,
+                'nama_prestasi' => $validated['nama_prestasi'],
+                'kategori' => $validated['kategori'],
+                'tingkat' => $validated['tingkat'],
+                'juara' => $validated['juara'] ?? null,
+                'nama_event' => $validated['nama_event'] ?? null,
+                'penyelenggara' => $validated['penyelenggara'] ?? null,
+                'tanggal_event' => $validated['tanggal_event'] ?? null,
+                'tempat_event' => $validated['tempat_event'] ?? null,
+                'sertifikat_path' => $request->hasFile('sertifikat') ? $request->file('sertifikat')->store('achievements/certificates', 'local') : null,
+                'sertifikat_name' => $request->file('sertifikat')?->getClientOriginalName(),
+                'foto_kegiatan_path' => $request->hasFile('foto_kegiatan') ? $request->file('foto_kegiatan')->store('achievements/photos', 'local') : null,
+                'foto_kegiatan_name' => $request->file('foto_kegiatan')?->getClientOriginalName(),
+                'source' => 'sekolah',
+                'status' => 'pending',
+                'recorded_by' => $request->user()->id,
+            ]);
+        } catch (\Illuminate\Database\UniqueConstraintViolationException) {
+            // The double-click race the exists() check cannot close - the
+            // partial unique index (2026_09_28_000007) is the real judge.
+            return response()->json([
+                'message' => 'Prestasi dengan nama yang sama untuk anak ini sudah diajukan (masih menunggu verifikasi atau sudah tercatat) - tidak perlu diajukan dua kali.',
+            ], 422);
+        }
 
         ActivityLog::record($request->user(), 'achievement.submitted', $achievement, ['student' => $student->nama_lengkap]);
 

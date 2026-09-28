@@ -2,18 +2,33 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Inbox } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
 import { todayJakarta } from "@/lib/format";
 import { JUARA_OPTIONS, KATEGORI_OPTIONS, TINGKAT_OPTIONS } from "@/lib/types/kesiswaan";
 
 type Classroom = { ulid: string; name: string };
 type StudentRow = { ulid: string; nama_lengkap: string };
+
+/** A pending STUDENT achievement for one of this teacher's homeroom classrooms. */
+type PendingAchievement = {
+  ulid: string;
+  nama_prestasi: string;
+  kategori: string;
+  tingkat: string;
+  juara: string | null;
+  tanggal_event: string | null;
+  point_awarded: number | null;
+  student: { nama_lengkap: string } | null;
+  recorded_by?: { name: string } | null;
+};
 
 export default function GuruAchievementPage() {
   // Poin 7: two tabs - a student's achievement (proposed here, verified by
@@ -26,8 +41,21 @@ export default function GuruAchievementPage() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [studentUlid, setStudentUlid] = useState("");
 
+  // The homeroom lane's decision queue (audit 2026-09-28): pending cards
+  // for the classrooms THIS teacher homerooms, whoever proposed them. The
+  // verify/reject endpoints existed since Poin 7 but nothing surfaced the
+  // queue - the lane was unreachable dead code.
+  const [pending, setPending] = useState<PendingAchievement[] | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function loadPending() {
+    api
+      .get<{ achievements: PendingAchievement[] }>("/api/guru/achievements")
+      .then((d) => setPending(d.achievements))
+      .catch(() => setPending([]));
+  }
 
   useEffect(() => {
     if (tab !== "siswa") return;
@@ -38,6 +66,7 @@ export default function GuruAchievementPage() {
         if (d.classrooms[0]) setClassroomUlid(d.classrooms[0].ulid);
       })
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar kelas."));
+    loadPending();
   }, [tab]);
 
   useEffect(() => {
@@ -63,6 +92,7 @@ export default function GuruAchievementPage() {
         form.set("student_ulid", studentUlid);
         await api.post("/api/guru/achievements", form);
         toast.success("Pengajuan prestasi siswa tersimpan — menunggu verifikasi wali kelas.");
+        loadPending();
       } else {
         await api.post("/api/guru/achievements/self", form);
         toast.success("Pengajuan prestasi pribadi tersimpan — menunggu verifikasi admin unit.");
@@ -108,6 +138,10 @@ export default function GuruAchievementPage() {
           Prestasi Diri Saya
         </button>
       </div>
+
+      {tab === "siswa" && (
+        <HomeroomDecisionQueue pending={pending} onDecided={loadPending} />
+      )}
 
       <Card className="p-6 border-border/80 shadow-md max-w-4xl">
         <form onSubmit={submit} className="space-y-4" noValidate>
@@ -199,13 +233,143 @@ export default function GuruAchievementPage() {
           {error && <p className="rounded-lg bg-destructive/10 p-2.5 text-xs text-destructive">{error}</p>}
 
           <div className="flex justify-end pt-2">
-            <Button type="submit" disabled={submitting || !studentUlid} className="gap-2 font-bold shadow-xs">
+            {/* The diri tab needs no student - gating on !studentUlid kept a
+                homeroom-less teacher from EVER submitting their own win
+                (audit 2026-09-28). */}
+            <Button type="submit" disabled={submitting || (tab === "siswa" && !studentUlid)} className="gap-2 font-bold shadow-xs">
               <CheckCircle2 className="size-4" />
-              <span>{submitting ? "Menyimpan…" : "Simpan & Verifikasi Prestasi"}</span>
+              <span>{submitting ? "Menyimpan…" : "Kirim Pengajuan"}</span>
             </Button>
           </div>
         </form>
       </Card>
     </div>
+  );
+}
+
+/**
+ * The homeroom teacher's decision queue: pending STUDENT achievements for
+ * the classrooms this teacher homerooms - their own proposals, a
+ * colleague's, or a guardian's. Only they (or an admin) can decide these;
+ * the API enforces it, this surface finally makes it reachable.
+ */
+function HomeroomDecisionQueue({ pending, onDecided }: { pending: PendingAchievement[] | null; onDecided: () => void }) {
+  const [points, setPoints] = useState<Record<string, string>>({});
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+
+  async function decide(a: PendingAchievement, kind: "verify" | "reject") {
+    setBusy(a.ulid + kind);
+    setRowError(null);
+    try {
+      if (kind === "verify") {
+        const p = points[a.ulid] ?? (a.point_awarded ? String(a.point_awarded) : "10");
+        await api.post(`/api/guru/achievements/${a.ulid}/verify`, {
+          ...(p ? { points_awarded: Number(p) } : {}),
+        });
+        toast.success(`Prestasi ${a.student?.nama_lengkap ?? ""} terverifikasi${p ? ` — ${p} poin dicatat` : ""}.`);
+      } else {
+        const reason = (reasons[a.ulid] ?? "").trim();
+        if (!reason) {
+          setRowError("Alasan penolakan wajib diisi.");
+          setBusy(null);
+          return;
+        }
+        await api.post(`/api/guru/achievements/${a.ulid}/reject`, { reason });
+        toast.success("Pengajuan ditolak.");
+      }
+      onDecided();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Decided elsewhere (an admin got there first) - refresh, the card
+        // will drop out of the queue on its own.
+        toast.info(err.message);
+        onDecided();
+        return;
+      }
+      setRowError(err instanceof ApiError ? err.message : "Gagal memutuskan.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (pending === null) {
+    return <Skeleton className="h-24 w-full rounded-2xl" />;
+  }
+
+  if (pending.length === 0) return null;
+
+  return (
+    <Card className="p-5 border-warn/30 bg-warn-soft/30">
+      <div className="flex items-center gap-2">
+        <Inbox className="size-4 text-warn" />
+        <h2 className="text-sm font-bold text-foreground">Menunggu Keputusan Anda (wali kelas)</h2>
+        <Badge variant="warn">{pending.length}</Badge>
+      </div>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        Pengajuan prestasi siswa kelas binaan Anda — dari sesama guru maupun wali murid. Poin hanya tercatat saat Anda memutuskan.
+      </p>
+
+      <div className="mt-4 space-y-3">
+        {pending.map((a) => (
+          <div key={a.ulid} className="rounded-xl border border-border bg-card p-4">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-bold text-foreground">{a.nama_prestasi}</p>
+                <p className="text-xs text-muted-foreground">
+                  {a.student?.nama_lengkap ?? "—"} · {a.kategori} · Tingkat {a.tingkat}{a.juara ? ` · Juara ${a.juara}` : ""}
+                  {a.tanggal_event ? ` · ${a.tanggal_event}` : ""}
+                  {a.point_awarded ? ` · usulan ${a.point_awarded} poin` : ""}
+                  {a.recorded_by?.name ? ` · diajukan oleh ${a.recorded_by.name}` : ""}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <div>
+                <Label className="text-[11px] text-muted-foreground">Poin Apresiasi</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={points[a.ulid] ?? (a.point_awarded ? String(a.point_awarded) : "10")}
+                  onChange={(e) => setPoints((prev) => ({ ...prev, [a.ulid]: e.target.value }))}
+                  className="mt-1 h-9 w-28 text-xs font-bold"
+                />
+              </div>
+              <Button
+                size="sm"
+                disabled={busy !== null}
+                onClick={() => decide(a, "verify")}
+                className="gap-1.5 text-xs font-semibold"
+              >
+                <CheckCircle2 className="size-3.5" />
+                {busy === a.ulid + "verify" ? "Memproses…" : "Verifikasi & Beri Poin"}
+              </Button>
+              <div className="flex-1 min-w-[180px]">
+                <Label className="text-[11px] text-muted-foreground">Alasan (untuk menolak)</Label>
+                <Input
+                  value={reasons[a.ulid] ?? ""}
+                  onChange={(e) => setReasons((prev) => ({ ...prev, [a.ulid]: e.target.value }))}
+                  placeholder="wajib bila menolak"
+                  className="mt-1 h-9 text-xs"
+                />
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy !== null}
+                onClick={() => decide(a, "reject")}
+                className="text-xs text-destructive hover:bg-destructive/10"
+              >
+                {busy === a.ulid + "reject" ? "Memproses…" : "Tolak"}
+              </Button>
+            </div>
+
+            {rowError && busy === null && <p className="mt-2 rounded-lg bg-destructive/10 p-2 text-xs text-destructive">{rowError}</p>}
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Edit2, Power, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -289,16 +289,37 @@ export default function JadwalPage() {
   // Rows are stored tagged with the classroom they belong to: a classroom
   // switch shows the skeleton (not the previous classroom's timetable) until
   // the new one lands, without any synchronous setState in the effect.
+  // Request-tagged + reconciled (audit 2026-09-28): a late OLD response
+  // used to overwrite the fresh tag and strand the panel on a skeleton
+  // forever - a stale response is now dropped, and a mismatched store
+  // triggers one corrective refetch that converges.
+  const schedulesRequestId = useRef(0);
+
   function loadSchedules(classroomUlid: string) {
     if (!classroomUlid) return;
+    const requestId = ++schedulesRequestId.current;
     api.get<{ schedules: ClassSchedule[] }>(`/api/admin/classrooms/${classroomUlid}/schedules`)
-      .then((d) => setSchedules({ classroomUlid, rows: d.schedules }))
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat jadwal."));
+      .then((d) => {
+        if (requestId !== schedulesRequestId.current) return;
+        setSchedules({ classroomUlid, rows: d.schedules });
+      })
+      .catch((err) => {
+        if (requestId !== schedulesRequestId.current) return;
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat jadwal.");
+      });
   }
 
   useEffect(() => {
     if (selectedClassroom) loadSchedules(selectedClassroom);
-  }, [selectedClassroom]);
+  }, [selectedClassroom]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reconciliation: the store's tag can only disagree with the selection
+  // through an out-of-order write - refetch once and converge.
+  useEffect(() => {
+    if (schedules !== null && selectedClassroom && schedules.classroomUlid !== selectedClassroom) {
+      loadSchedules(selectedClassroom);
+    }
+  }, [schedules, selectedClassroom]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The cascade's map (bug batch Poin 3): derived from the SAME classrooms
   // the Kelas picker lists, so Jenjang offers exactly the ladder that runs
@@ -365,8 +386,12 @@ export default function JadwalPage() {
                   setUnitFilter(nextUnit);
                   // Top-down cascade (Poin 3): a new unit resets a jenjang
                   // it doesn't run, and the kelas follows whatever survives.
+                  // "Semua Unit" runs every jenjang and keeps the pick
+                  // (audit 2026-09-28: it used to clear it).
                   const nextJenjang =
-                    jenjangFilter && !(jenjangByUnit[nextUnit] ?? []).includes(jenjangFilter) ? "" : jenjangFilter;
+                    jenjangFilter && nextUnit && !(jenjangByUnit[nextUnit] ?? []).includes(jenjangFilter)
+                      ? ""
+                      : jenjangFilter;
                   if (nextJenjang !== jenjangFilter) setJenjangFilter(nextJenjang);
                   refocusKelas(nextUnit, nextJenjang);
                 }}

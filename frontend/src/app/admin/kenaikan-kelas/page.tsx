@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ArrowRight, Users } from "lucide-react";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -55,7 +55,9 @@ export default function KenaikanKelasPage() {
   const [jenjangFilter, setJenjangFilter] = useState("");
   const [unitOptions, setUnitOptions] = useState<{ code: string; label: string }[]>([]);
 
-  const [roster, setRoster] = useState<RosterStudent[] | null>(null);
+  // Tagged with its source classroom (audit 2026-09-28): stale rows from a
+  // previous pick must never ride along into a new run.
+  const [roster, setRoster] = useState<{ classroomUlid: string; students: RosterStudent[] } | null>(null);
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const [targetClassrooms, setTargetClassrooms] = useState<Record<string, string>>({});
 
@@ -64,46 +66,58 @@ export default function KenaikanKelasPage() {
   const [bulkTarget, setBulkTarget] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
+  const loadClassrooms = useCallback((yearsList: AcademicYearOption[]) => {
     // Source picker stays inside the ACTIVE academic year (audit T63-a):
     // unfiltered, the picker showed every year's classrooms with identical
     // labels, and picking an old-year source sailed right past the
     // target-year guard (only target <= source is refused - the reverse
     // re-closed a closed year and re-issued the current one).
+    const active = yearsList.find((y) => y.is_active);
+    const query = active ? `?academic_year_ulid=${active.ulid}` : "";
+    api
+      .get<{ classrooms: ClassroomOption[] }>(`/api/admin/classrooms${query}`)
+      .then((d) => setClassrooms(d.classrooms))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar kelas."));
+  }, []);
+
+  useEffect(() => {
+    // Catch added (audit 2026-09-28): a failure here used to leave an
+    // unhandled rejection and a permanent skeleton.
     api
       .get<{ academic_years: AcademicYearOption[] }>("/api/admin/academic-years")
       .then((d) => {
         setYears(d.academic_years);
-        const active = d.academic_years.find((y) => y.is_active);
-        const query = active ? `?academic_year_ulid=${active.ulid}` : "";
-        return api.get<{ classrooms: ClassroomOption[] }>(`/api/admin/classrooms${query}`);
+        loadClassrooms(d.academic_years);
       })
-      .then((d) => setClassrooms(d.classrooms));
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat tahun ajaran."));
 
     if (isCentral) {
       api.get<{ school_units: { code: string; label: string }[] }>("/api/admin/school-units")
         .then((d) => setUnitOptions(d.school_units))
         .catch(() => {});
     }
-  }, [isCentral]);
+  }, [isCentral, loadClassrooms]);
 
-  // No sync reset-to-null inside the effects: "empty" is derived during
-  // render from the selectors (a roster without a source class, target
-  // options without a target year, render nothing), and a switch keeps the
-  // previous rows until the new ones land - no setState ever runs
-  // synchronously from an effect.
+  // Roster carries its SOURCE (audit 2026-09-28): the old shape kept the
+  // previous class's rows through a failed or out-of-order fetch while
+  // sourceClassroom had already moved on - submit would then promote class
+  // A's students inside class B's run. The tag makes stale rows inert
+  // wherever they render.
   useEffect(() => {
     if (!sourceClassroom) return;
 
     api.get<{ students: RosterStudent[] }>(`/api/admin/classrooms/${sourceClassroom}/promotion-roster`)
       .then((d) => {
-        setRoster(d.students);
+        setRoster({ classroomUlid: sourceClassroom, students: d.students });
         const defaults: Record<string, Outcome> = {};
         d.students.forEach((s) => { defaults[s.ulid] = "promoted"; });
         setOutcomes(defaults);
         setTargetClassrooms({});
       })
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar siswa."));
+      .catch((err) => {
+        setRoster(null);
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar siswa.");
+      });
   }, [sourceClassroom]);
 
   useEffect(() => {
@@ -134,10 +148,10 @@ export default function KenaikanKelasPage() {
   }
 
   function applyBulkTarget() {
-    if (!bulkTarget || !roster) return;
+    if (!bulkTarget || !rosterStudents) return;
     setTargetClassrooms((prev) => {
       const next = { ...prev };
-      roster.forEach((s) => {
+      rosterStudents.forEach((s) => {
         if (outcomes[s.ulid] === "promoted") next[s.ulid] = bulkTarget;
       });
       return next;
@@ -161,6 +175,9 @@ export default function KenaikanKelasPage() {
       toast.success(result.message);
       setRoster(null);
       setSourceClassroom("");
+      // The table's roster counts went stale the moment enrollment moved
+      // (audit 2026-09-28) - reload them alongside the reset.
+      loadClassrooms(years);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal membatalkan promosi.");
     } finally {
@@ -169,10 +186,10 @@ export default function KenaikanKelasPage() {
   }
 
   async function submit() {
-    if (!roster || !targetYear) return;
+    if (!rosterStudents || !targetYear) return;
     setSubmitting(true);
     try {
-      const entries = roster.map((s) => ({
+      const entries = rosterStudents.map((s) => ({
         student_ulid: s.ulid,
         outcome: outcomes[s.ulid],
         target_classroom_ulid: ["promoted", "repeated"].includes(outcomes[s.ulid]) ? targetClassrooms[s.ulid] : undefined,
@@ -186,6 +203,7 @@ export default function KenaikanKelasPage() {
       toast.success(`${result.promoted} siswa berhasil diproses.`);
       setRoster(null);
       setSourceClassroom("");
+      loadClassrooms(years);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menjalankan kenaikan kelas.");
     } finally {
@@ -193,8 +211,12 @@ export default function KenaikanKelasPage() {
     }
   }
 
-  const readyToSubmit = roster !== null && roster.length > 0 && targetYear
-    && roster.every((s) => !["promoted", "repeated"].includes(outcomes[s.ulid]) || targetClassrooms[s.ulid]);
+  // Only the CURRENT source's rows are usable (audit 2026-09-28): a stale
+  // roster from a previous pick must render and submit as nothing.
+  const rosterStudents = roster?.classroomUlid === sourceClassroom ? roster.students : null;
+
+  const readyToSubmit = rosterStudents !== null && rosterStudents.length > 0 && targetYear
+    && rosterStudents.every((s) => !["promoted", "repeated"].includes(outcomes[s.ulid]) || targetClassrooms[s.ulid]);
 
   // Poin 3's per-class table: the active-year classrooms narrowed by unit +
   // jenjang, in ladder order, with each row's active roster size.
@@ -231,7 +253,9 @@ export default function KenaikanKelasPage() {
               onChange={(e) => {
                 const nextUnit = e.target.value;
                 setUnitFilter(nextUnit);
-                if (jenjangFilter && !(jenjangByUnit[nextUnit] ?? []).includes(jenjangFilter)) {
+                // "Semua Unit" runs every jenjang, so it keeps the pick
+                // (audit 2026-09-28: it used to clear it).
+                if (jenjangFilter && nextUnit && !(jenjangByUnit[nextUnit] ?? []).includes(jenjangFilter)) {
                   setJenjangFilter("");
                 }
               }}
@@ -392,12 +416,12 @@ export default function KenaikanKelasPage() {
         </Card>
       )}
 
-      {sourceClassroom && roster === null && <Skeleton className="h-64 w-full" />}
+      {sourceClassroom && rosterStudents === null && <Skeleton className="h-64 w-full" />}
 
-      {sourceClassroom && roster !== null && (
+      {sourceClassroom && rosterStudents !== null && (
         <div className="flex flex-col gap-2">
-          {roster.length === 0 && <p className="text-sm text-muted-foreground">Tidak ada siswa aktif di kelas ini.</p>}
-          {roster.map((s) => {
+          {rosterStudents.length === 0 && <p className="text-sm text-muted-foreground">Tidak ada siswa aktif di kelas ini.</p>}
+          {rosterStudents.map((s) => {
             const outcome = outcomes[s.ulid];
             const needsTarget = outcome === "promoted" || outcome === "repeated";
 
@@ -443,11 +467,11 @@ export default function KenaikanKelasPage() {
         </div>
       )}
 
-      {sourceClassroom && roster !== null && roster.length > 0 && (
+      {sourceClassroom && rosterStudents !== null && rosterStudents.length > 0 && (
         <div className="fixed inset-x-0 bottom-0 border-t bg-card/95 px-6 py-4 backdrop-blur-sm">
           <div className="mx-auto flex max-w-5xl items-center justify-between">
             <p className="text-sm text-muted-foreground">
-              {roster.length} siswa akan diproses ke tahun ajaran {years.find((y) => y.ulid === targetYear)?.year}.
+              {rosterStudents.length} siswa akan diproses ke tahun ajaran {years.find((y) => y.ulid === targetYear)?.year}.
             </p>
             <Button onClick={submit} disabled={!readyToSubmit || submitting}>
               {submitting ? "Memproses…" : "Jalankan Kenaikan Kelas"}

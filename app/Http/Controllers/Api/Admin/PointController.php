@@ -31,15 +31,38 @@ class PointController extends Controller
         $term = Term::current();
 
         if (! $term) {
-            return response()->json(['students' => [], 'term' => null]);
+            // Same {summary, students:{data, meta}} shape as the full path
+            // (audit 2026-09-28): the old flat empty array crashed the
+            // frontend's summary fallback between semesters.
+            return response()->json([
+                'term' => null,
+                'summary' => ['total' => 0, 'flagged' => 0],
+                'students' => ['data' => [], 'meta' => ['current_page' => 1, 'last_page' => 1, 'total' => 0, 'per_page' => 20, 'from' => null, 'to' => null]],
+            ]);
         }
 
         $students = Student::query()
             ->visibleTo($request->user())
             ->active()
-            ->when($request->string('search')->value(), fn ($q, $search) => $q->where('nama_lengkap', 'like', '%'.$search.'%'))
+            ->when($search = $request->string('search')->value(), fn ($q) => $q->where(
+                // Escaped, else a user typing "%" or "_" gets wildcard
+                // semantics and the "search" widens instead of narrows.
+                'nama_lengkap',
+                'like',
+                '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search).'%',
+            ))
             ->when($request->string('unit')->value(), fn ($q, $code) => $q->whereHas('schoolUnit', fn ($u) => $u->where('code', $code)))
             ->when($jenjang = $request->string('jenjang')->value(), function ($q, $jenjang) use ($term) {
+                // Coarse keys stay unit-group-only - an unplaced student has
+                // no rung to sit on and must NOT vanish from the discipline
+                // roster just because a coarse filter was picked (mirrors
+                // StudentController, which documents the same distinction).
+                if (\App\Support\Jenjang::entry($jenjang) === null) {
+                    $q->whereHas('schoolUnit', fn ($u) => $u->where('jenjang_group', \App\Support\Jenjang::groupOf($jenjang) ?? $jenjang));
+
+                    return;
+                }
+
                 $q->whereHas('enrollments', function ($eq) use ($jenjang, $term) {
                     $eq->where('status', 'active')
                         ->where('academic_year_id', $term->academic_year_id)
@@ -72,12 +95,17 @@ class PointController extends Controller
             ];
         });
 
+        // A student counts as "terkena ambang" only in a WARNING band - a
+        // green "Aman" band must not flag the whole roster (audit
+        // 2026-09-28).
+        $isFlagged = fn (array $row) => $row['threshold'] !== null && $row['threshold']['color'] !== 'good';
+
         // The KPI cards count the unit/jenjang/search scope as a whole - so
         // the summary is taken BEFORE the threshold/flagged narrowing that
         // only shapes the paged list.
         $summary = [
             'total' => $rows->count(),
-            'flagged' => $rows->filter(fn ($row) => $row['threshold'] !== null)->count(),
+            'flagged' => $rows->filter($isFlagged)->count(),
         ];
 
         if ($thresholdUlid = $request->string('threshold')->value()) {
@@ -85,28 +113,30 @@ class PointController extends Controller
         }
 
         if ($request->boolean('flagged')) {
-            $rows = $rows->filter(fn ($row) => $row['threshold'] !== null)->values();
+            $rows = $rows->filter($isFlagged)->values();
         }
 
         $sorted = $rows->sortBy('balance')->values();
         $perPage = 20;
         $page = max(1, $request->integer('page', 1));
+        $pageRows = $sorted->forPage($page, $perPage)->values();
 
         // The {data, meta} shape the siswa tab's pagination already speaks
         // (a raw paginator would serialize flat), so the frontend component
-        // is reused as-is.
+        // is reused as-is. from/to come from the PAGE slice - beyond the
+        // last page they are null, never "81-26 of 26".
         return response()->json([
             'term' => $term->label(),
             'summary' => $summary,
             'students' => [
-                'data' => $sorted->forPage($page, $perPage)->values(),
+                'data' => $pageRows,
                 'meta' => [
                     'current_page' => $page,
                     'last_page' => max(1, (int) ceil($sorted->count() / $perPage)),
                     'total' => $sorted->count(),
                     'per_page' => $perPage,
-                    'from' => $sorted->count() === 0 ? null : ($page - 1) * $perPage + 1,
-                    'to' => $sorted->count() === 0 ? null : min($page * $perPage, $sorted->count()),
+                    'from' => $pageRows->isEmpty() ? null : ($page - 1) * $perPage + 1,
+                    'to' => $pageRows->isEmpty() ? null : ($page - 1) * $perPage + $pageRows->count(),
                 ],
             ],
         ]);

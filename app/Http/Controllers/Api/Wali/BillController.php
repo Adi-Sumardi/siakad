@@ -131,14 +131,24 @@ class BillController extends Controller
             ->open()
             ->get(['id', 'status', 'remaining_amount', 'updated_at']);
 
+        // Rolling 7 days, NOT startOfDay-aligned: the frontend filters the
+        // receipts list by an exact millisecond cutoff, and a calendar-day
+        // window here made the badge count a receipt the list then hid
+        // (audit 2026-09-28).
         $recentPayments = Payment::query()
             ->visibleTo($request->user())
             ->where('status', 'completed')
             ->whereNotNull('paid_at')
-            ->where('paid_at', '>=', now()->subDays(7)->startOfDay());
+            ->where('paid_at', '>=', now()->subDays(7));
 
         $receiptsCount = (clone $recentPayments)->count();
-        $latestPaymentAt = (clone $recentPayments)->max('paid_at');
+        // A query-builder max() returns a raw string; the collection max()
+        // over the bills side returns Carbon. Mixed, ->max() hands back the
+        // string - and $latestChangeAt?->toIso8601String() then fatals on
+        // it exactly when the family has no open bills but a fresh receipt
+        // (the endpoint's flagship scenario). Parse to Carbon first.
+        $latestPaymentRaw = (clone $recentPayments)->max('paid_at');
+        $latestPaymentAt = $latestPaymentRaw !== null ? Carbon::parse((string) $latestPaymentRaw) : null;
 
         $latestChangeAt = collect([$open->max('updated_at'), $latestPaymentAt])->filter()->max();
 

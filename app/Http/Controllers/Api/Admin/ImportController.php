@@ -175,7 +175,20 @@ class ImportController extends Controller
                 // back to 'active', resurrecting graduated students straight
                 // into billing candidates and watchlists.
                 if ($isNew) {
-                    $student->status = ! empty($data['status']) ? strtolower($data['status']) : 'active';
+                    // Whitelisted like its siblings (audit 2026-09-28): the
+                    // natural Indonesian "Aktif"/"Lulus"/"Pindah" in a CSV
+                    // used to hit the enum CHECK and abort the WHOLE import
+                    // with a raw DB error; unknown values now land in the
+                    // row's error message instead.
+                    $statusMap = [
+                        'active' => 'active', 'aktif' => 'active', 'siswa baru' => 'active',
+                        'prospective' => 'prospective', 'calon' => 'prospective', 'calon siswa' => 'prospective',
+                        'graduated' => 'graduated', 'lulus' => 'graduated', 'alumni' => 'graduated',
+                        'transferred' => 'transferred', 'pindah' => 'transferred', 'mutasi' => 'transferred',
+                        'dropped_out' => 'dropped_out', 'keluar' => 'dropped_out', 'berhenti' => 'dropped_out',
+                    ];
+                    $statusRaw = mb_strtolower(trim((string) ($data['status'] ?? '')));
+                    $student->status = $statusMap[$statusRaw] ?? 'active';
                 }
                 $student->save();
 

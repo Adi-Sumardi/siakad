@@ -55,6 +55,30 @@ class Bill extends Model
         return $this->belongsTo(FeeRate::class);
     }
 
+    /**
+     * The billing period as a calendar date, the year resolved through the
+     * ACADEMIC year rather than the printing date (audit 2026-09-28):
+     * months 7-12 sit in the academic year's start year, months 1-6 in the
+     * following calendar year. Deriving it from issued_at labelled a
+     * January bill pre-printed in December as "Januari 2026" when the
+     * 2026/2027 academic year means January 2027 - on every reminder and
+     * receipt. Null when the bill has no period month.
+     */
+    public function periodDate(): ?\Illuminate\Support\Carbon
+    {
+        if (! $this->period_month) {
+            return null;
+        }
+
+        $this->loadMissing('academicYear');
+
+        $startYear = $this->academicYear?->starts_on?->year;
+
+        return $startYear
+            ? \Illuminate\Support\Carbon::create((int) $this->period_month >= 7 ? $startYear : $startYear + 1, (int) $this->period_month, 1)
+            : null;
+    }
+
     public function academicYear(): BelongsTo
     {
         return $this->belongsTo(AcademicYear::class);

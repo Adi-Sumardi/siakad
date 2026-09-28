@@ -240,10 +240,20 @@ export default function WaliPrestasiPage() {
                     </div>
                   )}
 
-                  {ach.point_awarded && ach.point_awarded > 0 && (
+                  {/* Gated on status (audit 2026-09-28): pending rows carry
+                      the guru's PROPOSAL in point_awarded, which used to
+                      render as "poin diberikan" for a win nobody had even
+                      verified - or that was rejected. */}
+                  {isVerified && !!ach.point_awarded && ach.point_awarded > 0 && (
                     <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-500/10 p-2 rounded-lg">
                       <Sparkles className="size-3.5" />
                       <span>+{ach.point_awarded} Poin Apresiasi Kesiswaan Diberikan</span>
+                    </div>
+                  )}
+                  {isPending && !!ach.point_awarded && ach.point_awarded > 0 && (
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/40 p-2 rounded-lg">
+                      <Sparkles className="size-3.5" />
+                      <span>Usulan poin: {ach.point_awarded} (belum diberikan)</span>
                     </div>
                   )}
                 </div>

@@ -158,6 +158,12 @@ export default function AdminAchievementsPage() {
   const [tab, setTab] = useState<"siswa" | "guru">("siswa");
 
   function load() {
+    // Null FIRST (audit 2026-09-28): switching tabs used to leave the OLD
+    // tab's rows rendered with live decision buttons while the new fetch
+    // was in flight - and isTeacher came from the NEW tab, so clicking a
+    // stale student row verified it with the wrong payload (no points, the
+    // proposal destroyed).
+    setAchievements(null);
     const params = new URLSearchParams();
     if (filter) params.set("status", filter);
     params.set("achiever_type", tab);
@@ -280,7 +286,11 @@ export default function AdminAchievementsPage() {
                 )}
               </div>
 
-              {a.status === "pending" && <DecisionRow achievement={a} onDecided={load} isTeacher={tab === "guru"} />}
+              {a.status === "pending" && (
+                // isTeacher from the ROW, never the tab (audit 2026-09-28):
+                // the tab state can lag the rows on screen.
+                <DecisionRow achievement={a} onDecided={load} isTeacher={a.achiever_type === "guru"} />
+              )}
               {a.status === "rejected" && a.rejection_reason && (
                 <p className="mt-3 text-xs text-bad bg-bad-soft/40 p-2.5 rounded-lg">
                   Alasan Penolakan: {a.rejection_reason}

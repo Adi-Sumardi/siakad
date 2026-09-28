@@ -223,6 +223,16 @@ class UserController extends Controller
         }
 
         $user->fill(collect($validated)->except(['school_unit_ulid'])->all());
+
+        // Clearing the phone must also drop its blind index (audit
+        // 2026-09-28): setAttribute() skips hash-sync on null, so the stale
+        // phone_hash kept resolving OTP logins for a number the admin just
+        // removed - and kept the number locked against every other account.
+        // The mirror blocks below clear their hashes for the same reason.
+        if (array_key_exists('phone', $validated) && blank((string) $user->phone)) {
+            $user->phone_hash = null;
+        }
+
         $user->save();
 
         // Deactivation consumes the account's outstanding invitations
@@ -274,7 +284,14 @@ class UserController extends Controller
             $user->guardian->forceFill($mirror)->save();
         }
 
-        ActivityLog::record($request->user(), 'user.updated', $user, $validated);
+        // Masked (audit 2026-09-28): $validated carries the raw email/phone
+        // and meta is a plain JSON column - the neighboring actions mask
+        // exactly so no second plaintext copy lands in the audit trail.
+        $activityMeta = collect($validated)->map(fn ($value, $key) => in_array($key, ['email', 'phone'], true)
+            ? NotificationLog::maskRecipient((string) $value)
+            : $value)->all();
+
+        ActivityLog::record($request->user(), 'user.updated', $user, $activityMeta);
 
         return response()->json(['user' => $user->fresh('schoolUnit')]);
     }

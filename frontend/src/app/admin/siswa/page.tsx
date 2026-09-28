@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -129,11 +129,17 @@ function AdminStudentsContent() {
   const [formStatus, setFormStatus] = useState("active");
   const [submitting, setSubmitting] = useState(false);
 
+  // Out-of-order guard (audit 2026-09-28): a slow EARLIER fetch landing
+  // after a newer one used to overwrite the fresh rows and meta with the
+  // old filter's.
+  const loadRequestId = useRef(0);
+
   // No separate loading flag: `students === null` IS the first-load state, so a
   // refetch (filter/search change) keeps the previous rows on screen instead of
   // flashing a skeleton - and nothing ever calls setState synchronously in the
   // effect below.
   function loadStudents(targetPage: number = page) {
+    const requestId = ++loadRequestId.current;
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (unitFilter) params.set("unit", unitFilter);
@@ -149,10 +155,14 @@ function AdminStudentsContent() {
         `/api/admin/students?${params.toString()}`,
       )
       .then((d) => {
+        if (requestId !== loadRequestId.current) return;
         setStudents(d.students.data);
         setMeta(d.students.meta);
       })
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data siswa."));
+      .catch((err) => {
+        if (requestId !== loadRequestId.current) return;
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat data siswa.");
+      });
   }
 
   useEffect(() => {
@@ -468,8 +478,12 @@ function AdminStudentsContent() {
                 onChange={(key) => {
                   setJenjangFilter(key);
                   // Two-way cascade (Poin 1): a jenjang the picked unit
-                  // doesn't run un-picks the unit, back to "Semua Unit".
-                  if (key && unitFilter && !(jenjangByUnit?.[unitFilter] ?? []).includes(key)) {
+                  // doesn't run un-picks the unit - but ONLY when the map is
+                  // actually known (a null map is a failed/pending fetch,
+                  // not "no unit runs this") and a unit is picked. Widening
+                  // to "Semua Unit" means every jenjang applies and keeps
+                  // the pick (audit 2026-09-28: it used to clear it).
+                  if (key && unitFilter && jenjangByUnit && !(jenjangByUnit[unitFilter] ?? []).includes(key)) {
                     setUnitFilter("");
                   }
                   setPage(1);
@@ -489,8 +503,10 @@ function AdminStudentsContent() {
                   const nextUnit = e.target.value;
                   setUnitFilter(nextUnit);
                   // Two-way cascade (Poin 1): switching units resets a
-                  // jenjang the new unit doesn't run.
-                  if (jenjangFilter && !(jenjangByUnit?.[nextUnit] ?? []).includes(jenjangFilter)) {
+                  // jenjang the new unit doesn't run - "Semua Unit" runs
+                  // everything, so it keeps the pick; an unknown map (null)
+                  // resets nothing either.
+                  if (jenjangFilter && nextUnit && jenjangByUnit && !(jenjangByUnit[nextUnit] ?? []).includes(jenjangFilter)) {
                     setJenjangFilter("");
                   }
                   setPage(1);
@@ -498,7 +514,7 @@ function AdminStudentsContent() {
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
               >
                 <option value="">Semua Unit</option>
-                {unitsWithJenjang(units, jenjangByUnit ?? {}, jenjangFilter || null).map((u) => (
+                {unitsWithJenjang(units, jenjangByUnit, jenjangFilter || null).map((u) => (
                   <option key={u.ulid} value={u.code}>
                     {u.label}
                   </option>

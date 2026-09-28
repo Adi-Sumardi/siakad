@@ -133,6 +133,29 @@ class WaliBellSummaryTest extends TestCase
             ->assertOk()->assertJsonPath('changed_since', false);
     }
 
+    public function test_a_fully_paid_family_with_a_recent_receipt_still_gets_a_summary(): void
+    {
+        // The endpoint's flagship scenario, which used to 500: zero open
+        // bills, so the signature's only input is the raw-string payment
+        // max() - calling toIso8601String() on it fataled, the frontend
+        // swallowed the 500, and the bell silently vanished for a week
+        // after every full payoff.
+        $student = $this->student();
+        $user = $this->guardianFor($student);
+        $payer = Guardian::where('user_id', $user->id)->first();
+
+        $this->payment($payer, 'completed', now()->subDays(2)->toIso8601String());
+
+        $this->actingAs($user)->getJson('/api/wali/bell-summary')->assertOk()
+            ->assertJsonPath('open_count', 0)
+            ->assertJsonPath('overdue_count', 0)
+            ->assertJsonPath('outstanding', 0)
+            ->assertJsonPath('receipts_count', 1);
+        $this->assertNotNull(
+            $this->actingAs($user)->getJson('/api/wali/bell-summary')->json('latest_change_at'),
+        );
+    }
+
     public function test_another_familys_money_never_reaches_the_summary(): void
     {
         $mine = $this->student('Anak Sendiri');

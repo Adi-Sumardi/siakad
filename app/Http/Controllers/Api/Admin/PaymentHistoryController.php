@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Services\Billing\PaymentReceiptPdfService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -90,7 +91,20 @@ class PaymentHistoryController extends Controller
         }
 
         if (! $payment->receipt_public_token) {
-            $payment->forceFill(['receipt_public_token' => \Illuminate\Support\Str::random(32)])->save();
+            // Under a row lock (audit 2026-09-28): two admins clicking
+            // "share" concurrently both saw a null token and both minted -
+            // the second save won and the first admin handed out a dead
+            // link. The lock serializes the check; the loser re-reads the
+            // winner's token and returns the SAME stable link.
+            $payment = DB::transaction(function () use ($payment) {
+                $fresh = Payment::query()->lockForUpdate()->whereKey($payment->id)->firstOrFail();
+
+                if (! $fresh->receipt_public_token) {
+                    $fresh->forceFill(['receipt_public_token' => \Illuminate\Support\Str::random(32)])->save();
+                }
+
+                return $fresh;
+            });
         }
 
         return response()->json(['url' => "/receipt/{$payment->receipt_public_token}"]);

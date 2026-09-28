@@ -193,26 +193,35 @@ export default function FeeRatesPage() {
         setUnits(uRes.school_units);
         setYears(yRes.academic_years);
 
-        if (ftRes.fee_types.length > 0 && !rateForm.fee_type_ulid) {
-          // A unit admin's only writable rate is their unit's Cambridge - the
-          // form opens pre-locked to it so a submit can never name anything
-          // the API would refuse.
-          setRateForm((f) => ({
-            ...f,
-            fee_type_ulid: isCentral
-              ? ftRes.fee_types[0].ulid
-              : ftRes.fee_types.find((t) => t.code === "cambridge")?.ulid ?? "",
-            school_unit_ulid: isCentral
-              ? uRes.school_units[0]?.ulid ?? ""
-              : user?.school_unit?.ulid ?? uRes.school_units[0]?.ulid ?? "",
-            academic_year_ulid: yRes.academic_years.find((y) => y.is_active)?.ulid ?? yRes.academic_years[0]?.ulid ?? "",
-          }));
+        // Functional + ref-read (audit 2026-09-28): the prefill used to read
+        // rateForm.fee_type_ulid from the closure AND list it in the deps,
+        // so the very first prefill changed loadData's identity and re-ran
+        // the whole quadruple fetch on every mount.
+        if (ftRes.fee_types.length > 0) {
+          setRateForm((f) => {
+            if (f.fee_type_ulid) return f;
+            // A unit admin's only writable rate is their unit's Cambridge -
+            // the form opens pre-locked to it so a submit can never name
+            // anything the API would refuse.
+            return {
+              ...f,
+              fee_type_ulid: isCentral
+                ? ftRes.fee_types[0].ulid
+                : ftRes.fee_types.find((t) => t.code === "cambridge")?.ulid ?? "",
+              school_unit_ulid: isCentral
+                ? uRes.school_units[0]?.ulid ?? ""
+                : user?.school_unit?.ulid ?? uRes.school_units[0]?.ulid ?? "",
+              academic_year_ulid: yRes.academic_years.find((y) => y.is_active)?.ulid ?? yRes.academic_years[0]?.ulid ?? "",
+            };
+          });
         }
       })
       .catch((err) => {
         toast.error(err instanceof ApiError ? err.message : "Gagal memuat data tarif.");
       });
-  }, [filterUnit, filterType, filterYear, rateForm.fee_type_ulid, isCentral, user?.school_unit?.ulid]);
+    // rateForm.fee_type_ulid deliberately NOT a dep (see above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterUnit, filterType, filterYear, isCentral, user?.school_unit?.ulid]);
 
   useEffect(() => {
     loadData();

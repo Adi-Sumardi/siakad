@@ -10,6 +10,7 @@ use App\Http\Resources\AchievementResource;
 use App\Models\Achievement;
 use App\Models\ActivityLog;
 use App\Models\Student;
+use App\Models\Term;
 use App\Services\Kesiswaan\AchievementDecisionService;
 use App\Services\Kesiswaan\AchievementStateFailure;
 use App\Services\Points\PointLedger;
@@ -21,6 +22,38 @@ use RuntimeException;
 
 class AchievementController extends Controller
 {
+    /**
+     * The homeroom lane's missing half (audit 2026-09-28): the verify/reject
+     * endpoints existed since Poin 7, but a guru had no way to even SEE the
+     * pending cards - no GET route, no UI, the lane was dead code. This
+     * lists the pending STUDENT achievements for the classrooms the
+     * requesting teacher homerooms in the active term's year, whoever
+     * proposed them (a colleague or the family) - exactly the rows the
+     * service's refusalFor() lets this teacher decide.
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $term = Term::current();
+
+        if (! $term) {
+            return response()->json(['achievements' => []]);
+        }
+
+        $achievements = Achievement::query()
+            ->where('achiever_type', 'siswa')
+            ->where('status', 'pending')
+            ->whereHas('student.enrollments', function ($eq) use ($term, $request) {
+                $eq->where('status', 'active')
+                    ->where('academic_year_id', $term->academic_year_id)
+                    ->whereHas('classroom', fn ($cq) => $cq->where('homeroom_teacher_id', $request->user()->id));
+            })
+            ->with(['student', 'recordedBy'])
+            ->orderByDesc('created_at')
+            ->get();
+
+        return response()->json(['achievements' => AchievementResource::collection($achievements)]);
+    }
+
     /**
      * A teacher recording a win they witnessed - trusted immediately, unlike a
      * guardian's own account of it. Points are optional and decided here, on
@@ -38,7 +71,7 @@ class AchievementController extends Controller
         // time, which is exactly how points looked "added repeatedly".
         if (Achievement::pendingDuplicateExists($student->id, null, $validated['nama_prestasi'], $validated['tanggal_event'] ?? null)) {
             return response()->json([
-                'message' => 'Pengajuan prestasi yang sama (nama & tanggal event identik) untuk siswa ini masih menunggu verifikasi - tidak perlu diajukan dua kali.',
+                'message' => 'Prestasi dengan nama yang sama untuk siswa ini sudah diajukan (masih menunggu verifikasi atau sudah tercatat) - tidak perlu diajukan dua kali.',
             ], 422);
         }
 
@@ -47,25 +80,33 @@ class AchievementController extends Controller
         // points are written at decision time, exactly once. The
         // points_awarded field the request may carry is recorded as the
         // PROPOSAL for the verifier to see - it awards nothing here.
-        $achievement = Achievement::create([
-            'student_id' => $student->id,
-            'nama_prestasi' => $validated['nama_prestasi'],
-            'kategori' => $validated['kategori'],
-            'tingkat' => $validated['tingkat'],
-            'juara' => $validated['juara'] ?? null,
-            'nama_event' => $validated['nama_event'] ?? null,
-            'penyelenggara' => $validated['penyelenggara'] ?? null,
-            'tanggal_event' => $validated['tanggal_event'] ?? null,
-            'tempat_event' => $validated['tempat_event'] ?? null,
-            'sertifikat_path' => $request->hasFile('sertifikat') ? $request->file('sertifikat')->store('achievements/certificates', 'local') : null,
-            'sertifikat_name' => $request->file('sertifikat')?->getClientOriginalName(),
-            'foto_kegiatan_path' => $request->hasFile('foto_kegiatan') ? $request->file('foto_kegiatan')->store('achievements/photos', 'local') : null,
-            'foto_kegiatan_name' => $request->file('foto_kegiatan')?->getClientOriginalName(),
-            'source' => 'sekolah',
-            'status' => 'pending',
-            'recorded_by' => $request->user()->id,
-            'point_awarded' => $validated['points_awarded'] ?? null,
-        ]);
+        try {
+            $achievement = Achievement::create([
+                'student_id' => $student->id,
+                'nama_prestasi' => $validated['nama_prestasi'],
+                'kategori' => $validated['kategori'],
+                'tingkat' => $validated['tingkat'],
+                'juara' => $validated['juara'] ?? null,
+                'nama_event' => $validated['nama_event'] ?? null,
+                'penyelenggara' => $validated['penyelenggara'] ?? null,
+                'tanggal_event' => $validated['tanggal_event'] ?? null,
+                'tempat_event' => $validated['tempat_event'] ?? null,
+                'sertifikat_path' => $request->hasFile('sertifikat') ? $request->file('sertifikat')->store('achievements/certificates', 'local') : null,
+                'sertifikat_name' => $request->file('sertifikat')?->getClientOriginalName(),
+                'foto_kegiatan_path' => $request->hasFile('foto_kegiatan') ? $request->file('foto_kegiatan')->store('achievements/photos', 'local') : null,
+                'foto_kegiatan_name' => $request->file('foto_kegiatan')?->getClientOriginalName(),
+                'source' => 'sekolah',
+                'status' => 'pending',
+                'recorded_by' => $request->user()->id,
+                'point_awarded' => $validated['points_awarded'] ?? null,
+            ]);
+        } catch (\Illuminate\Database\UniqueConstraintViolationException) {
+            // The double-click race the exists() check cannot close - the
+            // partial unique index (2026_09_28_000007) is the real judge.
+            return response()->json([
+                'message' => 'Prestasi dengan nama yang sama untuk siswa ini sudah diajukan (masih menunggu verifikasi atau sudah tercatat) - tidak perlu diajukan dua kali.',
+            ], 422);
+        }
 
         ActivityLog::record($request->user(), 'achievement.proposed', $achievement, ['student' => $student->nama_lengkap]);
 
@@ -100,7 +141,7 @@ class AchievementController extends Controller
         // win, or verifying the clones multiplies the points.
         if (Achievement::pendingDuplicateExists(null, $user->id, $validated['nama_prestasi'], $validated['tanggal_event'] ?? null)) {
             return response()->json([
-                'message' => 'Pengajuan prestasi diri yang sama (nama & tanggal event identik) masih menunggu verifikasi - tidak perlu diajukan dua kali.',
+                'message' => 'Prestasi diri dengan nama yang sama sudah diajukan (masih menunggu verifikasi atau sudah tercatat) - tidak perlu diajukan dua kali.',
             ], 422);
         }
 

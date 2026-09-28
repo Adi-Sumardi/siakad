@@ -21,9 +21,9 @@ return new class extends Migration
 
     public function down(): void
     {
-        if (DB::getDriverName() === 'pgsql') {
-            DB::statement('ALTER TABLE integration_events DROP CONSTRAINT IF EXISTS integration_events_source_check');
-            DB::statement("ALTER TABLE integration_events ADD CONSTRAINT integration_events_source_check CHECK (source::text = ANY (ARRAY['pmb'::character varying, 'xendit'::character varying]::text[]))");
-        }
+        // One-way by design (audit 2026-09-28): recreating the check
+        // WITHOUT 'sendagopay' fails on PostgreSQL the moment any such
+        // row exists - deleting live integration history to make a
+        // rollback pass is the wrong trade.
     }
 };

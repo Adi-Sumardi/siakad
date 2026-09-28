@@ -227,10 +227,19 @@ class BillingApiGateway implements PaymentGateway
             $payment = $this->liveVaPaymentFor($bill, $bank);
 
             if (! $payment) {
+                // Whole rupiah, exactly like the checkout lane (audit
+                // 2026-09-28): rounding to 2dp here re-opened the T38-d
+                // class - a percent-discount remainder like ...001,50 made
+                // the VA amount and payment.amount disagree with the
+                // webhook's (int) comparison, failing every such settlement
+                // into integration_events noise even though the poller
+                // still landed the money.
+                $remaining = (int) round((float) $bill->remaining_amount);
+
                 $payment = Payment::create([
                     'payment_number' => Payment::generateNumber(),
                     'payer_guardian_id' => $payer->id,
-                    'amount' => round((float) $bill->remaining_amount, 2),
+                    'amount' => $remaining,
                     'method' => 'virtual_account',
                     'status' => 'pending',
                     'metadata' => [
@@ -244,7 +253,7 @@ class BillingApiGateway implements PaymentGateway
                     ],
                 ]);
 
-                $this->allocator->allocate($payment, [$bill->id => round((float) $bill->remaining_amount, 2)]);
+                $this->allocator->allocate($payment, [$bill->id => $remaining]);
 
                 // Reminder VAs must outlive the beat that minted them (audit
                 // T62-b): a 3-day va_due_days window dies mid-flight for an

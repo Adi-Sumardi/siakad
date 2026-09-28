@@ -46,6 +46,9 @@ export function WaliBillAlert() {
   const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState<BellSummary | null>(null);
   const [detail, setDetail] = useState<BellDetail | null>(null);
+  // A failed detail fetch must not strand "Memuat tagihan…" forever inside
+  // an open dropdown (audit 2026-09-28) - reopening retries.
+  const [detailFailed, setDetailFailed] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   // Refs, not state: the poll compares against the last signature without
   // re-subscribing, and knows whether the dropdown can currently be seen.
@@ -57,6 +60,7 @@ export function WaliBillAlert() {
   }, [open]);
 
   const loadDetail = useCallback(() => {
+    setDetailFailed(false);
     Promise.all([
       // status=open keeps the payload to the bill rows the bell can list;
       // summary is still computed over exactly those rows.
@@ -67,7 +71,10 @@ export function WaliBillAlert() {
     ]).then(([freshBills, freshPayments]) => {
       // A failed refresh keeps the last known state; the tagihan page
       // remains the authoritative surface for errors.
-      if (!freshBills) return;
+      if (!freshBills) {
+        setDetailFailed(true);
+        return;
+      }
 
       const cutoff = Date.now() - RECEIPT_WINDOW_DAYS * 86_400_000;
 
@@ -197,7 +204,11 @@ export function WaliBillAlert() {
 
           {openCount > 0 && (
             <>
-              {detail === null ? (
+              {detailFailed && detail === null ? (
+                <p className="px-3.5 py-4 text-center text-xs text-muted-foreground">
+                  Gagal memuat tagihan — tutup lalu buka lagi untuk mencoba ulang.
+                </p>
+              ) : detail === null ? (
                 <p className="px-3.5 py-4 text-center text-xs text-muted-foreground">Memuat tagihan…</p>
               ) : (
                 <>

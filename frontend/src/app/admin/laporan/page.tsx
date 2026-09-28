@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Calendar,
@@ -87,7 +87,11 @@ export default function ReportsPage() {
   const [txnPage, setTxnPage] = useState(1);
   const [unitOptions, setUnitOptions] = useState<{ code: string; label: string }[]>([]);
 
+  // Out-of-order guard (audit 2026-09-28) for the transaction list.
+  const txnRequestId = useRef(0);
+
   function loadTxns(page = txnPage) {
+    const requestId = ++txnRequestId.current;
     const params = new URLSearchParams();
     if (txnQ.trim()) params.set("q", txnQ.trim());
     if (txnStatus) params.set("status", txnStatus);
@@ -95,8 +99,14 @@ export default function ReportsPage() {
     params.set("page", String(page));
     api
       .get<{ payments: { data: TxnRow[]; meta: { current_page: number; last_page: number; total: number } } }>(`/api/admin/payments?${params}`)
-      .then((d) => setTxns(d.payments))
-      .catch(() => setTxns({ data: [], meta: { current_page: 1, last_page: 1, total: 0 } }));
+      .then((d) => {
+        if (requestId !== txnRequestId.current) return;
+        setTxns(d.payments);
+      })
+      .catch(() => {
+        if (requestId !== txnRequestId.current) return;
+        setTxns({ data: [], meta: { current_page: 1, last_page: 1, total: 0 } });
+      });
   }
 
   useEffect(() => {

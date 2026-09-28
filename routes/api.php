@@ -191,6 +191,10 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
 
     // Trusted immediately, unlike a guardian's own submission of the same thing.
     Route::post('/achievements', [GuruAchievementController::class, 'store']);
+    // The homeroom lane's eyes (audit 2026-09-28): pending student
+    // achievements for the classrooms this teacher homerooms - without a
+    // list the verify/reject endpoints below were unreachable dead code.
+    Route::get('/achievements', [GuruAchievementController::class, 'index']);
     // Poin 7: a teacher's OWN achievement (pending until admin_unit decides)
     // and the homeroom lane for student achievements (verify/reject by the
     // child's own wali kelas - 403 at the API, never a hidden button).

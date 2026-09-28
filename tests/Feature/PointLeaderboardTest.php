@@ -160,6 +160,43 @@ class PointLeaderboardTest extends TestCase
         $this->assertSame([], $body->json('violation'));
     }
 
+    public function test_no_active_term_returns_the_full_paged_shape(): void
+    {
+        // Between semesters the response must keep the {summary, students:
+        // {data, meta}} shape (audit 2026-09-28: the flat empty array used
+        // to crash the frontend's summary fallback into a toast + skeleton).
+        $this->term->update(['is_active' => false]);
+
+        $body = $this->actingAs($this->admin)->getJson('/api/admin/points')->assertOk();
+
+        $this->assertNull($body->json('term'));
+        $this->assertSame(0, $body->json('summary.total'));
+        $this->assertSame([], $body->json('students.data'));
+        $this->assertSame(1, $body->json('students.meta.last_page'));
+    }
+
+    public function test_a_coarse_jenjang_filter_keeps_unplaced_students(): void
+    {
+        // A child between rombels has no rung to sit on, but the discipline
+        // roster must not lose them when the operator picks a COARSE
+        // jenjang - exactly the student the sweep watches (audit
+        // 2026-09-28). Granular keys still resolve through the enrollment.
+        $placed = $this->studentIn('SD-13', 'sd', '1-A', 1, 'Anak Terpasang');
+        $this->award($placed, -30);
+        $unplaced = Student::create([
+            'nama_lengkap' => 'Anak Tanpa Rombel', 'jenis_kelamin' => 'L',
+            'school_unit_id' => SchoolUnit::where('code', 'SD-13')->value('id'),
+            'entry_year_id' => $this->term->academic_year_id, 'status' => 'active',
+        ]);
+        $this->award($unplaced, -60);
+
+        $coarse = $this->actingAs($this->admin)->getJson('/api/admin/points?jenjang=sd')->assertOk();
+        $this->assertSame(2, $coarse->json('summary.total'), 'coarse sd mencakup yang belum ditempatkan');
+
+        $fine = $this->actingAs($this->admin)->getJson('/api/admin/points?jenjang=sd-1')->assertOk();
+        $this->assertSame(1, $fine->json('summary.total'), 'granular sd-1 hanya yang punya rombel');
+    }
+
     public function test_the_student_balance_list_is_paginated_and_filterable(): void
     {
         // Bug batch Poin 5: the manage-points roster is a server-side

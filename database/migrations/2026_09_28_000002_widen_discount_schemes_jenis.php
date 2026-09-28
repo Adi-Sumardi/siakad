@@ -21,8 +21,8 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('discount_schemes', function (Blueprint $table) {
-            $table->string('jenis', 32)->default('lainnya')->change();
-        });
+        // One-way by design: narrowing back to 32 chars throws on
+        // PostgreSQL the moment any stored jenis grew past it - exactly
+        // the values this migration exists to allow.
     }
 };

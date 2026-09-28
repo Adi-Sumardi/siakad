@@ -64,7 +64,10 @@ class SensitiveFieldEncryptionTest extends TestCase
             'token_hash' => AccountInvitation::hashToken(AccountInvitation::generateToken()),
             'channel' => 'email',
             'sent_to' => 'dedi@example.com',
-            'purpose' => 'invite',
+            // 'activation' - an enum member; the earlier 'invite' only
+            // passed because ->change() migrations had silently dropped
+            // SQLite's enum CHECK on this table (audit 2026-09-28).
+            'purpose' => 'activation',
             'expires_at' => now()->addDays(7),
         ]);
 

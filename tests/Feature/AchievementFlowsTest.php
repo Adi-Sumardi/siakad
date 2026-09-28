@@ -100,6 +100,97 @@ class AchievementFlowsTest extends TestCase
         ]);
     }
 
+    public function test_the_homeroom_lane_can_see_what_it_may_decide(): void
+    {
+        // The lane was dead code until this list existed (audit
+        // 2026-09-28): verify/reject endpoints with no caller and no way
+        // for a wali kelas to discover pending cards for their own class.
+        $waliKelas = $this->guru('Wali Kelas Penentu');
+        [$mine] = $this->studentWithHomeroom('Anak Bimbinganku', $waliKelas->id);
+        [$other] = $this->studentWithHomeroom('Anak Kelas Lain', $this->guru('Wali Kelas Orang')->id);
+
+        $pengaju = $this->guru('Guru Pengaju Kas Kedua');
+        $this->propose($pengaju, $mine);
+        $this->propose($pengaju, $other);
+
+        $list = $this->actingAs($waliKelas)->getJson('/api/guru/achievements')->assertOk();
+
+        $names = collect($list->json('achievements'))->pluck('student.nama_lengkap');
+        $this->assertContains('Anak Bimbinganku', $names->all());
+        $this->assertNotContains('Anak Kelas Lain', $names->all());
+    }
+
+    public function test_rejection_clears_the_proposed_points(): void
+    {
+        // Symmetric with verify(): a rejected row awards nothing, so the
+        // proposal's suggested points must not linger as a "+N poin
+        // diberikan" the wali pages render straight from point_awarded.
+        $waliKelas = $this->guru('Wali Kelas Menolak Usulan');
+        [$student] = $this->studentWithHomeroom('Anak Ditolak', $waliKelas->id);
+        $ulid = $this->propose($this->guru('Guru Pengaju'), $student);
+
+        $this->actingAs($waliKelas)
+            ->postJson("/api/guru/achievements/{$ulid}/reject", ['reason' => 'bukti kurang'])
+            ->assertOk();
+
+        $this->assertDatabaseHas('achievements', ['ulid' => $ulid, 'status' => 'rejected', 'point_awarded' => null]);
+        $this->assertSame(0, PointRecord::where('student_id', $student->id)->count());
+    }
+
+    public function test_refiling_a_win_is_blocked_while_pending_or_verified_but_allowed_after_rejection(): void
+    {
+        // The guard's three holes (audit 2026-09-28): blank-vs-dated forms
+        // of the same win, re-filing an already-VERIFIED win (each re-file
+        // minted a fresh achievement row with a fresh merit), while a
+        // rejected one stays re-filable - that is "better evidence".
+        $waliKelas = $this->guru('Wali Kelelola');
+        [$student] = $this->studentWithHomeroom('Anak Diajukan Ulang', $waliKelas->id);
+        $guru = $this->guru('Guru Bandel');
+
+        // Dated proposal, then the same win filed UNDATED - still one card.
+        $ulid = $this->actingAs($guru)->postJson('/api/guru/achievements', [
+            'student_ulid' => $student->ulid,
+            'nama_prestasi' => 'Juara 2 Sains',
+            'kategori' => 'Akademik',
+            'tingkat' => 'Kabupaten/Kota',
+            'tanggal_event' => '2026-08-20',
+        ])->assertCreated()->json('achievement.ulid');
+
+        $this->actingAs($guru)->postJson('/api/guru/achievements', [
+            'student_ulid' => $student->ulid,
+            'nama_prestasi' => 'Juara 2 Sains',
+            'kategori' => 'Akademik',
+            'tingkat' => 'Kabupaten/Kota',
+        ])->assertStatus(422);
+
+        // Decide it, then re-file the SAME win - the verified copy blocks.
+        $this->actingAs($waliKelas)->postJson("/api/guru/achievements/{$ulid}/verify", ['points_awarded' => 10])->assertOk();
+
+        $this->actingAs($guru)->postJson('/api/guru/achievements', [
+            'student_ulid' => $student->ulid,
+            'nama_prestasi' => 'Juara 2 Sains',
+            'kategori' => 'Akademik',
+            'tingkat' => 'Kabupaten/Kota',
+            'tanggal_event' => '2026-08-20',
+        ])->assertStatus(422);
+
+        // A rejected win may be re-filed with better evidence.
+        $rejected = $this->actingAs($guru)->postJson('/api/guru/achievements', [
+            'student_ulid' => $student->ulid,
+            'nama_prestasi' => 'Juara 3 Puisi',
+            'kategori' => 'Seni',
+            'tingkat' => 'Kabupaten/Kota',
+        ])->assertCreated()->json('achievement.ulid');
+        $this->actingAs($waliKelas)->postJson("/api/guru/achievements/{$rejected}/reject", ['reason' => 'bukti kurang'])->assertOk();
+
+        $this->actingAs($guru)->postJson('/api/guru/achievements', [
+            'student_ulid' => $student->ulid,
+            'nama_prestasi' => 'Juara 3 Puisi',
+            'kategori' => 'Seni',
+            'tingkat' => 'Kabupaten/Kota',
+        ])->assertCreated();
+    }
+
     private function propose(User $guru, Student $student): string
     {
         return $this->actingAs($guru)

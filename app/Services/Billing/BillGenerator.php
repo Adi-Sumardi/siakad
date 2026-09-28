@@ -327,6 +327,25 @@ class BillGenerator
                 // firstOrCreate against the unique (student_id, dedup_key): two
                 // admins pressing the button at once, or a scheduler that fires
                 // twice, end up with one bill either way.
+                //
+                // Status at birth (audit 2026-09-28):
+                // - A 100%-covered total (beasiswa penuh, or a nominal
+                //   scheme >= subtotal) issues PAID, not unpaid: nothing was
+                //   ever owed, and a forever-unpaid Rp 0 bill used to pollute
+                //   the wali bell, the receivables KPIs, the debtor
+                //   watchlist, and even attempted a Rp 0 VA registration.
+                // - A bill whose due date already passed at issue (the
+                //   "catch up a late month" flow) is born OVERDUE: stored
+                //   status is what every reader keys on, and 'unpaid' kept
+                //   it green until the next 01:00 sweep - while the
+                //   reminder beats could never fire for it either way.
+                // The overdue test mirrors bills:mark-overdue exactly:
+                // due DATE strictly before today, so a bill due today is
+                // still unpaid at birth.
+                $birthStatus = $outcome['total'] <= 0
+                    ? 'paid'
+                    : ($outcome['due']->isBefore(now()->startOfDay()) ? 'overdue' : 'unpaid');
+
                 $bill = Bill::firstOrCreate(
                     ['student_id' => $student->id, 'dedup_key' => $outcome['dedup']],
                     [
@@ -342,9 +361,9 @@ class BillGenerator
                         'discount_amount' => $outcome['discount'],
                         'late_fee' => 0,
                         'total_amount' => $outcome['total'],
-                        'paid_amount' => 0,
-                        'remaining_amount' => $outcome['total'],
-                        'status' => 'unpaid',
+                        'paid_amount' => $outcome['total'] <= 0 ? $outcome['total'] : 0,
+                        'remaining_amount' => max(0, $outcome['total']),
+                        'status' => $birthStatus,
                         'due_date' => $outcome['due'],
                         'grace_period_end' => $rate->late_fee_grace_days
                             ? $outcome['due']->copy()->addDays($rate->late_fee_grace_days)
