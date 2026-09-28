@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { CreatableCombobox } from "@/components/ui/creatable-combobox";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +26,13 @@ type FeeType = { ulid: string; code: string; name: string };
 type SchoolUnit = { ulid: string; code: string; label: string };
 type AcademicYear = { ulid: string; year: string; is_active: boolean };
 
-/** The scholarship kinds - mirrors StoreDiscountSchemeRequest::JENIS. */
+/**
+ * Canonical scholarship kinds (Poin 11): the SEED of the combobox
+ * suggestions, not a closed list anymore - the field is free text with
+ * autocomplete from values already in use (see jenisSuggestions), so a
+ * new kind can be typed straight into the form. Stored as-is on
+ * discount_schemes.jenis.
+ */
 const JENIS_BEASISWA = [
   { value: "beasiswa_penuh", label: "Beasiswa Penuh" },
   { value: "beasiswa_parsial", label: "Beasiswa Parsial" },
@@ -37,6 +44,13 @@ const JENIS_BEASISWA = [
 const JENIS_LABEL: Record<string, string> = Object.fromEntries(
   JENIS_BEASISWA.map((j) => [j.value, j.label]),
 );
+
+/** Display label for a stored jenis: canonical label when it matches, else the raw value humanized (snake_case -> Title Case). */
+function jenisLabel(jenis: string | null | undefined): string {
+  const raw = jenis?.trim();
+  if (!raw) return "Lainnya";
+  return JENIS_LABEL[raw] ?? raw.replace(/_/g, " ").replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+}
 
 type DiscountScheme = {
   ulid: string;
@@ -136,6 +150,16 @@ export default function AdminDiscountPage() {
     notes: "",
   });
 
+  // Poin 11: the combobox suggestions - canonical seed plus every jenis
+  // already in use, so the list teaches what exists without capping what
+  // can be typed.
+  const jenisSuggestions = Array.from(
+    new Set([
+      ...JENIS_BEASISWA.map((j) => j.value),
+      ...(schemes ?? []).map((s) => s.jenis).filter((j): j is string => Boolean(j?.trim())),
+    ]),
+  );
+
   // Assign Form
   const [assignForm, setAssignForm] = useState({
     student_search: "",
@@ -209,6 +233,15 @@ export default function AdminDiscountPage() {
 
   async function handleCreateScheme(e: React.FormEvent) {
     e.preventDefault();
+
+    // Poin 11: free text, but never empty/whitespace - the field is still
+    // required, trimmed before it reaches the API.
+    const jenis = schemeForm.jenis.trim();
+    if (!jenis) {
+      toast.error("Jenis beasiswa wajib diisi.");
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -216,7 +249,7 @@ export default function AdminDiscountPage() {
         await api.patch(`/api/admin/discount-schemes/${editingScheme.ulid}`, {
           name: schemeForm.name,
           type: schemeForm.type,
-          jenis: schemeForm.jenis,
+          jenis,
           value: parseFloat(schemeForm.value),
           fee_type_ulid: schemeForm.fee_type_ulid || null,
           school_unit_ulid: schemeForm.school_unit_ulid || null,
@@ -229,7 +262,7 @@ export default function AdminDiscountPage() {
           code: schemeForm.code,
           name: schemeForm.name,
           type: schemeForm.type,
-          jenis: schemeForm.jenis,
+          jenis,
           value: parseFloat(schemeForm.value),
           fee_type_ulid: schemeForm.fee_type_ulid || null,
           school_unit_ulid: schemeForm.school_unit_ulid || null,
@@ -437,7 +470,7 @@ export default function AdminDiscountPage() {
                     </td>
                     <td className="px-5 py-4">
                       <Badge variant={s.jenis === "beasiswa_penuh" || s.jenis === "beasiswa_parsial" ? "primary" : "default"}>
-                        {JENIS_LABEL[s.jenis ?? "lainnya"] ?? "Lainnya"}
+                        {jenisLabel(s.jenis)}
                       </Badge>
                     </td>
                     <td className="px-5 py-4">
@@ -603,16 +636,17 @@ export default function AdminDiscountPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <Label htmlFor="jenis" className="text-xs">Jenis Beasiswa</Label>
-                  <select
+                  {/* Poin 11 (REVISI): free text, not a dropdown - suggestions
+                      come from what has been used before (plus the canonical
+                      seed), and anything typed is saved as-is. */}
+                  <CreatableCombobox
                     id="jenis"
                     value={schemeForm.jenis}
-                    onChange={(e) => setSchemeForm({ ...schemeForm, jenis: e.target.value })}
-                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
-                  >
-                    {JENIS_BEASISWA.map((j) => (
-                      <option key={j.value} value={j.value}>{j.label}</option>
-                    ))}
-                  </select>
+                    onChange={(next) => setSchemeForm({ ...schemeForm, jenis: next })}
+                    suggestions={jenisSuggestions}
+                    placeholder="mis. beasiswa_penuh, Beasiswa Yatim…"
+                    className="mt-1"
+                  />
                 </div>
                 <div>
                   <Label htmlFor="type" className="text-xs">Tipe Potongan</Label>

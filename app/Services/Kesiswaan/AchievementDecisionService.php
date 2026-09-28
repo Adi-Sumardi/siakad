@@ -26,20 +26,12 @@ use RuntimeException;
  * Both lanes share the atomic claim (audit T52): only the request that
  * flips pending -> decided wins; concurrent double-clicks produce one
  * decision, and the points (if any) are written exactly once, inside the
- * same transaction.
+ * same transaction. Re-deciding a decided row is a 409 at the API and,
+ * since the unique-index migration, impossible at the schema level too:
+ * point_records accepts at most one ACTIVE merit row per achievement.
  */
 class AchievementDecisionService
 {
-    /**
-     * A STATE failure (422 upstream), as opposed to the permission
-     * refusals which surface as 403: the decider is allowed, the world
-     * just is not ready (no active term to file points under).
-     */
-    public static function termMissing(): RuntimeException
-    {
-        return new RuntimeException('Tidak ada semester aktif - poin tidak bisa dicatat. Verifikasi tanpa poin, atau aktifkan term terlebih dahulu.');
-    }
-
     public function __construct(private PointLedger $ledger) {}
 
     /**
@@ -55,7 +47,8 @@ class AchievementDecisionService
     public function refusalFor(Achievement $achievement, User $actor, string $lane = 'admin'): ?string
     {
         // "Already decided" is not a permission question - callers surface
-        // it as 422 (state), while permission refusals surface as 403.
+        // it as 409 Conflict (state), while permission refusals surface as
+        // 403.
         if ($achievement->status !== 'pending') {
             return null; // handled separately by alreadyDecided()
         }
@@ -127,15 +120,27 @@ class AchievementDecisionService
             throw new RuntimeException($reason);
         }
 
+        if ($points !== null && $achievement->achiever_type === 'guru') {
+            // The merit ledger is a student construct (point_records.
+            // student_id is NOT NULL) - points on a teacher achievement
+            // would die on the insert mid-transaction. Refuse up front
+            // (Poin 6B) instead of surfacing a 500.
+            throw AchievementStateFailure::pointsNotApplicable();
+        }
+
         if ($points !== null && ! Term::current()) {
-            throw self::termMissing();
+            throw AchievementStateFailure::termMissing();
         }
 
         $decided = DB::transaction(function () use ($achievement, $actor, $points) {
             // Atomic claim (audit T52): two concurrent verifications - two
             // tabs, a double-click, an admin racing the wali kelas - and
             // only the one that flips pending wins; the loser gets false
-            // and reports "sudah diputuskan", never a second award.
+            // and reports "sudah diputuskan" (409), never a second award.
+            // The same update writes the FINAL point_awarded: when the
+            // decider grants no points, a teacher proposal's suggested
+            // value dies here, so a decided row can never read "20 poin"
+            // again with no ledger row behind it.
             $claimed = Achievement::query()
                 ->whereKey($achievement->id)
                 ->where('status', 'pending')
@@ -144,15 +149,17 @@ class AchievementDecisionService
                     'status' => 'verified',
                     'verified_by' => $actor->id,
                     'verified_at' => now(),
+                    'point_awarded' => $points,
                 ]);
 
             if ($claimed !== 1) {
                 return false;
             }
 
+            // Points exist ONLY on the pending -> verified transition, in
+            // this transaction - never per endpoint call.
             if ($points !== null) {
-                $this->ledger->awardForAchievement($achievement->fresh(), Term::current(), $actor, $points);
-                $achievement->fresh()->forceFill(['point_awarded' => $points])->save();
+                $this->ledger->awardForAchievement($achievement, Term::current(), $actor, $points);
             }
 
             return true;

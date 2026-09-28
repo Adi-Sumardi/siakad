@@ -242,7 +242,7 @@ class DashboardDemoSeeder extends Seeder
         $this->seedPoints($students, $term, $teachers->first());
 
         // ---- Achievements ----------------------------------------------------
-        $this->seedAchievements($unit, $students, $teachers);
+        $this->seedAchievements($unit, $students, $teachers, $term);
 
         // ---- Extracurriculars -----------------------------------------------
         $this->seedExtracurriculars($unit, $year, $students, $teachers->first());
@@ -446,7 +446,7 @@ class DashboardDemoSeeder extends Seeder
         }
     }
 
-    private function seedAchievements(SchoolUnit $unit, Collection $students, Collection $teachers): void
+    private function seedAchievements(SchoolUnit $unit, Collection $students, Collection $teachers, Term $term): void
     {
         $studentRows = $students->take(4);
         $list = [
@@ -459,8 +459,13 @@ class DashboardDemoSeeder extends Seeder
         $i = 0;
         foreach ($studentRows as $student) {
             $name = $list[$i % count($list)];
-            Achievement::updateOrCreate(
-                ['student_id' => $student->id, 'nama_prestasi' => $name, 'tanggal_event' => '2026-08-20'],
+            $verified = $i % 3 !== 2;
+            $achievement = Achievement::updateOrCreate(
+                // No tanggal_event in the key: the datetime cast stores
+                // '2026-08-20 00:00:00' while a bare date string never
+                // matches it, which is exactly how repeated seeding runs
+                // stacked duplicate cards for the same student+prestasi.
+                ['student_id' => $student->id, 'nama_prestasi' => $name],
                 [
                     'achiever_type' => 'siswa',
                     'school_unit_id' => $unit->id,
@@ -469,12 +474,35 @@ class DashboardDemoSeeder extends Seeder
                     'juara' => '1',
                     'nama_event' => $name,
                     'penyelenggara' => 'Dinas Pendidikan',
-                    'status' => $i % 3 === 2 ? 'pending' : 'verified',
-                    'point_awarded' => 15,
-                    'verified_by' => $teachers->first()?->id,
-                    'verified_at' => $i % 3 === 2 ? null : now(),
+                    'status' => $verified ? 'verified' : 'pending',
+                    // Null while pending: point_awarded is the DECIDED
+                    // value, written on the verification transition - a
+                    // suggestion belongs to the proposal UI, not the row.
+                    'point_awarded' => $verified ? 15 : null,
+                    'verified_by' => $verified ? $teachers->first()?->id : null,
+                    'verified_at' => $verified ? now() : null,
                 ]
             );
+
+            // The merit row behind a verified-with-points achievement -
+            // without it the ledger balance and the prestasi list disagree
+            // (exactly what prestasi:audit-points flags). Exactly one per
+            // achievement: the unique index enforces it.
+            if ($verified) {
+                PointRecord::updateOrCreate(
+                    ['related_achievement_id' => $achievement->id],
+                    [
+                        'student_id' => $student->id,
+                        'term_id' => $term->id,
+                        'type' => 'merit',
+                        'points' => 15,
+                        'occurred_on' => '2026-08-20',
+                        'description' => "Penghargaan prestasi: {$name}",
+                        'recorded_by' => $teachers->first()?->id,
+                        'status' => 'recorded',
+                    ]
+                );
+            }
             $i++;
         }
 
@@ -490,7 +518,9 @@ class DashboardDemoSeeder extends Seeder
                 'nama_event' => 'Jambore Pramuka',
                 'penyelenggara' => 'Kwarda',
                 'status' => 'verified',
-                'point_awarded' => 10,
+                // The merit ledger is a student construct - a teacher
+                // achievement carries no points at all.
+                'point_awarded' => null,
                 'verified_at' => now(),
             ]
         );

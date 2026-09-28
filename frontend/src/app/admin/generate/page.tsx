@@ -129,7 +129,11 @@ export default function GenerateBillsPage() {
       {/* Control Card */}
       <Card className="p-6 border-border/80">
         <h2 className="text-base font-bold text-foreground mb-4">Pilih Parameter Penagihan</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+        {/* Poin 9: Jenis, Bulan, Tanggal Terbit sit as EQUAL peers on one
+            row - Bulan is always rendered (disabled when the fee type is
+            not monthly) so Tanggal Terbit never slides into a different
+            column when the fee type changes. The button has its own row. */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <Label htmlFor="fee_type" className="text-xs">Jenis Tagihan</Label>
             {feeTypes === null ? (
@@ -139,26 +143,31 @@ export default function GenerateBillsPage() {
                 id="fee_type"
                 value={feeTypeCode}
                 onChange={(e) => setFeeTypeCode(e.target.value)}
-                className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
+                className="mt-1 w-full h-10 rounded-md border border-input bg-card px-3 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
               >
                 {feeTypes.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
               </select>
             )}
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Jenis biaya yang akan diterbitkan massal.
+            </p>
           </div>
 
-          {isMonthly && (
-            <div>
-              <Label htmlFor="month" className="text-xs">Bulan Penagihan</Label>
-              <select
-                id="month"
-                value={month}
-                onChange={(e) => setMonth(Number(e.target.value))}
-                className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary"
-              >
-                {MONTHS.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
-              </select>
-            </div>
-          )}
+          <div>
+            <Label htmlFor="month" className="text-xs">Bulan Penagihan</Label>
+            <select
+              id="month"
+              value={month}
+              onChange={(e) => setMonth(Number(e.target.value))}
+              disabled={!isMonthly}
+              className="mt-1 w-full h-10 rounded-md border border-input bg-card px-3 text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {MONTHS.map((name, i) => <option key={name} value={i + 1}>{name}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {isMonthly ? "Bulan yang ditagihkan pada tahun ajaran aktif." : "Hanya berlaku untuk jenis biaya bulanan."}
+            </p>
+          </div>
 
           <div>
             <Label htmlFor="issued_at" className="text-xs">Tanggal Terbit (opsional)</Label>
@@ -173,13 +182,13 @@ export default function GenerateBillsPage() {
               Kosong = hari ini. Isi bila mengejar tagihan bulan yang terlanjur lewat terbitnya.
             </p>
           </div>
+        </div>
 
-          <div>
-            <Button onClick={runPreview} disabled={loading} className="w-full gap-2 shadow-xs">
-              <Sparkles className="size-4" />
-              <span>{loading ? "Menghitung Pratinjau..." : "Hitung Pratinjau Tagihan"}</span>
-            </Button>
-          </div>
+        <div className="mt-4">
+          <Button onClick={runPreview} disabled={loading} className="w-full sm:w-auto gap-2 shadow-xs">
+            <Sparkles className="size-4" />
+            <span>{loading ? "Menghitung Pratinjau..." : "Hitung Pratinjau Tagihan"}</span>
+          </Button>
         </div>
 
         {error && (

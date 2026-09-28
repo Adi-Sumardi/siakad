@@ -9,7 +9,8 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { API_BASE, api, ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { downloadApiFile } from "@/lib/download";
 import { tanggal } from "@/lib/format";
 import type { Achievement } from "@/lib/types/kesiswaan";
 
@@ -21,7 +22,10 @@ const STATUS_LABEL: Record<Achievement["status"], { label: string; variant: "goo
 
 function DecisionRow({ achievement, onDecided, isTeacher = false }: { achievement: Achievement; onDecided: () => void; isTeacher?: boolean }) {
   const [mode, setMode] = useState<"verify" | "reject" | null>(null);
-  const [points, setPoints] = useState("10");
+  // Prefill with the proposer's suggestion (a guru proposal carries it in
+  // point_awarded while pending) - the decider sees and adjusts it rather
+  // than silently overriding it with the default.
+  const [points, setPoints] = useState(achievement.point_awarded ? String(achievement.point_awarded) : "10");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +42,15 @@ function DecisionRow({ achievement, onDecided, isTeacher = false }: { achievemen
       toast.success(isTeacher ? "Prestasi guru berhasil diverifikasi." : "Prestasi berhasil diverifikasi dan poin ditambahkan ke siswa.");
       onDecided();
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Decided elsewhere (another tab, another admin) - the LIST is
+        // stale, not the database. Refetch so this row shows its real
+        // state instead of leaving live decision buttons on a decided
+        // achievement.
+        toast.info(err.message);
+        onDecided();
+        return;
+      }
       setError(err instanceof ApiError ? err.message : "Gagal memverifikasi.");
     } finally {
       setSubmitting(false);
@@ -56,6 +69,11 @@ function DecisionRow({ achievement, onDecided, isTeacher = false }: { achievemen
       toast.success("Prestasi ditolak.");
       onDecided();
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.info(err.message);
+        onDecided();
+        return;
+      }
       setError(err instanceof ApiError ? err.message : "Gagal menolak.");
     } finally {
       setSubmitting(false);
@@ -244,15 +262,21 @@ export default function AdminAchievementsPage() {
                 </div>
 
                 {a.has_sertifikat && (
-                  <a
-                    href={`${API_BASE}/api/files/achievements/${a.ulid}/sertifikat`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // The file endpoint sits behind Sanctum's session
+                      // cookie - fetch as a blob, never a bare navigation
+                      // (which lands on a JSON 401, Poin 10's bug class).
+                      downloadApiFile(`/api/files/achievements/${a.ulid}/sertifikat`, `Sertifikat-${a.nama_prestasi}.pdf`).catch((err) =>
+                        toast.error(err instanceof Error ? err.message : "Gagal mengunduh sertifikat."),
+                      );
+                    }}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors self-start"
                   >
                     <FileDown className="size-3.5" />
                     <span>Lihat Piagam / Sertifikat</span>
-                  </a>
+                  </button>
                 )}
               </div>
 
@@ -262,7 +286,12 @@ export default function AdminAchievementsPage() {
                   Alasan Penolakan: {a.rejection_reason}
                 </p>
               )}
-              {a.point_awarded && (
+              {a.status === "pending" && a.point_awarded && (
+                <p className="mt-3 text-xs text-muted-foreground bg-muted/40 p-2 rounded-lg inline-block">
+                  Usulan poin dari pengaju: {a.point_awarded} (belum diberikan - menunggu keputusan)
+                </p>
+              )}
+              {a.status === "verified" && a.point_awarded && (
                 <p className="mt-3 text-xs font-bold text-good bg-good-soft/30 p-2 rounded-lg inline-block">
                   +{a.point_awarded} poin apresiasi telah ditambahkan ke siswa
                 </p>

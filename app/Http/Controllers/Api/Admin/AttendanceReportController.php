@@ -18,6 +18,11 @@ class AttendanceReportController extends Controller
      * and the watchlist quote; per-lesson detail stays on the teacher's
      * session screens and has no place in a cross-unit report. Masuk windows
      * only - a pulang row is the same day told twice.
+     *
+     * Optional ?unit= (school unit ULID) narrows to one campus - the
+     * Presensi Harian tab passes the unit its operational half is already
+     * showing, so the recap on that page never mixes campuses for a central
+     * admin. An admin_unit stays scoped by visibleTo() regardless.
      */
     public function summary(DateRangeRequest $request): JsonResponse
     {
@@ -32,6 +37,10 @@ class AttendanceReportController extends Controller
             ->visibleTo($request->user())
             ->active()
             ->whereHas('dailySession', fn ($q) => $q->where('type', 'masuk'))
+            ->when($request->string('unit')->value(), fn ($q, $unitUlid) => $q->whereHas(
+                'dailySession.schoolUnit',
+                fn ($u) => $u->where('ulid', $unitUlid)
+            ))
             // date may store a midnight time component depending on the
             // driver (the occurred_on lesson the per-lesson report learned);
             // bound with full start/end-of-day timestamps, never bare date

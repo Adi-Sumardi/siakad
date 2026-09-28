@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { CalendarCheck2, Copy, Link2, RefreshCw, ShieldAlert, Split } from "lucide-react";
+import { Calendar, CalendarCheck2, Copy, Link2, RefreshCw, ShieldAlert, Split, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth/auth-context";
+import { todayJakarta } from "@/lib/format";
 
 type Settings = {
   unit: { ulid: string; label: string };
@@ -54,6 +55,14 @@ type TodaySession = {
     no_lesson: { nama_lengkap: string; nis: string }[];
     no_gate: { nama_lengkap: string; nis: string }[];
   };
+};
+
+/** H/S/I/A days over a date range - the recap card's payload (§8 daily layer, masuk windows only). */
+type AttendanceRecap = {
+  period: { from: string; to: string };
+  summary: { total_records: number; hadir: number; sakit: number; izin: number; alpa: number };
+  by_class: { kelas: string; hadir: number; sakit: number; izin: number; alpa: number }[];
+  by_unit: { unit: string; hadir: number; sakit: number; izin: number; alpa: number }[];
 };
 
 const DAY_LABEL = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"];
@@ -557,8 +566,138 @@ export default function AdminDailyAttendancePage() {
         </>
       )}
 
+      {/* The date-range recap (moved here from Laporan Keuangan - an
+          attendance summary belongs on the attendance tab, not a financial
+          report). Follows the unit this page's operational half shows. */}
+      <AttendanceRecapCard unitUlid={unitUlid} />
+
       {isCentral && <HolidayCalendarCard />}
     </div>
+  );
+}
+
+/**
+ * Rekap Presensi Harian over a picked date range (default: this month).
+ * Reads /api/admin/reports/attendance - the §8 daily layer, masuk windows
+ * only, so these are the same numbers the rapor quotes. For a central admin
+ * the ?unit= parameter clips the recap to the unit selected above on this
+ * page; an admin_unit is scoped by the API itself (visibleTo).
+ */
+function AttendanceRecapCard({ unitUlid }: { unitUlid: string }) {
+  const [from, setFrom] = useState(todayJakarta().slice(0, 7) + "-01");
+  const [to, setTo] = useState(todayJakarta());
+  const [recap, setRecap] = useState<AttendanceRecap | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams({ from, to });
+    if (unitUlid) params.set("unit", unitUlid);
+    api
+      .get<AttendanceRecap>(`/api/admin/reports/attendance?${params.toString()}`)
+      .then(setRecap)
+      .catch(() => setRecap(null));
+  }, [from, to, unitUlid]);
+
+  return (
+    <Card className="p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="flex items-center gap-2 text-sm font-bold text-foreground">
+            <Users className="size-4 text-primary" />
+            <span>Rekap Presensi Harian</span>
+          </h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Hadir/Sakit/Izin/Alpa dalam HARI (lapis harian - sumber resmi), menyusut/meluas mengikuti rentang tanggal.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 rounded-lg border border-input bg-card px-2.5 py-1.5 shadow-2xs">
+            <Calendar className="size-3.5 text-muted-foreground" />
+            <Label className="text-xs text-muted-foreground">Dari:</Label>
+            <Input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className="h-7 border-0 p-0 text-xs font-semibold shadow-none focus-visible:ring-0"
+            />
+          </div>
+          <div className="flex items-center gap-1.5 rounded-lg border border-input bg-card px-2.5 py-1.5 shadow-2xs">
+            <Calendar className="size-3.5 text-muted-foreground" />
+            <Label className="text-xs text-muted-foreground">Sampai:</Label>
+            <Input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className="h-7 border-0 p-0 text-xs font-semibold shadow-none focus-visible:ring-0"
+            />
+          </div>
+        </div>
+      </div>
+
+      {recap === null ? (
+        <Skeleton className="mt-4 h-32 w-full" />
+      ) : recap.summary.total_records === 0 ? (
+        <p className="mt-4 rounded-lg border border-border p-6 text-center text-sm text-muted-foreground">
+          Belum ada data presensi pada rentang {recap.period.from} s/d {recap.period.to}.
+        </p>
+      ) : (
+        <>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-xl border border-border/80 bg-muted/30 p-4">
+              <span className="text-xs text-muted-foreground">Hadir</span>
+              <p className="mt-1 text-xl font-bold text-good">{recap.summary.hadir}</p>
+            </div>
+            <div className="rounded-xl border border-border/80 bg-muted/30 p-4">
+              <span className="text-xs text-muted-foreground">Sakit</span>
+              <p className="mt-1 text-xl font-bold text-foreground">{recap.summary.sakit}</p>
+            </div>
+            <div className="rounded-xl border border-border/80 bg-muted/30 p-4">
+              <span className="text-xs text-muted-foreground">Izin</span>
+              <p className="mt-1 text-xl font-bold text-foreground">{recap.summary.izin}</p>
+            </div>
+            <div className="rounded-xl border border-border/80 bg-muted/30 p-4">
+              <span className="text-xs text-muted-foreground">Alpa</span>
+              <p className="mt-1 text-xl font-bold text-destructive">{recap.summary.alpa}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 overflow-x-auto rounded-xl border border-border/80">
+            <div className="flex items-center justify-between border-b border-border bg-muted/30 px-5 py-3">
+              <p className="text-sm font-bold text-foreground">Rekap Presensi per Kelas</p>
+              <span className="text-xs text-muted-foreground">{recap.by_class.length} kelas terdata</span>
+            </div>
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-border bg-muted/40 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-5 py-3.5">Rombel / Kelas</th>
+                  <th className="px-5 py-3.5 text-right">Hadir</th>
+                  <th className="px-5 py-3.5 text-right">Sakit</th>
+                  <th className="px-5 py-3.5 text-right">Izin</th>
+                  <th className="px-5 py-3.5 text-right">Alpa</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {recap.by_class.map((row) => (
+                  <tr key={row.kelas} className="transition-colors hover:bg-muted/20">
+                    <td className="px-5 py-3.5 font-bold text-foreground">{row.kelas}</td>
+                    <td className="px-5 py-3.5 text-right font-bold text-good">{row.hadir}</td>
+                    <td className="px-5 py-3.5 text-right text-muted-foreground">{row.sakit}</td>
+                    <td className="px-5 py-3.5 text-right text-muted-foreground">{row.izin}</td>
+                    <td className="px-5 py-3.5 text-right">
+                      {row.alpa > 0 ? (
+                        <span className="font-bold text-destructive">{row.alpa}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 

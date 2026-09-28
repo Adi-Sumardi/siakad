@@ -20,8 +20,9 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { API_BASE, api, ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
+import { downloadApiFile } from "@/lib/download";
 import { tanggal, todayJakarta } from "@/lib/format";
 import {
   JUARA_OPTIONS,
@@ -257,15 +258,20 @@ export default function WaliPrestasiPage() {
                   </Link>
 
                   {ach.has_sertifikat && (
-                    <a
-                      href={`${API_BASE}/api/files/achievements/${ach.ulid}/sertifikat`}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Blob download, not a bare <a href>: the file endpoint
+                        // needs the Sanctum session cookie (Poin 10's bug class).
+                        downloadApiFile(`/api/files/achievements/${ach.ulid}/sertifikat`, `Sertifikat-${ach.nama_prestasi}.pdf`).catch((err) =>
+                          toast.error(err instanceof Error ? err.message : "Gagal mengunduh piagam."),
+                        );
+                      }}
                       className="inline-flex items-center gap-1.5 text-xs font-bold text-foreground bg-muted/60 hover:bg-muted px-3 py-1.5 rounded-lg transition-colors"
                     >
                       <FileDown className="size-3.5 text-primary" />
                       <span>Lihat Piagam</span>
-                    </a>
+                    </button>
                   )}
                 </div>
               </Card>

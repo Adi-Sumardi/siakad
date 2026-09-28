@@ -384,6 +384,9 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/academic-years', [ReferenceController::class, 'academicYears']);
     Route::get('/terms', [ReferenceController::class, 'terms']);
     Route::get('/classrooms', [ReferenceController::class, 'classrooms']);
+    // The unit↔jenjang map the cascading filters read (bug batch Poin
+    // 1-3) - visibleTo-scoped, so an admin_unit only ever maps their unit.
+    Route::get('/unit-jenjang', [ReferenceController::class, 'unitJenjang']);
 
     Route::get('/grades', [GradeController::class, 'index']);
     Route::get('/students/{ulid}/rapor', [GradeController::class, 'rapor']);

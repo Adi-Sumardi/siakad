@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { JenjangSelect } from "@/components/ui/jenjang-select";
 import { matchesClassroom } from "@/lib/jenjang";
+import { deriveUnitJenjang, jenjangKeysForUnit } from "@/lib/unit-jenjang";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -299,6 +300,23 @@ export default function JadwalPage() {
     if (selectedClassroom) loadSchedules(selectedClassroom);
   }, [selectedClassroom]);
 
+  // The cascade's map (bug batch Poin 3): derived from the SAME classrooms
+  // the Kelas picker lists, so Jenjang offers exactly the ladder that runs
+  // in the picked unit.
+  const jenjangByUnit = deriveUnitJenjang(classrooms ?? []);
+
+  /** Top-down cascade (Poin 3): when Unit/Jenjang change, a selected kelas that no longer matches steps down to the first one that does - same auto-pick the first load uses. */
+  function refocusKelas(nextUnit: string, nextJenjang: string) {
+    const stillMatches = (c: ClassroomOption) =>
+      (!nextUnit || c.school_unit.code === nextUnit) && matchesClassroom(c, nextJenjang || null);
+
+    if (!selectedClassroom) return;
+    const current = (classrooms ?? []).find((c) => c.ulid === selectedClassroom);
+    if (current && !stillMatches(current)) {
+      setSelectedClassroom((classrooms ?? []).find(stillMatches)?.ulid ?? "");
+    }
+  }
+
   async function removeSchedule(ulid: string) {
     try {
       await api.delete(`/api/admin/classrooms/${selectedClassroom}/schedules/${ulid}`);
@@ -342,7 +360,16 @@ export default function JadwalPage() {
               <Label className="text-xs">Unit</Label>
               <select
                 value={unitFilter}
-                onChange={(e) => setUnitFilter(e.target.value)}
+                onChange={(e) => {
+                  const nextUnit = e.target.value;
+                  setUnitFilter(nextUnit);
+                  // Top-down cascade (Poin 3): a new unit resets a jenjang
+                  // it doesn't run, and the kelas follows whatever survives.
+                  const nextJenjang =
+                    jenjangFilter && !(jenjangByUnit[nextUnit] ?? []).includes(jenjangFilter) ? "" : jenjangFilter;
+                  if (nextJenjang !== jenjangFilter) setJenjangFilter(nextJenjang);
+                  refocusKelas(nextUnit, nextJenjang);
+                }}
                 className="h-10 w-52 rounded-lg border border-input bg-card px-3 text-sm"
               >
                 <option value="">Semua Unit</option>
@@ -356,7 +383,11 @@ export default function JadwalPage() {
             <Label className="text-xs">Jenjang</Label>
             <JenjangSelect
               value={jenjangFilter}
-              onChange={setJenjangFilter}
+              onChange={(key) => {
+                setJenjangFilter(key);
+                refocusKelas(unitFilter, key);
+              }}
+              allowedKeys={jenjangKeysForUnit(jenjangByUnit, unitFilter || null)}
               className="h-10 w-56 rounded-lg border border-input bg-card px-3 text-sm"
             />
           </div>

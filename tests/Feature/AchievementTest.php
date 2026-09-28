@@ -12,6 +12,7 @@ use App\Models\Term;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -261,13 +262,143 @@ class AchievementTest extends TestCase
             ->postJson("/api/admin/achievements/{$achievement->ulid}/verify", [])
             ->assertOk();
 
-        // Every further decision is refused.
+        // Every further decision is refused - 409 Conflict (Poin 6B), not
+        // 422: re-deciding is a state conflict, refused at the API so a
+        // direct request can never re-award points.
         $this->actingAs($admin)
             ->postJson("/api/admin/achievements/{$achievement->ulid}/verify", [])
-            ->assertStatus(422);
+            ->assertStatus(409);
         $this->actingAs($admin)
             ->postJson("/api/admin/achievements/{$achievement->ulid}/reject", ['reason' => 'terlambat'])
+            ->assertStatus(409);
+    }
+
+    public function test_verifying_without_points_clears_a_proposals_suggested_points(): void
+    {
+        // Poin 6: point_awarded used to keep the teacher proposal's value
+        // after a no-points verification - a decided row that read "25
+        // poin" with no ledger row behind it. The decision now writes the
+        // FINAL value: null when the decider grants nothing.
+        $student = $this->student();
+        $guru = $this->staff('guru');
+        $this->actingAs($guru)->postJson('/api/guru/achievements', $this->payload() + [
+            'student_ulid' => $student->ulid, 'points_awarded' => 25,
+        ]);
+
+        $achievement = Achievement::first();
+        $admin = $this->staff('admin_unit');
+
+        $this->actingAs($admin)
+            ->postJson("/api/admin/achievements/{$achievement->ulid}/verify", [])
+            ->assertOk()
+            ->assertJsonPath('achievement.status', 'verified');
+
+        $this->assertDatabaseHas('achievements', ['ulid' => $achievement->ulid, 'point_awarded' => null]);
+        $this->assertDatabaseCount('point_records', 0);
+    }
+
+    public function test_points_sent_for_a_teacher_achievement_are_refused_before_anything_is_written(): void
+    {
+        // Poin 6B: the merit ledger is a student construct - points on a
+        // teacher achievement would die on the NOT NULL student_id insert
+        // mid-transaction. The service refuses up front (422) instead.
+        $adminUnit = $this->staff('admin_unit');
+        $guru = $this->staff('guru');
+
+        $ulid = $this->actingAs($guru)->postJson('/api/guru/achievements/self', [
+            'nama_prestasi' => 'Juara 1 LKS Guru', 'kategori' => 'Akademik', 'tingkat' => 'Provinsi',
+        ])->assertCreated()->json('achievement.ulid');
+
+        $this->actingAs($adminUnit)
+            ->postJson("/api/admin/achievements/{$ulid}/verify", ['points_awarded' => 10])
             ->assertStatus(422);
+
+        $this->assertDatabaseHas('achievements', ['ulid' => $ulid, 'status' => 'pending']);
+        $this->assertDatabaseCount('point_records', 0);
+    }
+
+    public function test_the_schema_refuses_a_second_active_merit_row_for_one_achievement(): void
+    {
+        // Poin 6B, schema half: the partial unique index is the guarantee
+        // that survives even a future writer that forgets the atomic
+        // claim. Revoked rows must stay exempt - a revoke is the repair
+        // path itself.
+        $student = $this->student();
+        $achievement = Achievement::create([
+            'student_id' => $student->id, 'nama_prestasi' => 'Juara 2 Cipta Puisi',
+            'kategori' => 'Seni', 'tingkat' => 'Kabupaten/Kota', 'status' => 'verified',
+        ]);
+        $recorder = $this->staff('admin');
+
+        $first = PointRecord::create([
+            'student_id' => $student->id, 'term_id' => $this->term->id,
+            'related_achievement_id' => $achievement->id, 'type' => 'merit', 'points' => 15,
+            'occurred_on' => today(), 'description' => 'Penghargaan prestasi: Juara 2 Cipta Puisi',
+            'recorded_by' => $recorder->id, 'status' => 'recorded',
+        ]);
+
+        try {
+            PointRecord::create([
+                'student_id' => $student->id, 'term_id' => $this->term->id,
+                'related_achievement_id' => $achievement->id, 'type' => 'merit', 'points' => 15,
+                'occurred_on' => today(), 'description' => 'duplikat',
+                'recorded_by' => $recorder->id, 'status' => 'recorded',
+            ]);
+            $this->fail('The unique index should have refused a second ACTIVE merit row for one achievement.');
+        } catch (\Illuminate\Database\QueryException) {
+            // Refused at the schema level - exactly what Poin 6B asked for.
+        }
+
+        // The revoke path stays open: revoked rows are excluded by the
+        // partial index, so repairing a duplicate never violates it.
+        $first->forceFill(['status' => 'revoked', 'revoked_at' => now(), 'revoke_reason' => 'uji'])->save();
+        PointRecord::create([
+            'student_id' => $student->id, 'term_id' => $this->term->id,
+            'related_achievement_id' => $achievement->id, 'type' => 'merit', 'points' => 15,
+            'occurred_on' => today(), 'description' => 'pengganti setelah revoke',
+            'recorded_by' => $recorder->id, 'status' => 'recorded',
+        ]);
+        $this->assertSame(2, PointRecord::where('related_achievement_id', $achievement->id)->count());
+        $this->assertSame(1, PointRecord::where('related_achievement_id', $achievement->id)->active()->count());
+    }
+
+    public function test_the_repair_command_revokes_only_the_later_duplicates(): void
+    {
+        // Poin 6C: pre-index data could carry several active merit rows for
+        // one achievement. Simulate it by dropping the index, planting a
+        // duplicate, then running the audit's repair half: earliest row
+        // survives, the rest are REVOKED (never deleted - D6) with a
+        // reason that names the bug.
+        $student = $this->student();
+        $achievement = Achievement::create([
+            'student_id' => $student->id, 'nama_prestasi' => 'Juara 1 Paduan Suara',
+            'kategori' => 'Seni', 'tingkat' => 'Kota', 'status' => 'verified', 'point_awarded' => 15,
+        ]);
+        $recorder = $this->staff('admin');
+
+        DB::statement('DROP INDEX IF EXISTS point_records_one_active_merit_per_achievement');
+
+        foreach ([0, 1, 2] as $n) {
+            PointRecord::create([
+                'student_id' => $student->id, 'term_id' => $this->term->id,
+                'related_achievement_id' => $achievement->id, 'type' => 'merit', 'points' => 15,
+                'occurred_on' => today(), 'description' => "baris ke-{$n}",
+                'recorded_by' => $recorder->id, 'status' => 'recorded',
+            ]);
+        }
+
+        // Dry run first: reviews the audit without touching anything.
+        $this->artisan('prestasi:repair-points')->assertSuccessful();
+        $this->assertSame(3, PointRecord::where('related_achievement_id', $achievement->id)->active()->count());
+
+        $this->artisan('prestasi:repair-points', ['--confirm' => true])->assertSuccessful();
+
+        $remaining = PointRecord::where('related_achievement_id', $achievement->id)->orderBy('id')->get();
+        $this->assertSame('recorded', $remaining[0]->status, 'baris paling awal dipertahankan');
+        $this->assertSame('baris ke-0', $remaining[0]->description);
+        $this->assertSame('revoked', $remaining[1]->status);
+        $this->assertSame('revoked', $remaining[2]->status);
+        $this->assertSame(15, (int) PointRecord::where('student_id', $student->id)->active()->sum('points'));
     }
 
     public function test_a_guardian_cannot_verify_any_submission(): void
@@ -344,5 +475,43 @@ class AchievementTest extends TestCase
         $statuses = collect($response->json('achievements'))->pluck('status');
 
         $this->assertSame('pending', $statuses->first());
+    }
+
+    public function test_an_identical_pending_submission_is_refused_rather_than_stacked(): void
+    {
+        // Follow-up to the "points added repeatedly" report: the same win
+        // filed twice (double-clicked submit, wali and guru both filing it)
+        // used to stack pending cards that each legitimately earned their
+        // own points at verify time. One pending card per identical win.
+        $student = $this->student();
+        $user = $this->guardianFor($student);
+
+        $this->actingAs($user)->postJson("/api/wali/students/{$student->ulid}/achievements", $this->payload())->assertCreated();
+
+        $this->actingAs($user)
+            ->postJson("/api/wali/students/{$student->ulid}/achievements", $this->payload())
+            ->assertStatus(422);
+        $this->assertSame(1, Achievement::where('student_id', $student->id)->count());
+
+        // A genuinely different win still goes through. (Spread, not array
+        // `+`: the union operator keeps the FIRST key, so `+ ['nama_prestasi'
+        // => …]` would silently resend the same name.)
+        $this->actingAs($user)
+            ->postJson("/api/wali/students/{$student->ulid}/achievements", [...$this->payload(), 'nama_prestasi' => 'Juara 2 Lomba Puisi'])
+            ->assertCreated();
+        $this->assertSame(2, Achievement::where('student_id', $student->id)->count());
+    }
+
+    public function test_a_guru_cannot_stack_an_identical_pending_proposal_either(): void
+    {
+        $student = $this->student();
+        $guru = $this->staff('guru');
+
+        $this->actingAs($guru)->postJson('/api/guru/achievements', $this->payload() + ['student_ulid' => $student->ulid])->assertCreated();
+
+        $this->actingAs($guru)
+            ->postJson('/api/guru/achievements', $this->payload() + ['student_ulid' => $student->ulid])
+            ->assertStatus(422);
+        $this->assertSame(1, Achievement::where('student_id', $student->id)->count());
     }
 }

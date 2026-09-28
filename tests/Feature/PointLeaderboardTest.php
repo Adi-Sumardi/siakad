@@ -159,4 +159,46 @@ class PointLeaderboardTest extends TestCase
         $this->assertSame([], $body->json('merit'));
         $this->assertSame([], $body->json('violation'));
     }
+
+    public function test_the_student_balance_list_is_paginated_and_filterable(): void
+    {
+        // Bug batch Poin 5: the manage-points roster is a server-side
+        // paged list (20/page, worst balance first) whose unit/jenjang/
+        // search filters ride the same query - and whose summary keeps
+        // counting the WHOLE filtered scope, not just the visible page.
+        foreach (range(1, 25) as $i) {
+            $student = $this->studentIn('SD-13', 'sd', '1-A', 1, "Anak Uji {$i}");
+            $this->award($student, -$i);
+        }
+        $outsider = $this->studentIn('SMP-12', 'smp', '7-B', 7, 'Anak Luuar Cakupan');
+        $this->award($outsider, 5);
+
+        $page1 = $this->actingAs($this->admin)->getJson('/api/admin/points')->assertOk();
+        $this->assertSame(26, $page1->json('summary.total'));
+        $this->assertSame(20, count($page1->json('students.data')));
+        $this->assertSame(1, $page1->json('students.meta.current_page'));
+        $this->assertSame(2, $page1->json('students.meta.last_page'));
+        // Worst balance first: -25 opens page 1.
+        $this->assertSame(-25, $page1->json('students.data.0.balance'));
+
+        $page2 = $this->actingAs($this->admin)->getJson('/api/admin/points?page=2')->assertOk();
+        $this->assertSame(6, count($page2->json('students.data')));
+        $this->assertSame(-5, $page2->json('students.data.0.balance'));
+
+        $byUnit = $this->actingAs($this->admin)->getJson('/api/admin/points?unit=SMP-12')->assertOk();
+        $this->assertSame(1, $byUnit->json('summary.total'));
+        $this->assertSame(['Anak Luuar Cakupan'], collect($byUnit->json('students.data'))->pluck('student.nama_lengkap')->all());
+
+        $byJenjang = $this->actingAs($this->admin)->getJson('/api/admin/points?jenjang=sd-1')->assertOk();
+        $this->assertSame(25, $byJenjang->json('summary.total'));
+
+        $bySearch = $this->actingAs($this->admin)->getJson('/api/admin/points?search=Uji 3')->assertOk();
+        $this->assertSame(['Anak Uji 3'], collect($bySearch->json('students.data'))->pluck('student.nama_lengkap')->all());
+
+        // The ambang toggle with no threshold bands configured narrows to
+        // nothing - every row's threshold is null.
+        $flagged = $this->actingAs($this->admin)->getJson('/api/admin/points?flagged=1')->assertOk();
+        $this->assertSame([], $flagged->json('students.data'));
+        $this->assertSame(26, $flagged->json('summary.total'), 'summary counts the scope, not the toggle');
+    }
 }

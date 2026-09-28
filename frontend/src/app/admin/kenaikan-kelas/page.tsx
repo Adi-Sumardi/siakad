@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
 import { jenjangEntry, jenjangSortIndex, keyForClassroom, matchesClassroom } from "@/lib/jenjang";
+import { deriveUnitJenjang, jenjangKeysForUnit } from "@/lib/unit-jenjang";
 
 type ClassroomOption = {
   ulid: string;
@@ -203,6 +204,11 @@ export default function KenaikanKelasPage() {
     .slice()
     .sort((a, b) => jenjangSortIndex(a) - jenjangSortIndex(b) || a.name.localeCompare(b.name));
 
+  // The cascade's map (bug batch Poin 2): derived from the SAME active-year
+  // classrooms the table shows, so the Jenjang dropdown offers exactly the
+  // ladder this unit actually runs here and now.
+  const jenjangByUnit = deriveUnitJenjang(classrooms ?? []);
+
   return (
     <div className="flex flex-col gap-5 pb-24">
       <div>
@@ -212,14 +218,23 @@ export default function KenaikanKelasPage() {
         </p>
       </div>
 
-      {/* Poin 3: filter per unit + jenjang di atas tabel kelas. */}
+      {/* Poin 3: filter per unit + jenjang di atas tabel kelas. Poin 2:
+          one-way cascade - once a unit is picked, Jenjang only offers that
+          unit's ladder, and switching units resets a jenjang it doesn't
+          run. */}
       <Card className="flex flex-wrap items-end gap-3 p-5">
         {isCentral && (
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs">Unit</Label>
             <select
               value={unitFilter}
-              onChange={(e) => setUnitFilter(e.target.value)}
+              onChange={(e) => {
+                const nextUnit = e.target.value;
+                setUnitFilter(nextUnit);
+                if (jenjangFilter && !(jenjangByUnit[nextUnit] ?? []).includes(jenjangFilter)) {
+                  setJenjangFilter("");
+                }
+              }}
               className="h-10 w-52 rounded-lg border border-input bg-card px-3 text-sm"
             >
               <option value="">Semua Unit</option>
@@ -234,6 +249,7 @@ export default function KenaikanKelasPage() {
           <JenjangSelect
             value={jenjangFilter}
             onChange={setJenjangFilter}
+            allowedKeys={jenjangKeysForUnit(jenjangByUnit, unitFilter || null)}
             className="h-10 w-56 rounded-lg border border-input bg-card px-3 text-sm"
           />
         </div>

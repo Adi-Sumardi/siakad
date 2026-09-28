@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { JenjangSelect } from "@/components/ui/jenjang-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -249,16 +248,15 @@ export default function EkstrakurikulerPage() {
     api.get<{ students: { data: StudentOption[] } }>("/api/admin/students?per_page=500").then((d) => setStudents(d.students.data));
   }, []);
 
-  // Poin 5: unit (central only) + coarse jenjang filters, applied
-  // server-side; an admin_unit's list is already scoped by the API.
+  // Unit filter only (REVISI batch ini, Poin 4): the coarse jenjang filter
+  // from the earlier batch is gone - ekskul is a unit-level catalogue, and
+  // an admin_unit's list is already scoped by the API.
   const [unitFilter, setUnitFilter] = useState("");
-  const [jenjangFilter, setJenjangFilter] = useState("");
 
-  function loadActivities(unit = unitFilter, jenjang = jenjangFilter) {
+  function loadActivities(unit = unitFilter) {
     setActivities(null);
     const params = new URLSearchParams();
     if (unit) params.set("unit", unit);
-    if (jenjang) params.set("jenjang", jenjang);
     const query = params.toString();
     api.get<{ extracurriculars: EkskulRow[] }>(`/api/admin/extracurriculars${query ? `?${query}` : ""}`)
       .then((d) => setActivities(d.extracurriculars))
@@ -284,7 +282,7 @@ export default function EkstrakurikulerPage() {
               value={unitFilter}
               onChange={(e) => {
                 setUnitFilter(e.target.value);
-                loadActivities(e.target.value, jenjangFilter);
+                loadActivities(e.target.value);
               }}
               className="h-10 w-52 rounded-lg border border-input bg-card px-3 text-sm"
             >
@@ -295,19 +293,6 @@ export default function EkstrakurikulerPage() {
             </select>
           </div>
         )}
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Jenjang</Label>
-          <JenjangSelect
-            granularity="coarse"
-            allLabel="Semua Jenjang"
-            value={jenjangFilter}
-            onChange={(key) => {
-              setJenjangFilter(key);
-              loadActivities(unitFilter, key);
-            }}
-            className="h-10 w-48 rounded-lg border border-input bg-card px-3 text-sm"
-          />
-        </div>
       </Card>
 
       <Card className="p-5">

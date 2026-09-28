@@ -59,7 +59,7 @@ class DiscountJenisTest extends TestCase
         );
     }
 
-    public function test_a_scheme_without_jenis_lands_on_lainnya_and_unknown_values_are_refused(): void
+    public function test_a_scheme_without_jenis_lands_on_lainnya_and_new_values_are_accepted(): void
     {
         $created = $this->actingAs($this->admin)->postJson('/api/admin/discount-schemes', [
             'code' => 'potongan_lama',
@@ -76,11 +76,28 @@ class DiscountJenisTest extends TestCase
             'kolom default menampung pemanggil lama',
         );
 
-        $this->actingAs($this->admin)->postJson('/api/admin/discount-schemes', [
-            'code' => 'nilai_asal',
-            'name' => 'Nilai Asal',
+        // REVISI Poin 11: free text - a kind the old enum never predicted
+        // is stored verbatim (the UI suggests used values, the API only
+        // guards the length).
+        $freeText = $this->actingAs($this->admin)->postJson('/api/admin/discount-schemes', [
+            'code' => 'beasiswa_yatim',
+            'name' => 'Beasiswa Yatim',
             'type' => 'percent',
-            'jenis' => 'beasiswa_total',
+            'jenis' => 'Beasiswa Yatim Putra/Putri',
+            'value' => 10,
+        ])->assertCreated()->json('scheme.ulid');
+
+        $this->assertSame(
+            'Beasiswa Yatim Putra/Putri',
+            collect($this->actingAs($this->admin)->getJson('/api/admin/discount-schemes')->json('schemes'))->firstWhere('ulid', $freeText)['jenis'],
+        );
+
+        // The only guard left: length.
+        $this->actingAs($this->admin)->postJson('/api/admin/discount-schemes', [
+            'code' => 'nilai_kepanjangan',
+            'name' => 'Nilai Kepanjangan',
+            'type' => 'percent',
+            'jenis' => str_repeat('x', 65),
             'value' => 10,
         ])->assertStatus(422)->assertInvalid('jenis');
     }

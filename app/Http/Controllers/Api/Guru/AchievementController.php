@@ -11,6 +11,7 @@ use App\Models\Achievement;
 use App\Models\ActivityLog;
 use App\Models\Student;
 use App\Services\Kesiswaan\AchievementDecisionService;
+use App\Services\Kesiswaan\AchievementStateFailure;
 use App\Services\Points\PointLedger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,6 +32,15 @@ class AchievementController extends Controller
         $validated = $request->validated();
 
         $student = Student::visibleTo($request->user())->where('ulid', $validated['student_ulid'])->firstOrFail();
+
+        // The same win must not stack pending cards (Poin 6 follow-up):
+        // each duplicate would legitimately earn its own points at verify
+        // time, which is exactly how points looked "added repeatedly".
+        if (Achievement::pendingDuplicateExists($student->id, null, $validated['nama_prestasi'], $validated['tanggal_event'] ?? null)) {
+            return response()->json([
+                'message' => 'Pengajuan prestasi yang sama (nama & tanggal event identik) untuk siswa ini masih menunggu verifikasi - tidak perlu diajukan dua kali.',
+            ], 422);
+        }
 
         // PENDING, never self-verified (feature batch Poin 7): the teacher
         // PROPOSES; the child's own homeroom teacher decides, and the
@@ -86,6 +96,14 @@ class AchievementController extends Controller
             return response()->json(['message' => 'Akun guru Anda belum terhubung ke unit sekolah mana pun.'], 422);
         }
 
+        // Same guard as the student lane: one pending card per identical
+        // win, or verifying the clones multiplies the points.
+        if (Achievement::pendingDuplicateExists(null, $user->id, $validated['nama_prestasi'], $validated['tanggal_event'] ?? null)) {
+            return response()->json([
+                'message' => 'Pengajuan prestasi diri yang sama (nama & tanggal event identik) masih menunggu verifikasi - tidak perlu diajukan dua kali.',
+            ], 422);
+        }
+
         $achievement = Achievement::create([
             'achiever_type' => 'guru',
             'teacher_user_id' => $user->id,
@@ -120,7 +138,9 @@ class AchievementController extends Controller
         $achievement = Achievement::where('ulid', $ulid)->firstOrFail();
 
         if ($decisions->alreadyDecided($achievement)) {
-            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
+            // 409 Conflict (Poin 6B): the row is past deciding - refused at
+            // the API so a direct request cannot re-award points.
+            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 409);
         }
 
         try {
@@ -130,15 +150,16 @@ class AchievementController extends Controller
                 ! empty($request->validated()['points_awarded']) ? (int) $request->validated()['points_awarded'] : null,
                 lane: 'guru',
             );
+        } catch (AchievementStateFailure $e) {
+            // State failures (no active term, points on a teacher
+            // achievement) keep their 422; permission refusals are a 403.
+            return response()->json(['message' => $e->getMessage()], 422);
         } catch (RuntimeException $e) {
-            // Permission refusals are a 403; the no-active-term state
-            // failure keeps its historical 422 (both shapes matter).
-            $isTermMissing = str_contains($e->getMessage(), 'Tidak ada semester aktif');
-            return response()->json(['message' => $e->getMessage()], $isTermMissing ? 422 : 403);
+            return response()->json(['message' => $e->getMessage()], 403);
         }
 
         if (! $decided) {
-            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
+            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 409);
         }
 
         ActivityLog::record($request->user(), 'achievement.verified', $achievement, [
@@ -154,7 +175,7 @@ class AchievementController extends Controller
         $achievement = Achievement::where('ulid', $ulid)->firstOrFail();
 
         if ($decisions->alreadyDecided($achievement)) {
-            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
+            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 409);
         }
 
         try {
@@ -164,7 +185,7 @@ class AchievementController extends Controller
         }
 
         if (! $decided) {
-            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
+            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 409);
         }
 
         ActivityLog::record($request->user(), 'achievement.rejected', $achievement, ['reason' => $request->validated()['reason']]);

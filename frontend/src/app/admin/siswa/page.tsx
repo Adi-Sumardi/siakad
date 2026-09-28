@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { JenjangSelect } from "@/components/ui/jenjang-select";
+import { type UnitJenjangMap, jenjangKeysForUnit, unitsWithJenjang } from "@/lib/unit-jenjang";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -90,6 +91,11 @@ function AdminStudentsContent() {
   const [students, setStudents] = useState<StudentItem[] | null>(null);
   const [meta, setMeta] = useState<StudentListMeta | null>(null);
   const [units, setUnits] = useState<SchoolUnit[]>([]);
+  // The unit↔jenjang map (Poin 1): the two-way cascade between the Jenjang
+  // and Unit dropdowns reads this - derived from live classrooms, fetched
+  // once. Falls back to null (= unfiltered ladder / all units) until it
+  // lands, so the dropdowns work even while it loads.
+  const [jenjangByUnit, setJenjangByUnit] = useState<UnitJenjangMap | null>(null);
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [selectedYear, setSelectedYear] = useState<string>("");
   const [page, setPage] = useState(1);
@@ -165,6 +171,11 @@ function AdminStudentsContent() {
     api
       .get<{ school_units: SchoolUnit[] }>("/api/admin/school-units")
       .then((d) => setUnits(d.school_units))
+      .catch(() => {});
+
+    api
+      .get<{ jenjang_by_unit: UnitJenjangMap }>("/api/admin/unit-jenjang")
+      .then((d) => setJenjangByUnit(d.jenjang_by_unit))
       .catch(() => {});
   }, []);
 
@@ -445,7 +456,10 @@ function AdminStudentsContent() {
           {/* Jenjang & unit filters are central-admin only: a per-unit
               admin's scope already narrows every query to their own unit,
               so these dropdowns would only offer choices that render an
-              empty table. */}
+              empty table. The two cascade BOTH ways (Poin 1): picking a
+              jenjang leaves only units that run it, picking a unit leaves
+              only that unit's ladder - pairs with no real classes behind
+              them stop being offered. */}
           {isAdministrator && (
             <div>
               <Label className="text-xs">Jenjang Sekolah</Label>
@@ -453,8 +467,14 @@ function AdminStudentsContent() {
                 value={jenjangFilter}
                 onChange={(key) => {
                   setJenjangFilter(key);
+                  // Two-way cascade (Poin 1): a jenjang the picked unit
+                  // doesn't run un-picks the unit, back to "Semua Unit".
+                  if (key && unitFilter && !(jenjangByUnit?.[unitFilter] ?? []).includes(key)) {
+                    setUnitFilter("");
+                  }
                   setPage(1);
                 }}
+                allowedKeys={jenjangByUnit ? jenjangKeysForUnit(jenjangByUnit, unitFilter || null) : null}
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
               />
             </div>
@@ -466,13 +486,19 @@ function AdminStudentsContent() {
               <select
                 value={unitFilter}
                 onChange={(e) => {
-                  setUnitFilter(e.target.value);
+                  const nextUnit = e.target.value;
+                  setUnitFilter(nextUnit);
+                  // Two-way cascade (Poin 1): switching units resets a
+                  // jenjang the new unit doesn't run.
+                  if (jenjangFilter && !(jenjangByUnit?.[nextUnit] ?? []).includes(jenjangFilter)) {
+                    setJenjangFilter("");
+                  }
                   setPage(1);
                 }}
                 className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-medium shadow-2xs"
               >
                 <option value="">Semua Unit</option>
-                {units.map((u) => (
+                {unitsWithJenjang(units, jenjangByUnit ?? {}, jenjangFilter || null).map((u) => (
                   <option key={u.ulid} value={u.code}>
                     {u.label}
                   </option>

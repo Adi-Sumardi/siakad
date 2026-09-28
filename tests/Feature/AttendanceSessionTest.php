@@ -625,6 +625,32 @@ class AttendanceSessionTest extends TestCase
         $this->assertSame(1, $response->json('summary.total_records'));
     }
 
+    public function test_a_central_admin_can_narrow_the_report_to_one_unit(): void
+    {
+        // The Presensi Harian tab's recap follows the unit its operational
+        // half is showing - ?unit= (ULID) clips the cross-unit report for a
+        // central admin, the same narrowing visibleTo() already forces on an
+        // admin_unit.
+        $sdClassroom = $this->classroomIn($this->sd);
+        $sdStudent = $this->studentIn($sdClassroom, nis: '20019');
+        $smpClassroom = $this->classroomIn($this->smp);
+        $smpStudent = $this->studentIn($smpClassroom, nis: '20020');
+
+        $today = Carbon::today()->toDateString();
+        $this->dailyMark($sdStudent, $sdClassroom, 'hadir', $today);
+        $this->dailyMark($smpStudent, $smpClassroom, 'alpa', $today);
+
+        $admin = $this->staff('admin');
+
+        $both = $this->actingAs($admin)->getJson('/api/admin/reports/attendance')->assertStatus(200);
+        $this->assertSame(2, $both->json('summary.total_records'));
+
+        $smpOnly = $this->actingAs($admin)->getJson("/api/admin/reports/attendance?unit={$this->smp->ulid}")->assertStatus(200);
+        $this->assertSame(1, $smpOnly->json('summary.total_records'));
+        $this->assertSame(1, $smpOnly->json('summary.alpa'));
+        $this->assertSame('SMP Sakinah', $smpOnly->json('by_unit.0.unit'));
+    }
+
     // --- Gate vs lesson discrepancy (anti "masuk gerbang, bolos mapel") ----
 
     public function test_the_gate_vs_lesson_discrepancy_flags_both_directions(): void

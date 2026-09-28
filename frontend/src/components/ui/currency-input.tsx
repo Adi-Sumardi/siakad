@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { cn } from "@/lib/utils";
 
 /**
  * The one rupiah input every money form uses (feature batch Poin 9/12):
@@ -11,6 +12,12 @@ import { useState } from "react";
  *
  * Controlled on the INTEGER: `value` is the raw number (null = empty), and
  * every keystroke reports the parsed integer back through onChange.
+ *
+ * Styling is the shared Input's, verbatim (Poin 8): same border, padding,
+ * height and focus ring as every other text field on the same form, plus
+ * pl-10 for the Rp prefix. className MERGES over the default (via
+ * tailwind-merge) instead of replacing it, so the compact per-component
+ * variants (h-8) tweak size without losing the rest.
  */
 export function CurrencyInput({
   value,
@@ -68,10 +75,14 @@ export function CurrencyInput({
         min={min}
         value={text}
         onChange={(e) => handle(e.target.value)}
-        className={
-          className ??
-          "h-10 w-full rounded-lg border border-input bg-card pl-10 pr-3 text-sm font-bold tabular shadow-2xs focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary"
-        }
+        className={cn(
+          "flex h-10 w-full rounded-lg border border-input bg-card py-2 pl-10 pr-3 text-sm tabular",
+          "placeholder:text-muted-foreground",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-primary",
+          "disabled:cursor-not-allowed disabled:opacity-60",
+          "aria-[invalid=true]:border-bad aria-[invalid=true]:ring-bad/30",
+          className,
+        )}
       />
     </div>
   );

@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { JenjangSelect } from "@/components/ui/jenjang-select";
+import { Label } from "@/components/ui/label";
+import { Pagination, type PageMeta } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PointMeter } from "@/components/point-meter";
 import { api, ApiError } from "@/lib/api";
@@ -27,9 +29,16 @@ export default function AdminPointsPage() {
   const isCentral = user?.role === "admin";
 
   const [term, setTerm] = useState<string | null>(null);
-  const [rows, setRows] = useState<Row[] | null>(null);
+  // Poin 5: the student list is server-side paginated (20/page) with its
+  // own unit/jenjang/search filters - `summary` keeps the KPI cards counting
+  // the whole filtered scope, not just the visible page.
+  const [paged, setPaged] = useState<{ data: Row[]; meta: PageMeta } | null>(null);
+  const [summary, setSummary] = useState<{ total: number; flagged: number } | null>(null);
   const [search, setSearch] = useState("");
-  const [filterThresholdOnly, setFilterThresholdOnly] = useState(false);
+  const [listUnit, setListUnit] = useState("");
+  const [listJenjang, setListJenjang] = useState("");
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [page, setPage] = useState(1);
 
   // Poin 6: one shared unit+jenjang filter pair driving BOTH boards.
   const [boardUnit, setBoardUnit] = useState("");
@@ -55,15 +64,32 @@ export default function AdminPointsPage() {
       });
   }
 
-  useEffect(() => {
+  function loadStudents(targetPage = page) {
+    const params = new URLSearchParams();
+    if (search.trim()) params.set("search", search.trim());
+    if (listUnit) params.set("unit", listUnit);
+    if (listJenjang) params.set("jenjang", listJenjang);
+    if (flaggedOnly) params.set("flagged", "1");
+    params.set("page", String(targetPage));
+
     api
-      .get<{ term: string | null; students: Row[] }>("/api/admin/points")
+      .get<{ term: string | null; summary: { total: number; flagged: number }; students: { data: Row[]; meta: PageMeta } }>(`/api/admin/points?${params}`)
       .then((d) => {
         setTerm(d.term);
-        setRows(d.students);
+        setSummary(d.summary ?? { total: d.students.meta.total, flagged: 0 });
+        setPaged(d.students);
       })
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat data poin."));
+  }
 
+  // Debounced like the tagihan tab: typing narrows without hammering the
+  // API, and every filter change re-runs with whatever page state it set.
+  useEffect(() => {
+    const timer = setTimeout(() => loadStudents(), 300);
+    return () => clearTimeout(timer);
+  }, [search, listUnit, listJenjang, flaggedOnly, page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     loadLeaderboard("", "");
 
     if (isCentral) {
@@ -73,14 +99,6 @@ export default function AdminPointsPage() {
     }
   }, [isCentral]);
 
-  const flagged = rows?.filter((r) => r.threshold) ?? [];
-
-  const filteredRows = rows?.filter((r) => {
-    if (search && !r.student.nama_lengkap.toLowerCase().includes(search.toLowerCase())) return false;
-    if (filterThresholdOnly && !r.threshold) return false;
-    return true;
-  });
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -88,7 +106,7 @@ export default function AdminPointsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Buku Rekap Poin & Tata Tertib Siswa</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {term ? `Semester Aktif: ${term}` : "Belum ada semester aktif"} · Total {rows?.length ?? 0} siswa terdata
+            {term ? `Semester Aktif: ${term}` : "Belum ada semester aktif"} · Total {summary?.total ?? 0} siswa terdata
           </p>
         </div>
 
@@ -112,20 +130,20 @@ export default function AdminPointsPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card className="p-5 border-border/80">
           <span className="text-xs font-semibold text-muted-foreground uppercase">Total Siswa Terdaftar</span>
-          <div className="mt-2 text-2xl font-bold text-foreground">{rows?.length ?? <Skeleton className="h-8 w-16" />}</div>
+          <div className="mt-2 text-2xl font-bold text-foreground">{summary?.total ?? <Skeleton className="h-8 w-16" />}</div>
           <p className="mt-1 text-xs text-muted-foreground">Dalam cakupan unit sekolah</p>
         </Card>
 
         <Card className="p-5 border-border/80">
           <span className="text-xs font-semibold text-muted-foreground uppercase">Siswa Terkena Ambang SP</span>
-          <p className="mt-2 text-2xl font-bold text-destructive">{flagged.length} siswa</p>
+          <p className="mt-2 text-2xl font-bold text-destructive">{summary?.flagged ?? 0} siswa</p>
           <p className="mt-1 text-xs text-muted-foreground">Perlu pembinaan guru BK / wali kelas</p>
         </Card>
 
         <Card className="p-5 border-border/80">
           <span className="text-xs font-semibold text-muted-foreground uppercase">Kondisi Tertib / Aman</span>
           <div className="mt-2 text-2xl font-bold text-emerald-600">
-            {rows ? `${rows.length - flagged.length} siswa` : <Skeleton className="h-8 w-16" />}
+            {summary ? `${summary.total - summary.flagged} siswa` : <Skeleton className="h-8 w-16" />}
           </div>
           <p className="mt-1 text-xs text-muted-foreground">Tidak memiliki poin pelanggaran kritis</p>
         </Card>
@@ -232,22 +250,62 @@ export default function AdminPointsPage() {
         </div>
       </Card>
 
-      {/* Search & Filter Bar */}
-      <div className="flex flex-wrap items-center gap-3 bg-muted/40 p-3.5 rounded-2xl border border-border">
-        <div className="relative min-w-[240px] flex-1">
-          <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari nama siswa..."
-            className="pl-9 bg-card text-xs shadow-2xs"
+      {/* Search & Filter Bar (Poin 5): the list's own unit/jenjang/search
+          filters ride the same server-side query as the pagination; any
+          change lands back on page 1. */}
+      <div className="flex flex-wrap items-end gap-3 bg-muted/40 p-3.5 rounded-2xl border border-border">
+        <div className="relative min-w-[220px] flex-1">
+          <Label className="text-xs text-muted-foreground">Cari Nama Siswa</Label>
+          <div className="relative mt-1">
+            <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Cari nama siswa..."
+              className="pl-9 bg-card text-xs shadow-2xs"
+            />
+          </div>
+        </div>
+
+        {isCentral && (
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-muted-foreground">Unit</Label>
+            <select
+              value={listUnit}
+              onChange={(e) => {
+                setListUnit(e.target.value);
+                setPage(1);
+              }}
+              className="h-10 w-48 rounded-lg border border-input bg-card px-3 text-sm"
+            >
+              <option value="">Semua Unit</option>
+              {unitOptions.map((u) => <option key={u.code} value={u.code}>{u.label}</option>)}
+            </select>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs text-muted-foreground">Jenjang</Label>
+          <JenjangSelect
+            value={listJenjang}
+            onChange={(key) => {
+              setListJenjang(key);
+              setPage(1);
+            }}
+            className="h-10 w-52 rounded-lg border border-input bg-card px-3 text-sm"
           />
         </div>
 
         <button
-          onClick={() => setFilterThresholdOnly(!filterThresholdOnly)}
+          onClick={() => {
+            setFlaggedOnly(!flaggedOnly);
+            setPage(1);
+          }}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${
-            filterThresholdOnly
+            flaggedOnly
               ? "bg-destructive text-destructive-foreground border-destructive"
               : "bg-card text-muted-foreground border-border hover:bg-accent"
           }`}
@@ -258,37 +316,40 @@ export default function AdminPointsPage() {
       </div>
 
       {/* List */}
-      {rows === null && (
+      {paged === null && (
         <div className="space-y-3">
           <Skeleton className="h-20 w-full rounded-xl" />
           <Skeleton className="h-20 w-full rounded-xl" />
         </div>
       )}
 
-      {filteredRows?.length === 0 && (
+      {paged?.data.length === 0 && (
         <Card className="p-8 text-center text-sm text-muted-foreground">
           Tidak ada data siswa yang cocok dengan filter pencarian.
         </Card>
       )}
 
       <div className="grid grid-cols-1 gap-3">
-        {filteredRows
-          ?.slice()
-          .sort((a, b) => a.balance - b.balance)
-          .map((row) => (
-            <Card key={row.student.ulid} className="p-4 sm:p-5 border-border/80 hover:border-primary/40 transition-colors">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <p className="font-bold text-foreground text-base">{row.student.nama_lengkap}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{row.student.unit ?? "Unit Sekolah"}</p>
-                </div>
-                <div className="sm:text-right">
-                  <PointMeter balance={row.balance} threshold={row.threshold} size="sm" />
-                </div>
+        {paged?.data.map((row) => (
+          <Card key={row.student.ulid} className="p-4 sm:p-5 border-border/80 hover:border-primary/40 transition-colors">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <p className="font-bold text-foreground text-base">{row.student.nama_lengkap}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{row.student.unit ?? "Unit Sekolah"}</p>
               </div>
-            </Card>
-          ))}
+              <div className="sm:text-right">
+                <PointMeter balance={row.balance} threshold={row.threshold} size="sm" />
+              </div>
+            </div>
+          </Card>
+        ))}
       </div>
+
+      {/* Pagination (Poin 5): 20 per page, worst balance first - the sort
+          happened server-side before the slice. */}
+      {paged && (
+        <Pagination meta={paged.meta} onPage={setPage} label="siswa" />
+      )}
     </div>
   );
 }

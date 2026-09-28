@@ -212,4 +212,45 @@ class Jenjang
 
         return [implode(' OR ', $sql), $bindings];
     }
+
+    /**
+     * The live unit↔jenjang map (bug batch Poin 1-3): which ladder keys
+     * actually run in each unit, DERIVED from the classrooms that exist -
+     * never a static mapping table, so a new class structure updates the
+     * cascading dropdowns by itself. This is the ONE query helper behind
+     * "unit yang punya jenjang X" and "jenjang yang ada di unit Y" alike;
+     * the tabs only read the map from different directions.
+     *
+     * Unrecognizable classrooms (no early-childhood prefix, odd tingkat)
+     * contribute nothing rather than guessing - the coarse group stays
+     * reachable through the regular filters.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\App\Models\Classroom>|null  $classrooms
+     * @return array<string, list<string>> unit code => ladder keys, ladder-ordered
+     */
+    public static function unitJenjangMap($classrooms = null): array
+    {
+        $query = ($classrooms ?? Classroom::query())->where('is_active', true);
+
+        $rows = $query->with('schoolUnit:id,ulid,code,label,jenjang_group')
+            ->get(['school_unit_id', 'tingkat', 'name']);
+
+        $seen = [];
+
+        foreach ($rows as $classroom) {
+            $key = self::keyForClassroom($classroom);
+            if ($key !== null) {
+                $seen[$classroom->schoolUnit?->code][$key] = true;
+            }
+        }
+
+        $order = array_flip(array_column(self::ladder(), 'key'));
+
+        return collect($seen)
+            ->map(fn (array $keys) => collect(array_keys($keys))
+                ->sortBy(fn (string $key) => $order[$key] ?? PHP_INT_MAX)
+                ->values()
+                ->all())
+            ->all();
+    }
 }

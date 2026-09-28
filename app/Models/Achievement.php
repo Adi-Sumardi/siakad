@@ -72,6 +72,29 @@ class Achievement extends Model
         return $this->status === 'pending';
     }
 
+    /**
+     * An identical proposal already waiting for a decision (follow-up to
+     * the Poin 6 bug report): the same win filed twice - a double-clicked
+     * submit, wali and guru both reporting it - must not stack pending
+     * cards that each carry their own points at verify time. Name + event
+     * date identify "the same win"; the verifier can still differentiate
+     * genuinely different wins by naming them differently.
+     */
+    public static function pendingDuplicateExists(?int $studentId, ?int $teacherUserId, string $namaPrestasi, ?string $tanggalEvent): bool
+    {
+        return static::query()
+            ->where('status', 'pending')
+            ->when($studentId, fn ($q) => $q->where('student_id', $studentId), fn ($q) => $q->whereNull('student_id'))
+            ->when($teacherUserId, fn ($q) => $q->where('teacher_user_id', $teacherUserId))
+            ->where('nama_prestasi', $namaPrestasi)
+            // whereDate, never a bare string comparison: the model casts
+            // tanggal_event to datetime, so SQLite stores '2026-08-20
+            // 00:00:00' and `= '2026-08-20'` silently matches nothing -
+            // the same trap that made the old seeder stack duplicates.
+            ->when($tanggalEvent, fn ($q) => $q->whereDate('tanggal_event', $tanggalEvent), fn ($q) => $q->whereNull('tanggal_event'))
+            ->exists();
+    }
+
     /** A row PMB already collected during registration - not this school's teacher's to edit. */
     public function isEditableHere(): bool
     {

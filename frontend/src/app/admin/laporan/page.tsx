@@ -11,7 +11,6 @@ import {
   RefreshCw,
   TrendingDown,
   TrendingUp,
-  Users,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth/auth-context";
@@ -21,7 +20,8 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { API_BASE, api, ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { downloadApiFile } from "@/lib/download";
 import { rupiah, todayJakarta } from "@/lib/format";
 
 type Receivables = {
@@ -36,13 +36,6 @@ type Collections = {
   count: number;
   by_method: { method: string; count: number; total: number }[];
   by_fee_type: { fee_type: string; total: number }[];
-};
-
-type Attendance = {
-  period: { from: string; to: string };
-  summary: { total_records: number; hadir: number; sakit: number; izin: number; alpa: number };
-  by_class: { kelas: string; hadir: number; sakit: number; izin: number; alpa: number }[];
-  by_unit: { unit: string; hadir: number; sakit: number; izin: number; alpa: number }[];
 };
 
 /** The 1st of the current month, in Jakarta - see todayJakarta() for why UTC-based conversion loses a day near midnight WIB. */
@@ -79,7 +72,6 @@ export default function ReportsPage() {
 
   const [receivables, setReceivables] = useState<Receivables | null>(null);
   const [collections, setCollections] = useState<Collections | null>(null);
-  const [attendance, setAttendance] = useState<Attendance | null>(null);
   const [from, setFrom] = useState(firstOfMonth());
   const [to, setTo] = useState(todayJakarta());
   // Spinner state ONLY - set from the button click and cleared in the async
@@ -124,12 +116,10 @@ export default function ReportsPage() {
     Promise.all([
       api.get<Receivables>("/api/admin/reports/receivables"),
       api.get<Collections>(`/api/admin/reports/collections?from=${from}&to=${to}`),
-      api.get<Attendance>(`/api/admin/reports/attendance?from=${from}&to=${to}`),
     ])
-      .then(([recData, colData, attData]) => {
+      .then(([recData, colData]) => {
         setReceivables(recData);
         setCollections(colData);
-        setAttendance(attData);
       })
       .catch((err) => {
         toast.error(err instanceof ApiError ? err.message : "Gagal memuat laporan.");
@@ -361,15 +351,23 @@ export default function ReportsPage() {
                           <div className="flex items-center justify-end gap-1.5">
                             {t.status === "completed" && (
                               <>
-                                <a
-                                  href={`${API_BASE}/api/admin/payments/${t.ulid}/receipt`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                                <button
+                                  type="button"
                                   title="Unduh kuitansi PDF"
+                                  onClick={() => {
+                                    // Poin 10: the receipt endpoint sits behind
+                                    // Sanctum's session cookie - a plain <a href>
+                                    // navigates without it and gets a JSON 401.
+                                    // Fetch as a blob instead; the cookie rides along.
+                                    downloadApiFile(
+                                      `/api/admin/payments/${t.ulid}/receipt`,
+                                      `Kuitansi-${t.reference_number.replace(/\//g, "-")}.pdf`,
+                                    ).catch((err) => toast.error(err instanceof Error ? err.message : "Gagal mengunduh kuitansi."));
+                                  }}
                                   className="rounded-lg border border-input bg-card p-1.5 text-muted-foreground transition-colors hover:text-primary"
                                 >
                                   <FileDown className="size-3.5" />
-                                </a>
+                                </button>
                                 <button
                                   type="button"
                                   title="Salin tautan struk publik"
@@ -485,86 +483,9 @@ export default function ReportsPage() {
         )}
       </div>
 
-      {/* SECTION 3: PRESENSI HARIAN */}
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-muted/40 p-4 rounded-2xl border border-border">
-          <div>
-            <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-              <Users className="size-4.5 text-primary" />
-              <span>Rekap Presensi Harian</span>
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              Hadir/Sakit/Izin/Alpa dalam HARI (lapis harian - sumber resmi), rentang tanggal sama dgn laporan kas.
-            </p>
-          </div>
-        </div>
-
-        {attendance === null ? (
-          <Skeleton className="h-40 w-full" />
-        ) : attendance.summary.total_records === 0 ? (
-          <Card className="p-6 border-border/80 text-center text-sm text-muted-foreground">
-            Belum ada data presensi pada rentang {attendance.period.from} s/d {attendance.period.to}.
-          </Card>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <Card className="p-4 border-border/80">
-                <span className="text-xs text-muted-foreground">Hadir</span>
-                <p className="mt-1 text-xl font-bold text-good">{attendance.summary.hadir}</p>
-              </Card>
-              <Card className="p-4 border-border/80">
-                <span className="text-xs text-muted-foreground">Sakit</span>
-                <p className="mt-1 text-xl font-bold text-foreground">{attendance.summary.sakit}</p>
-              </Card>
-              <Card className="p-4 border-border/80">
-                <span className="text-xs text-muted-foreground">Izin</span>
-                <p className="mt-1 text-xl font-bold text-foreground">{attendance.summary.izin}</p>
-              </Card>
-              <Card className="p-4 border-border/80">
-                <span className="text-xs text-muted-foreground">Alpa</span>
-                <p className="mt-1 text-xl font-bold text-destructive">{attendance.summary.alpa}</p>
-              </Card>
-            </div>
-
-            <Card className="overflow-hidden border-border/80">
-              <div className="border-b border-border bg-muted/30 px-5 py-3 flex items-center justify-between">
-                <p className="text-sm font-bold text-foreground">Rekap Presensi per Kelas</p>
-                <span className="text-xs text-muted-foreground">{attendance.by_class.length} kelas terdata</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="border-b border-border bg-muted/40 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    <tr>
-                      <th className="px-5 py-3.5">Rombel / Kelas</th>
-                      <th className="px-5 py-3.5 text-right">Hadir</th>
-                      <th className="px-5 py-3.5 text-right">Sakit</th>
-                      <th className="px-5 py-3.5 text-right">Izin</th>
-                      <th className="px-5 py-3.5 text-right">Alpa</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {attendance.by_class.map((row) => (
-                      <tr key={row.kelas} className="hover:bg-muted/20 transition-colors">
-                        <td className="px-5 py-3.5 font-bold text-foreground">{row.kelas}</td>
-                        <td className="px-5 py-3.5 text-right font-bold text-good">{row.hadir}</td>
-                        <td className="px-5 py-3.5 text-right text-muted-foreground">{row.sakit}</td>
-                        <td className="px-5 py-3.5 text-right text-muted-foreground">{row.izin}</td>
-                        <td className="px-5 py-3.5 text-right">
-                          {row.alpa > 0 ? (
-                            <span className="font-bold text-destructive">{row.alpa}</span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </>
-        )}
-      </div>
+      {/* SECTION 3: PRESENSI HARIAN - moved to the Presensi Harian tab
+          (admin/presensi-harian), where an attendance recap belongs; this
+          page stays purely financial (receivables, collections, transactions). */}
     </div>
   );
 }

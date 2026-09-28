@@ -40,6 +40,15 @@ class AchievementController extends Controller
 
         $validated = $request->validated();
 
+        // The same win must not stack pending cards (Poin 6 follow-up):
+        // each duplicate would legitimately earn its own points at verify
+        // time, which is exactly how points looked "added repeatedly".
+        if (Achievement::pendingDuplicateExists($student->id, null, $validated['nama_prestasi'], $validated['tanggal_event'] ?? null)) {
+            return response()->json([
+                'message' => 'Pengajuan prestasi yang sama (nama & tanggal event identik) untuk anak ini masih menunggu verifikasi - tidak perlu diajukan dua kali.',
+            ], 422);
+        }
+
         $achievement = Achievement::create([
             'student_id' => $student->id,
             'nama_prestasi' => $validated['nama_prestasi'],

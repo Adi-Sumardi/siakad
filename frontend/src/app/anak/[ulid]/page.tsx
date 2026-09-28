@@ -15,6 +15,7 @@ import { PointMeter } from "@/components/point-meter";
 import { AttendanceMeter } from "@/components/attendance-meter";
 import { API_BASE, api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
+import { downloadApiFile } from "@/lib/download";
 import { tanggal, todayJakarta } from "@/lib/format";
 import {
   ATTENDANCE_STATUS_LABEL,
@@ -140,15 +141,20 @@ function AchievementCard({ achievement }: { achievement: Achievement }) {
       )}
 
       {achievement.has_sertifikat && (
-        <a
-          href={`${API_BASE}/api/files/achievements/${achievement.ulid}/sertifikat`}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          type="button"
+          onClick={() => {
+            // Blob download, not a bare <a href>: the file endpoint needs
+            // the Sanctum session cookie (Poin 10's bug class).
+            downloadApiFile(`/api/files/achievements/${achievement.ulid}/sertifikat`, `Sertifikat-${achievement.nama_prestasi}.pdf`).catch((err) =>
+              toast.error(err instanceof Error ? err.message : "Gagal mengunduh sertifikat."),
+            );
+          }}
           className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
         >
           <FileDown className="size-3.5" />
           <span>Lihat Sertifikat Piagam</span>
-        </a>
+        </button>
       )}
     </Card>
   );

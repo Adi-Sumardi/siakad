@@ -20,6 +20,11 @@ class PointController extends Controller
      * Balances are computed in one grouped query rather than one SUM per
      * student - the difference between one query and three hundred on a
      * central admin's full roster.
+     *
+     * Paginated 20/page (bug batch Poin 5) and filterable by unit/jenjang
+     * the same way the leaderboard is - the balance sort happens before
+     * the slice, so page 1 is always the worst band first regardless of
+     * how the filters shrink the roster.
      */
     public function index(Request $request): JsonResponse
     {
@@ -32,6 +37,15 @@ class PointController extends Controller
         $students = Student::query()
             ->visibleTo($request->user())
             ->active()
+            ->when($request->string('search')->value(), fn ($q, $search) => $q->where('nama_lengkap', 'like', '%'.$search.'%'))
+            ->when($request->string('unit')->value(), fn ($q, $code) => $q->whereHas('schoolUnit', fn ($u) => $u->where('code', $code)))
+            ->when($jenjang = $request->string('jenjang')->value(), function ($q, $jenjang) use ($term) {
+                $q->whereHas('enrollments', function ($eq) use ($jenjang, $term) {
+                    $eq->where('status', 'active')
+                        ->where('academic_year_id', $term->academic_year_id)
+                        ->whereHas('classroom', fn ($cq) => \App\Support\Jenjang::applyToClassroomQuery($cq, $jenjang));
+                });
+            })
             ->with('schoolUnit')
             ->orderBy('nama_lengkap')
             ->get();
@@ -58,13 +72,43 @@ class PointController extends Controller
             ];
         });
 
+        // The KPI cards count the unit/jenjang/search scope as a whole - so
+        // the summary is taken BEFORE the threshold/flagged narrowing that
+        // only shapes the paged list.
+        $summary = [
+            'total' => $rows->count(),
+            'flagged' => $rows->filter(fn ($row) => $row['threshold'] !== null)->count(),
+        ];
+
         if ($thresholdUlid = $request->string('threshold')->value()) {
             $rows = $rows->filter(fn ($row) => $row['threshold']['ulid'] === $thresholdUlid)->values();
         }
 
+        if ($request->boolean('flagged')) {
+            $rows = $rows->filter(fn ($row) => $row['threshold'] !== null)->values();
+        }
+
+        $sorted = $rows->sortBy('balance')->values();
+        $perPage = 20;
+        $page = max(1, $request->integer('page', 1));
+
+        // The {data, meta} shape the siswa tab's pagination already speaks
+        // (a raw paginator would serialize flat), so the frontend component
+        // is reused as-is.
         return response()->json([
             'term' => $term->label(),
-            'students' => $rows->sortBy('balance')->values(),
+            'summary' => $summary,
+            'students' => [
+                'data' => $sorted->forPage($page, $perPage)->values(),
+                'meta' => [
+                    'current_page' => $page,
+                    'last_page' => max(1, (int) ceil($sorted->count() / $perPage)),
+                    'total' => $sorted->count(),
+                    'per_page' => $perPage,
+                    'from' => $sorted->count() === 0 ? null : ($page - 1) * $perPage + 1,
+                    'to' => $sorted->count() === 0 ? null : min($page * $perPage, $sorted->count()),
+                ],
+            ],
         ]);
     }
 

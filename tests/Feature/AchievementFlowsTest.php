@@ -141,10 +141,11 @@ class AchievementFlowsTest extends TestCase
         $this->assertSame(1, PointRecord::where('student_id', $student->id)->count());
         $this->assertSame(20, (int) PointRecord::where('student_id', $student->id)->value('points'));
 
-        // A double-click on the decided row: 422, nothing new written.
+        // A double-click on the decided row: 409 Conflict (Poin 6B),
+        // nothing new written.
         $this->actingAs($waliKelas)
             ->postJson("/api/guru/achievements/{$ulid}/verify", ['points_awarded' => 20])
-            ->assertStatus(422);
+            ->assertStatus(409);
         $this->assertSame(1, PointRecord::where('student_id', $student->id)->count());
     }
 

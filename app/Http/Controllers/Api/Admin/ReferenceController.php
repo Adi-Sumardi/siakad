@@ -137,4 +137,21 @@ class ReferenceController extends Controller
             ]),
         ]);
     }
+
+    /**
+     * The unit↔jenjang map behind the cascading filters (bug batch Poin
+     * 1-3): which ladder keys actually run in each unit, derived from live
+     * classroom rows via Jenjang::unitJenjangMap() - the ONE query helper
+     * every tab reads, so "units having jenjang X" and "jenjang in unit Y"
+     * can never drift apart. Scoped by visibleTo(): an admin_unit's map
+     * holds exactly their own unit.
+     */
+    public function unitJenjang(Request $request): JsonResponse
+    {
+        $map = \App\Support\Jenjang::unitJenjangMap(
+            Classroom::query()->visibleTo($request->user())
+        );
+
+        return response()->json(['jenjang_by_unit' => $map]);
+    }
 }

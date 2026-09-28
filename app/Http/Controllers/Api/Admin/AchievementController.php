@@ -10,6 +10,7 @@ use App\Models\Achievement;
 use App\Models\ActivityLog;
 use App\Models\Term;
 use App\Services\Kesiswaan\AchievementDecisionService;
+use App\Services\Kesiswaan\AchievementStateFailure;
 use App\Services\Points\PointLedger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -47,7 +48,11 @@ class AchievementController extends Controller
         $achievement = Achievement::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
 
         if ($decisions->alreadyDecided($achievement)) {
-            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
+            // 409, not 422: the row is PAST deciding - a conflict with the
+            // state a direct API caller is trying to re-create (Poin 6B),
+            // refused here so hiding the button in the UI is never the only
+            // guard.
+            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 409);
         }
 
         // The two verification lanes (Poin 7): student achievements keep
@@ -62,15 +67,16 @@ class AchievementController extends Controller
                 ! empty($validated['points_awarded']) ? (int) $validated['points_awarded'] : null,
                 lane: 'admin',
             );
+        } catch (AchievementStateFailure $e) {
+            // State failures (no active term, points on a teacher
+            // achievement) keep their 422; permission refusals are a 403.
+            return response()->json(['message' => $e->getMessage()], 422);
         } catch (RuntimeException $e) {
-            // Permission refusals are a 403; the no-active-term state
-            // failure keeps its historical 422 (both shapes matter).
-            $isTermMissing = str_contains($e->getMessage(), 'Tidak ada semester aktif');
-            return response()->json(['message' => $e->getMessage()], $isTermMissing ? 422 : 403);
+            return response()->json(['message' => $e->getMessage()], 403);
         }
 
         if (! $decided) {
-            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
+            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 409);
         }
 
         ActivityLog::record($request->user(), 'achievement.verified', $achievement, [
@@ -95,7 +101,7 @@ class AchievementController extends Controller
         // call (central admin sees, decides nothing); student
         // achievements stay decidable here as they always were.
         if ($decisions->alreadyDecided($achievement)) {
-            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
+            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 409);
         }
 
         try {
@@ -105,7 +111,7 @@ class AchievementController extends Controller
         }
 
         if (! $decided) {
-            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 422);
+            return response()->json(['message' => 'Prestasi ini sudah diputuskan sebelumnya.'], 409);
         }
 
         ActivityLog::record($request->user(), 'achievement.rejected', $achievement, ['reason' => $validated['reason']]);
