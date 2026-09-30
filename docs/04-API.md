@@ -44,6 +44,7 @@ pengecekan per-controller.
 | Method | Path | Keterangan |
 |---|---|---|
 | GET | `/api/wali/students` | daftar anak — tiap baris sudah membawa `poin.balance` & `poin.threshold` semester berjalan |
+| POST | `/api/wali/welcome/acknowledge` | tutup splash sambutan sekali-per-akun — idempoten, timestamp pertama dipertahankan; flag dibaca dari `user.welcome_shown_at` di `/api/auth/me` |
 | GET | `/api/wali/students/{ulid}/points` | saldo, ambang yang berlaku, dan seluruh ledger semester ini |
 | GET | `/api/wali/students/{ulid}/achievements` | |
 | POST | `/api/wali/students/{ulid}/achievements` | ajukan prestasi — masuk `pending`, tidak pernah membawa poin sendiri |

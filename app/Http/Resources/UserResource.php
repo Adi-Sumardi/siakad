@@ -19,6 +19,9 @@ class UserResource extends JsonResource
             'role' => $this->role,
             'is_active' => $this->is_active,
             'activated_at' => $this->activated_at,
+            // Null until the guardian closes the once-per-account welcome
+            // splash - the SPA gates the overlay on this.
+            'welcome_shown_at' => $this->welcome_shown_at,
             'school_unit' => $this->whenLoaded('schoolUnit', fn () => [
                 'ulid' => $this->schoolUnit->ulid,
                 'code' => $this->schoolUnit->code,

@@ -10,6 +10,8 @@ export type User = {
   phone?: string | null;
   role: "admin" | "admin_unit" | "guru" | "orangtua";
   is_active: boolean;
+  /** Null until the guardian closes the once-per-account welcome splash. */
+  welcome_shown_at?: string | null;
   school_unit?: { ulid: string; code: string; label: string } | null;
 };
 

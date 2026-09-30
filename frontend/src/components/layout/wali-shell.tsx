@@ -16,6 +16,7 @@ import {
 import { BrandMark } from "@/components/brand-mark";
 import { UserMenu } from "@/components/layout/user-menu";
 import { WaliBillAlert } from "@/components/layout/wali-bill-alert";
+import { WelcomeOverlay } from "@/components/wali/welcome-overlay";
 import { useAuth } from "@/lib/auth/auth-context";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +40,10 @@ export function WaliShell({
 
   return (
     <div className="min-h-dvh bg-canvas md:flex">
+      {/* The once-per-account welcome splash - self-gating, so no condition
+          is needed here: it renders nothing once the flag is set. */}
+      <WelcomeOverlay />
+
       {/* Mobile Backdrop */}
       {mobileOpen && (
         <div
