@@ -16,7 +16,7 @@ const fontBody = Plus_Jakarta_Sans({
   weight: ["400", "500", "600", "700"],
 });
 
-// Same pairing as PMB's brand-mark: this serif carries the "Siakad YAPI"
+// Same pairing as PMB's brand-mark: this serif carries the "SIAKAD YAPI Al Azhar"
 // wordmark and nothing else, set against the sans used everywhere else.
 const fontBrand = Fraunces({
   variable: "--font-brand",
@@ -26,7 +26,7 @@ const fontBrand = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "Siakad YAPI",
+  title: "SIAKAD YAPI Al Azhar",
   description: "Aplikasi sekolah YAPI: data siswa, prestasi, poin, dan tagihan.",
   icons: {
     icon: [

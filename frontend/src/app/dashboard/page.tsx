@@ -13,11 +13,13 @@ import {
   Sparkles,
 } from "lucide-react";
 import { WaliShell } from "@/components/layout/wali-shell";
+import { WelcomeSplash } from "@/components/welcome-splash";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth/auth-context";
 import { useRequireRole } from "@/lib/auth/use-require-role";
 import { PointMeter } from "@/components/point-meter";
 import { rupiah } from "@/lib/format";
@@ -38,6 +40,7 @@ type Student = {
 
 export default function DashboardPage() {
   const { user, loading } = useRequireRole("orangtua");
+  const { markWelcomed } = useAuth();
   const [students, setStudents] = useState<Student[] | null>(null);
   const [announcementCount, setAnnouncementCount] = useState<number | null>(null);
 
@@ -67,6 +70,10 @@ export default function DashboardPage() {
 
   return (
     <WaliShell>
+      {/* First login only - welcomed_at is kept per account on the server.
+          Shown straight away; the children's names fill in before the
+          greeting line animates in (1.5 s). */}
+      {!user.welcomed_at && <WelcomeSplash childList={students ?? []} onDone={markWelcomed} />}
       <div className="space-y-8">
         {/* Welcome banner - same gradient PMB uses on its own dashboard, so
             a family coming from either app lands on a screen that reads as

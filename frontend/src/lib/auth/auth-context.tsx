@@ -10,6 +10,8 @@ export type User = {
   phone?: string | null;
   role: "admin" | "admin_unit" | "guru" | "orangtua";
   is_active: boolean;
+  /** Null until the wali welcome splash has been seen once (per account). */
+  welcomed_at?: string | null;
   school_unit?: { ulid: string; code: string; label: string } | null;
 };
 
@@ -44,6 +46,8 @@ type AuthContextValue = {
   logout: () => Promise<void>;
   /** Adopts a session the server already started - used by the activation link. */
   adopt: (user: User) => void;
+  /** Records that the welcome splash was seen, so it never shows again for this account. */
+  markWelcomed: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -87,6 +91,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return user;
   }, []);
 
+  const markWelcomed = useCallback(async () => {
+    // Hidden right away either way - a failed call only means it may show
+    // once more on the next login, never that the parent is stuck behind it.
+    setUser((current) => (current ? { ...current, welcomed_at: current.welcomed_at ?? new Date().toISOString() } : current));
+    try {
+      const { user } = await api.post<{ user: User }>("/api/auth/welcomed");
+      setUser(user);
+    } catch (error) {
+      console.error(error);
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api.post("/api/auth/logout");
@@ -100,7 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, requestOtp, verifyOtp, logout, adopt: setUser }}
+      value={{ user, loading, requestOtp, verifyOtp, logout, adopt: setUser, markWelcomed }}
     >
       {children}
     </AuthContext.Provider>

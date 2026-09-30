@@ -91,7 +91,7 @@ class SendagoMailGateway implements MailGateway
              * for. No password appears anywhere - there are none in this app.
              */
             'school_account_invite' => [
-                "Akun Siakad untuk {$data['nama_panggilan']} sudah siap",
+                "Akun SIAKAD YAPI Al Azhar untuk {$data['nama_panggilan']} sudah siap",
                 "Yth. {$data['guardian_name']},\n\n"
                     ."Uang pangkal {$data['student_name']} sudah kami terima lunas. "
                     ."{$data['nama_panggilan']} resmi tercatat sebagai siswa {$data['unit_label']} "
@@ -113,7 +113,7 @@ class SendagoMailGateway implements MailGateway
              * it replaces the account's only way in.
              */
             'school_account_reset' => [
-                'Pembaruan kontak akun Siakad YAPI',
+                'Pembaruan kontak akun SIAKAD YAPI Al Azhar',
                 "Yth. {$data['guardian_name']},\n\n"
                     ."Kami menerima permintaan memperbarui kontak akun aplikasi sekolah Anda.\n\n"
                     ."Buka tautan berikut untuk mengaktifkan alamat ini sebagai kontak akun Anda:\n\n"
@@ -128,7 +128,7 @@ class SendagoMailGateway implements MailGateway
              * for this kind of message: nobody legitimate will ever ask for it.
              */
             'login_otp' => [
-                "Kode masuk Siakad YAPI: {$data['code']}",
+                "Kode masuk SIAKAD YAPI Al Azhar: {$data['code']}",
                 "Yth. {$data['name']},\n\n"
                     ."Kode untuk masuk ke aplikasi sekolah:\n\n"
                     ."    {$data['code']}\n\n"
@@ -175,7 +175,7 @@ class SendagoMailGateway implements MailGateway
             // with "Array to string conversion" (how payment_receipt, which
             // carries a list of bills, failed before it had its own case).
             default => [
-                'Notifikasi Siakad YAPI',
+                'Notifikasi SIAKAD YAPI Al Azhar',
                 implode("\n", array_map(
                     fn ($k, $v) => $k.': '.(is_array($v) ? implode(', ', $v) : (string) $v),
                     array_keys($data),

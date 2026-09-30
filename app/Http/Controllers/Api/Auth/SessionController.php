@@ -22,6 +22,23 @@ class SessionController extends Controller
         ]);
     }
 
+    /**
+     * The wali welcome splash was seen - it shows once per account. Idempotent:
+     * the first time is kept.
+     */
+    public function welcomed(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (! $user->welcomed_at) {
+            $user->forceFill(['welcomed_at' => now()])->save();
+        }
+
+        return response()->json([
+            'user' => new UserResource($user->load('schoolUnit')),
+        ]);
+    }
+
     public function logout(Request $request): JsonResponse
     {
         Auth::guard('web')->logout();
