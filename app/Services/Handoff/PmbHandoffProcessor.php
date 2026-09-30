@@ -119,6 +119,14 @@ class PmbHandoffProcessor
             }
         }
 
+        // Nomor Induk, assigned per unit in PMB (Kelulusan > Murid Diterima,
+        // 2026-09-30) - usually after the first handoff, so it mostly arrives
+        // on a student.updated. Only applied when PMB actually sends one, so a
+        // NIS set here in the school app isn't blanked by an event without it.
+        if (! empty($data['nis'])) {
+            $student->nis = $data['nis'];
+        }
+
         // A student PMB hands over is enrolled by definition - PMB only sends
         // this event once the uang pangkal bill is settled.
         $student->status = 'active';

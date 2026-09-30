@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 
 /**
- * "Siakad YAPI" logo + wordmark - same logo file and layout as PMB's own
+ * "SIAKAD YAPI Al Azhar" logo + wordmark - same logo file and layout as PMB's own
  * brand-mark, since the two apps are one family and a guardian arriving from
  * PMB should recognise this immediately as the same school, not a stranger.
  *
@@ -36,7 +36,7 @@ export function BrandMark({
           variant === "dark" && "rounded-full bg-white p-0.5",
         )}
       />
-      <span className={textClassName}>Siakad YAPI</span>
+      <span className={textClassName}>SIAKAD YAPI Al Azhar</span>
     </div>
   );
 }

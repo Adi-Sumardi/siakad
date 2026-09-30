@@ -10,6 +10,7 @@ use App\Models\Student;
 use App\Models\User;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -220,6 +221,48 @@ class PmbHandoffTest extends TestCase
 
         $father = Guardian::firstWhere('hubungan', 'ayah');
         $this->assertCount(2, $father->students);
+    }
+
+    /**
+     * PMB assigns the Nomor Induk per unit on Kelulusan > Murid Diterima,
+     * usually after the first handoff - so it arrives on a student.updated.
+     * Unique per unit (2026-09-30), not across the foundation.
+     */
+    public function test_a_nis_assigned_later_in_pmb_reaches_the_student_through_student_updated(): void
+    {
+        $year = ['academic_year' => '2027/2028'];
+        $this->postHandoff($this->payload(['student' => $year]))->assertStatus(202);
+
+        $this->postHandoff($this->payload([
+            'event' => 'student.updated',
+            'event_id' => '01JCEVENT0000000000000009',
+            'student' => $year + ['nis' => '262701142'],
+        ]))->assertStatus(202);
+
+        $this->assertSame('262701142', Student::firstWhere('pmb_student_ulid', '01JCSTUDENT000000000000001')->nis);
+
+        // An event without a nis leaves the one already there alone.
+        $this->postHandoff($this->payload([
+            'event' => 'student.updated',
+            'event_id' => '01JCEVENT0000000000000010',
+            'student' => $year,
+        ]))->assertStatus(202);
+
+        $this->assertSame('262701142', Student::firstWhere('pmb_student_ulid', '01JCSTUDENT000000000000001')->nis);
+    }
+
+    public function test_the_same_nis_may_exist_in_two_units_but_not_twice_in_one(): void
+    {
+        $sd = SchoolUnit::firstWhere('code', 'SD-SAKINAH');
+        $smp = SchoolUnit::create(['code' => 'SMP-X', 'label' => 'SMP X', 'jenjang_group' => 'smp']);
+
+        Student::create(['nama_lengkap' => 'A', 'jenis_kelamin' => 'L', 'school_unit_id' => $sd->id, 'nis' => '1001']);
+        Student::create(['nama_lengkap' => 'B', 'jenis_kelamin' => 'L', 'school_unit_id' => $smp->id, 'nis' => '1001']);
+
+        $this->assertSame(2, Student::where('nis', '1001')->count());
+
+        $this->expectException(QueryException::class);
+        Student::create(['nama_lengkap' => 'C', 'jenis_kelamin' => 'L', 'school_unit_id' => $sd->id, 'nis' => '1001']);
     }
 
     public function test_an_unknown_unit_fails_the_event_instead_of_inventing_one(): void

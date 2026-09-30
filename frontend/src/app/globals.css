@@ -90,3 +90,76 @@ body {
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/*
+  Wali welcome splash (components/welcome-splash.tsx) - plays once, on the
+  first login of an account. Each piece rises in from a soft blur, one after
+  another; the gold outline draws around the logos; the hairline fills while
+  the parent reads, then the dashboard takes over.
+*/
+@keyframes splash-rise {
+  from { opacity: 0; transform: translateY(16px); filter: blur(6px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes splash-drop {
+  from { opacity: 0; transform: translateY(-8px); filter: blur(6px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes splash-bloom {
+  from { opacity: 0; transform: scale(0.88); filter: blur(8px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes splash-draw {
+  from { stroke-dashoffset: 100; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes splash-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes splash-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.06); }
+}
+@keyframes splash-orbit {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.035) rotate(4deg); }
+}
+
+.splash-in {
+  animation: splash-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--splash-delay, 0s);
+}
+.splash-drop {
+  animation: splash-drop 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--splash-delay, 0s);
+}
+.splash-bloom {
+  animation: splash-bloom 1.3s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
+}
+.splash-draw {
+  stroke-dasharray: 100;
+  animation: splash-draw 1.8s cubic-bezier(0.65, 0, 0.35, 1) 0.5s both;
+}
+.splash-fill {
+  transform-origin: left center;
+  animation: splash-fill var(--splash-fill, 3s) linear 3.3s both;
+}
+.splash-breathe {
+  animation: splash-breathe 9s ease-in-out infinite;
+}
+.splash-orbit {
+  animation: splash-orbit 18s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-in,
+  .splash-drop,
+  .splash-bloom,
+  .splash-draw,
+  .splash-fill,
+  .splash-breathe,
+  .splash-orbit {
+    animation: none;
+  }
+}
