@@ -22,6 +22,8 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'role' => EnsureUserHasRole::class,
+            // Log Aktivitas safety net on /api/admin - see the middleware.
+            'admin.activity' => \App\Http\Middleware\LogAdminActivity::class,
             'active' => EnsureUserIsActive::class,
             'pmb.signature' => VerifyPmbSignature::class,
         ]);

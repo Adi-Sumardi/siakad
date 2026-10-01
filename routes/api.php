@@ -227,7 +227,7 @@ Route::middleware(['auth:sanctum', 'active'])->prefix('files')->group(function (
  * a separate question answered by visibleTo() on each model - a role check
  * alone would let one unit's admin open another unit's student.
  */
-Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->group(function () {
+Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin,admin_unit'])->prefix('admin')->group(function () {
     // (billing-chart / achievements-chart were removed 2026-09-21: no screen
     // ever read them - everything visual lives in /dashboard/summary.)
     Route::get('/dashboard/summary', [DashboardSummaryController::class, 'summary']);
@@ -387,7 +387,7 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
  * sole rate exception (a unit's own Cambridge nominal) lives in the shared
  * group above; deleting any rate, Cambridge included, stays here.
  */
-Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
+Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin'])->prefix('admin')->group(function () {
     Route::post('/fee-types', [FeeSettingController::class, 'storeType']);
     Route::patch('/fee-types/{feeType}', [FeeSettingController::class, 'updateType']);
     Route::delete('/fee-types/{feeType}', [FeeSettingController::class, 'destroyType']);
