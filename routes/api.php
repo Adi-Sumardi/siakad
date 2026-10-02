@@ -55,7 +55,6 @@ use App\Http\Controllers\Api\Wali\ExtracurricularController;
 use App\Http\Controllers\Api\Wali\FeeSelectionController as WaliFeeSelectionController;
 use App\Http\Controllers\Api\Wali\GradeController as WaliGradeController;
 use App\Http\Controllers\Api\Wali\PointController as WaliPointController;
-use App\Http\Controllers\Api\Wali\WelcomeController as WaliWelcomeController;
 use App\Http\Controllers\Api\Webhooks\PmbHandoffController;
 use Illuminate\Support\Facades\Route;
 
@@ -132,10 +131,6 @@ Route::get('/receipt/{token}', [ReceiptController::class, 'show'])->middleware('
 
 Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(function () {
     Route::get('/students', [WaliDashboardController::class, 'index']);
-
-    // The once-per-account welcome splash: idempotent, the first timestamp
-    // wins. Lives on the wali lane so staff can never reach it.
-    Route::post('/welcome/acknowledge', WaliWelcomeController::class);
 
     Route::get('/bills', [WaliBillController::class, 'index']);
     Route::get('/bills/{ulid}', [WaliBillController::class, 'show']);

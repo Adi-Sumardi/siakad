@@ -57,7 +57,7 @@ erDiagram
 | phone, phone_hash | string enc / string(64) index | login alternatif untuk wali tanpa email |
 | is_active | boolean default true | |
 | activated_at | timestamp nullable | terisi saat undangan dipakai |
-| welcome_shown_at | timestamp nullable | splash sambutan wali — null berarti belum disambut |
+| welcomed_at | timestamp nullable | splash sambutan wali — null berarti belum disambut |
 | last_login_at, email_verified_at, remember_token, timestamps | | |
 
 Unique parsial: `email` unique bila tidak null; `phone_hash` unique bila tidak null.
