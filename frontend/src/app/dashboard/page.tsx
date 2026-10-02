@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   ArrowRight,
   ChevronRight,
+  CircleHelp,
   CreditCard,
   GraduationCap,
   Megaphone,
@@ -13,6 +14,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { WaliShell } from "@/components/layout/wali-shell";
+import { FeatureTour } from "@/components/wali/feature-tour";
 import { WelcomeSplash } from "@/components/welcome-splash";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,9 +42,16 @@ type Student = {
 
 export default function DashboardPage() {
   const { user, loading } = useRequireRole("orangtua");
-  const { markWelcomed } = useAuth();
+  const { markWelcomed, markOnboarded } = useAuth();
   const [students, setStudents] = useState<Student[] | null>(null);
   const [announcementCount, setAnnouncementCount] = useState<number | null>(null);
+  const [replayOpen, setReplayOpen] = useState(false);
+
+  // Derived, not coordinated: markWelcomed's optimistic write flips this on
+  // exactly the frame the splash lets go of the screen, so the tour simply
+  // follows it. Accounts welcomed before the tour shipped (onboarded_at
+  // still null) get their one run on the next visit.
+  const tourOpen = replayOpen || (!!user?.welcomed_at && !user?.onboarded_at);
 
   useEffect(() => {
     if (user?.role === "orangtua") {
@@ -82,6 +91,18 @@ export default function DashboardPage() {
           Shown straight away; the children's names fill in before the
           greeting line animates in (1.5 s). */}
       {!user.welcomed_at && <WelcomeSplash childList={students ?? []} onDone={markWelcomed} />}
+
+      {/* The Panduan Fitur spotlight tour - inside the shell so it can reach
+          the drawer levers through WaliChromeContext. markOnboarded's
+          optimistic write is what turns the automatic run off, on both the
+          auto and the replay path. */}
+      <FeatureTour
+        open={tourOpen}
+        onFinish={() => {
+          setReplayOpen(false);
+          void markOnboarded();
+        }}
+      />
       <div className="space-y-8">
         {/* Welcome banner - same gradient PMB uses on its own dashboard, so
             a family coming from either app lands on a screen that reads as
@@ -96,19 +117,31 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <Link href="/tagihan" className="shrink-0">
-            <Button variant="ghost" className="bg-white/15 text-white border border-white/20 hover:bg-white/25 gap-2">
-              <Receipt className="size-4" />
-              <span>Bayar Tagihan SPP</span>
-              <ArrowRight className="size-4" />
+          <div className="flex shrink-0 flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+            <Link href="/tagihan">
+              <Button variant="ghost" className="bg-white/15 text-white border border-white/20 hover:bg-white/25 gap-2">
+                <Receipt className="size-4" />
+                <span>Bayar Tagihan SPP</span>
+                <ArrowRight className="size-4" />
+              </Button>
+            </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              data-tour="tour-replay"
+              onClick={() => setReplayOpen(true)}
+              className="bg-white/10 text-white border border-white/20 hover:bg-white/20 gap-2"
+            >
+              <CircleHelp className="size-4" />
+              <span>Panduan Fitur</span>
             </Button>
-          </Link>
+          </div>
         </div>
 
         {/* Stat grid - PMB's pattern: icon-badge + value + status badge,
             not just a navigation shortcut, so the number that matters is
             visible before a tap. */}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div data-tour="stat-grid" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Link href="/tagihan">
             <Card className="py-4 gap-2 hover:border-primary transition-colors">
               <CardContent className="flex flex-col gap-1.5">
@@ -175,7 +208,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Student Cards Section */}
-        <section className="space-y-4">
+        <section data-tour="anak-cards" className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold tracking-tight text-foreground">Ananda Terdaftar</h2>
             <span className="text-xs text-muted-foreground">Klik nama ananda untuk melihat buku rekap lengkap</span>

@@ -12,6 +12,8 @@ export type User = {
   is_active: boolean;
   /** Null until the wali welcome splash has been seen once (per account). */
   welcomed_at?: string | null;
+  /** Null until the wali "Panduan Fitur" tour has been seen once (per account). */
+  onboarded_at?: string | null;
   school_unit?: { ulid: string; code: string; label: string } | null;
 };
 
@@ -48,6 +50,8 @@ type AuthContextValue = {
   adopt: (user: User) => void;
   /** Records that the welcome splash was seen, so it never shows again for this account. */
   markWelcomed: () => Promise<void>;
+  /** Records that the feature tour was seen (finished or skipped), once per account. */
+  markOnboarded: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -103,6 +107,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const markOnboarded = useCallback(async () => {
+    // Same contract as markWelcomed: the tour never traps the parent behind
+    // it, and a failed call just means it may be offered once more later.
+    setUser((current) => (current ? { ...current, onboarded_at: current.onboarded_at ?? new Date().toISOString() } : current));
+    try {
+      const { user } = await api.post<{ user: User }>("/api/auth/onboarded");
+      setUser(user);
+    } catch (error) {
+      console.error(error);
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api.post("/api/auth/logout");
@@ -116,7 +132,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, requestOtp, verifyOtp, logout, adopt: setUser, markWelcomed }}
+      value={{ user, loading, requestOtp, verifyOtp, logout, adopt: setUser, markWelcomed, markOnboarded }}
     >
       {children}
     </AuthContext.Provider>

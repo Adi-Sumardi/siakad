@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -16,18 +16,31 @@ import {
 import { BrandMark } from "@/components/brand-mark";
 import { UserMenu } from "@/components/layout/user-menu";
 import { WaliBillAlert } from "@/components/layout/wali-bill-alert";
-import { WelcomeOverlay } from "@/components/wali/welcome-overlay";
 import { useAuth } from "@/lib/auth/auth-context";
 import { cn } from "@/lib/utils";
 
 export const WALI_NAV = [
-  { href: "/dashboard", label: "Beranda", icon: Home },
-  { href: "/tagihan", label: "Tagihan SPP", icon: Receipt },
-  { href: "/pembayaran", label: "Riwayat Bayar", icon: CreditCard },
-  { href: "/prestasi", label: "Prestasi Siswa", icon: Award },
-  { href: "/informasi", label: "Pengumuman", icon: Megaphone },
-  { href: "/profil", label: "Profil Akun", icon: User },
+  { href: "/dashboard", label: "Beranda", icon: Home, tour: "beranda" },
+  { href: "/tagihan", label: "Tagihan SPP", icon: Receipt, tour: "tagihan" },
+  { href: "/pembayaran", label: "Riwayat Bayar", icon: CreditCard, tour: "pembayaran" },
+  { href: "/prestasi", label: "Prestasi Siswa", icon: Award, tour: "prestasi" },
+  { href: "/informasi", label: "Pengumuman", icon: Megaphone, tour: "informasi" },
+  { href: "/profil", label: "Profil Akun", icon: User, tour: "profil" },
 ];
+
+/**
+ * The feature tour (components/wali/feature-tour.tsx) highlights sidebar items
+ * on a phone by opening the mobile drawer itself, so the shell hands it just
+ * those two levers - it has no business reading drawer state back.
+ */
+type WaliChrome = { openMobileNav: () => void; closeMobileNav: () => void };
+
+export const WaliChromeContext = createContext<WaliChrome | null>(null);
+
+/** For pages that mount the tour inside their own <WaliShell>. */
+export function useWaliChrome(): WaliChrome | null {
+  return useContext(WaliChromeContext);
+}
 
 export function WaliShell({
   children,
@@ -40,10 +53,6 @@ export function WaliShell({
 
   return (
     <div className="min-h-dvh bg-canvas md:flex">
-      {/* The once-per-account welcome splash - self-gating, so no condition
-          is needed here: it renders nothing once the flag is set. */}
-      <WelcomeOverlay />
-
       {/* Mobile Backdrop */}
       {mobileOpen && (
         <div
@@ -97,6 +106,7 @@ export function WaliShell({
                   key={item.href}
                   href={item.href}
                   onClick={() => setMobileOpen(false)}
+                  data-tour={`nav-${item.tour}`}
                   className={cn(
                     "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all",
                     active
@@ -135,6 +145,7 @@ export function WaliShell({
                 <Link
                   key={item.href}
                   href={item.href}
+                  data-tour={`nav-${item.tour}`}
                   className={cn(
                     "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all",
                     active
@@ -177,7 +188,12 @@ export function WaliShell({
           </button>
           <BrandMark />
           <div className="flex items-center gap-1.5">
-            <WaliBillAlert />
+            {/* The span (not the bell) carries the tour anchor: WaliBillAlert
+                renders nothing at all when there is no news, so the tour wraps
+                it and treats the step as optional. */}
+            <span data-tour="bill-alert" className="flex">
+              <WaliBillAlert />
+            </span>
             <UserMenu subtitle="Wali Murid YAPI" />
           </div>
         </header>
@@ -186,14 +202,23 @@ export function WaliShell({
             with the SPP alert bell at its left. */}
         <header className="hidden md:flex sticky top-0 z-30 items-center justify-end border-b border-border bg-card/95 backdrop-blur px-6 py-3">
           <div className="flex items-center gap-2">
-            <WaliBillAlert />
+            <span data-tour="bill-alert" className="flex">
+              <WaliBillAlert />
+            </span>
             <UserMenu subtitle="Wali Murid YAPI" />
           </div>
         </header>
 
         {/* Responsive Content Area */}
         <main className="w-full flex-1 max-w-7xl 2xl:max-w-full mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-6 md:py-8">
-          {children}
+          {/* The provider only needs to wrap children: the feature tour is
+              mounted inside them (dashboard), and it is the sole consumer of
+              the drawer levers. */}
+          <WaliChromeContext.Provider
+            value={{ openMobileNav: () => setMobileOpen(true), closeMobileNav: () => setMobileOpen(false) }}
+          >
+            {children}
+          </WaliChromeContext.Provider>
         </main>
       </div>
     </div>
