@@ -21,6 +21,8 @@ class UserResource extends JsonResource
             'activated_at' => $this->activated_at,
             // Null until the wali welcome splash has been seen once.
             'welcomed_at' => $this->welcomed_at,
+            // Null until the wali "Panduan Fitur" tour has been seen once.
+            'onboarded_at' => $this->onboarded_at,
             'school_unit' => $this->whenLoaded('schoolUnit', fn () => [
                 'ulid' => $this->schoolUnit->ulid,
                 'code' => $this->schoolUnit->code,

@@ -27,6 +27,7 @@ Konvensi:
 | POST | `/api/auth/logout` | |
 | GET | `/api/auth/me` | profil pengguna yang sedang masuk |
 | POST | `/api/auth/welcomed` | tandai splash sambutan wali sudah dilihat — sekali per akun, idempoten (timestamp pertama dipertahankan); flag dibaca dari `user.welcomed_at` |
+| POST | `/api/auth/onboarded` | tandai tur "Panduan Fitur" sudah dilihat (selesai maupun dilewati) — sekali per akun, idempoten; flag dibaca dari `user.onboarded_at` |
 | GET | `/api/invitations/{token}` | validasi token undangan, balikkan nama & daftar anak (tanpa auth) |
 | POST | `/api/invitations/{token}/activate` | tanpa body — akun aktif → langsung login |
 

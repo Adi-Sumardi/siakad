@@ -39,6 +39,24 @@ class SessionController extends Controller
         ]);
     }
 
+    /**
+     * The wali "Panduan Fitur" tour was seen (finished or skipped) - it also
+     * runs once per account, and its automatic offering keys off this the same
+     * way the splash keys off welcomed_at. Idempotent: the first time is kept.
+     */
+    public function onboarded(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (! $user->onboarded_at) {
+            $user->forceFill(['onboarded_at' => now()])->save();
+        }
+
+        return response()->json([
+            'user' => new UserResource($user->load('schoolUnit')),
+        ]);
+    }
+
     public function logout(Request $request): JsonResponse
     {
         Auth::guard('web')->logout();

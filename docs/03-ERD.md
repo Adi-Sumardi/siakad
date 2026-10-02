@@ -58,6 +58,7 @@ erDiagram
 | is_active | boolean default true | |
 | activated_at | timestamp nullable | terisi saat undangan dipakai |
 | welcomed_at | timestamp nullable | splash sambutan wali — null berarti belum disambut |
+| onboarded_at | timestamp nullable | tur "Panduan Fitur" — null berarti belum pernah dijalankan/dilewati |
 | last_login_at, email_verified_at, remember_token, timestamps | | |
 
 Unique parsial: `email` unique bila tidak null; `phone_hash` unique bila tidak null.

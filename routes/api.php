@@ -90,6 +90,7 @@ Route::prefix('auth')->group(function () {
         Route::post('/logout', [SessionController::class, 'logout']);
         Route::get('/me', [SessionController::class, 'me']);
         Route::post('/welcomed', [SessionController::class, 'welcomed']);
+        Route::post('/onboarded', [SessionController::class, 'onboarded']);
     });
 });
 

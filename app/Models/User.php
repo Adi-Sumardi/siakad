@@ -26,6 +26,7 @@ class User extends Authenticatable
         'last_login_at',
         'email_verified_at',
         'welcomed_at',
+        'onboarded_at',
     ];
 
     protected $hidden = [
@@ -44,6 +45,7 @@ class User extends Authenticatable
             'activated_at' => 'datetime',
             'last_login_at' => 'datetime',
             'welcomed_at' => 'datetime',
+            'onboarded_at' => 'datetime',
             'is_active' => 'boolean',
         ];
     }
