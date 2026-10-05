@@ -19,6 +19,7 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { API_BASE, api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
+import { YAYASAN_NAME } from "@/lib/brand";
 import { rupiah, tanggal } from "@/lib/format";
 import type { Bill, Payment } from "@/lib/types/billing";
 
@@ -139,7 +140,10 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
             </Button>
 
             {!isPaid && (
-              <Link href="/tagihan">
+              // ?bayar= preselects this bill in the list's basket (audit r2
+              // 2026-10-05): the old link just bounced to /tagihan and the
+              // family had to find and tick the bill they were staring at.
+              <Link href={`/tagihan?bayar=${bill.ulid}`}>
                 <Button size="sm" className="gap-2 font-bold shadow-xs">
                   <Wallet className="size-4" />
                   <span>Bayar Sekarang</span>
@@ -159,7 +163,7 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
                   <Building2 className="size-6" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-sm text-foreground">YAYASAN ASRAMA PELAJAR ISLAM (YAPI)</h3>
+                  <h3 className="font-extrabold text-sm text-foreground">{YAYASAN_NAME}</h3>
                   <p className="text-xs text-primary font-bold">{bill.student?.school_unit?.label ?? "—"}</p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">Kompleks Pendidikan Rawamangun, Jakarta Timur</p>
                 </div>

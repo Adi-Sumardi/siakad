@@ -234,12 +234,18 @@ class BillingApiGateway implements PaymentGateway
             // every pending payment on the bill (money-safe: the void asks
             // the bank first and settles anything already paid) and mint a
             // fresh, honest VA instead.
+            // Amplified 2026-10-05 r2: the comparison is at WHOLE-RUPIAH
+            // granularity, not 0.01 - the registration itself is (int)
+            // round(), so a cents-bearing remainder (a percent-discount
+            // ...001,50) failed the old tolerance on EVERY beat, churning a
+            // fresh VA per reminder and - with expireVa broken at e-SPP -
+            // re-creating the two-live-VA state this guard exists to kill.
             $registeredForThisBill = (float) (PaymentAllocation::query()
                 ->where('payment_id', $payment->id)
                 ->where('bill_id', $bill->id)
                 ->value('amount') ?? 0.0);
 
-            if (abs($registeredForThisBill - round((float) $bill->remaining_amount)) > 0.01) {
+            if (abs((int) round($registeredForThisBill) - (int) round((float) $bill->remaining_amount)) >= 1) {
                 app(\App\Services\Billing\CheckoutService::class)->voidPendingPaymentsFor(
                     $bill,
                     'Nominal Virtual Account tidak sesuai sisa tagihan saat pengingat terkirim - diterbitkan VA baru.',

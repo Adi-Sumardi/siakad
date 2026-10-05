@@ -72,7 +72,16 @@ class NotificationRetryService
                     ->where('claimed_at', '<', now()->subMinutes(30))))
             ->whereNotIn('template', array_keys(self::EXCLUDED_TEMPLATES))
             ->where('attempts', '<', self::MAX_ATTEMPTS)
-            ->where('created_at', '>=', now()->subHours(self::WINDOW_HOURS))
+            // The 24h window bounds rows that HAD a recipient (audit r2
+            // 2026-10-05): their shot was real and missed. A NULL-recipient
+            // row is a different animal - the overpayment/receipt skip rows
+            // written exactly because the contact had no phone or email
+            // yet. Nothing was ever deliverable, so no window applies: the
+            // row stays due until the contact gains a channel (the senders
+            // re-resolve it live) or a human resolves it from monitoring.
+            ->where(fn ($q) => $q
+                ->whereNull('recipient')
+                ->orWhere('created_at', '>=', now()->subHours(self::WINDOW_HOURS)))
             ->orderBy('id') // oldest first: the row that waited longest gets the next slot
             ->get();
     }
@@ -222,7 +231,14 @@ class NotificationRetryService
             return $attempts;
         }
 
-        $attempts = $log->attempts + 1;
+        // A NULL-recipient row that still fails is not an attempt (audit r2
+        // 2026-10-05): nothing physical was sent - the contact simply still
+        // has no phone/email, and the resend lanes re-resolve that live.
+        // Counting these would burn the 3-attempt budget on empty air and
+        // exhaust the row days before the contact gains a channel.
+        $isNoContactRow = $log->recipient === null;
+
+        $attempts = $log->attempts + ($result->success || ! $isNoContactRow ? 1 : 0);
 
         $log->update([
             'attempts' => $attempts,

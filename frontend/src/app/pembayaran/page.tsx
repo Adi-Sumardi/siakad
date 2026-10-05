@@ -23,6 +23,7 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRequireRole } from "@/lib/auth/use-require-role";
 import { api, ApiError } from "@/lib/api";
+import { YAYASAN_NAME } from "@/lib/brand";
 import { Payment } from "@/lib/types/billing";
 
 const STATUS_LABEL: Record<string, { label: string; variant: "default" | "warn" | "good" | "bad" | "primary" }> = {
@@ -100,9 +101,20 @@ function PaymentsContent() {
           setPayMeta(data.payments.meta);
 
           if (initialPaymentUlid && !autoOpenedRef.current) {
-            autoOpenedRef.current = true;
             const found = data.payments.data.find((p) => p.ulid === initialPaymentUlid);
-            if (found) setSelectedPayment(found);
+            if (found) {
+              autoOpenedRef.current = true;
+              setSelectedPayment(found);
+            } else if (data.payments.meta.current_page < data.payments.meta.last_page) {
+              // The target may simply sit on a later page (audit r2
+              // 2026-10-05): the old code only searched page 1 and silently
+              // dropped the param.
+              setPayPage((p) => p + 1);
+            } else {
+              autoOpenedRef.current = true;
+              toast.info("Pembayaran yang dituju tidak ditemukan di riwayat - mungkin sudah tidak tersedia.");
+              window.history.replaceState(null, "", window.location.pathname);
+            }
           }
         })
         .catch((err) => {
@@ -366,7 +378,7 @@ function PaymentsContent() {
                   </div>
                   <div>
                     <h2 className="text-base font-black text-foreground">Invoice & Rincian Pembayaran</h2>
-                    <p className="text-[11px] text-muted-foreground">Yayasan Asrama Pelajar Islam (YAPI) Jakarta</p>
+                    <p className="text-[11px] text-muted-foreground">{YAYASAN_NAME} Jakarta</p>
                   </div>
                 </div>
 

@@ -80,6 +80,18 @@ services:
       - siakad-net
     user: "www-data"
     entrypoint: ["php", "artisan", "schedule:work"]
+    # schedule:health reads the once-a-minute heartbeat cache row (audit r2
+    # 2026-10-05): restart:unless-stopped only covers process death, not a
+    # hung schedule:work - and a silent scheduler means SPP not issuing on
+    # the 1st and the day's reminder beats lost forever. Docker marks the
+    # container unhealthy after 3 stale minutes and `docker ps` / any
+    # uptime watch on health status sees it; see docs/07-OPERASIONAL.md.
+    healthcheck:
+      test: ["CMD", "php", "artisan", "schedule:health", "--stale-minutes=3"]
+      interval: 1m
+      timeout: 15s
+      retries: 3
+      start_period: 2m
 
   nextjs:
     build:

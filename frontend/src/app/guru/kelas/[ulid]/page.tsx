@@ -61,7 +61,11 @@ function AttendanceRecapPanel({ classroomUlid }: { classroomUlid: string }) {
         `/api/guru/classrooms/${classroomUlid}/attendance?${params}`
       )
       .then(setData)
-      .catch(() => setData({ period: { from: "", to: "" }, students: [] }));
+      .catch((err) => {
+        // A failed fetch is not an empty roster (audit r2 2026-10-05).
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat rekap presensi.");
+        setData({ period: { from: "", to: "" }, students: [] });
+      });
   }, [classroomUlid, from, to]);
 
   useEffect(() => {

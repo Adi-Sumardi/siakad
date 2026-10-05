@@ -11,6 +11,7 @@ import {
   RefreshCw,
   TrendingDown,
   TrendingUp,
+  Undo2,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth/auth-context";
@@ -64,6 +65,7 @@ const TXN_STATUS: Record<string, { label: string; variant: "good" | "warn" | "ba
   failed: { label: "Gagal", variant: "bad" },
   expired: { label: "Kedaluwarsa", variant: "bad" },
   cancelled: { label: "Dibatalkan", variant: "default" },
+  refunded: { label: "Direfund", variant: "default" },
 };
 
 export default function ReportsPage() {
@@ -87,8 +89,33 @@ export default function ReportsPage() {
   const [txnPage, setTxnPage] = useState(1);
   const [unitOptions, setUnitOptions] = useState<{ code: string; label: string }[]>([]);
 
+  // The refund worklist (audit r2 2026-10-05): payments whose money arrived
+  // for bills another payment had already covered. Two-step confirm per row
+  // - a refund is a money decision, not a click.
+  const [overpayments, setOverpayments] = useState<{ data: TxnRow[] } | null>(null);
+  const [refundArmed, setRefundArmed] = useState<string | null>(null);
+
   // Out-of-order guard (audit 2026-09-28) for the transaction list.
   const txnRequestId = useRef(0);
+
+  function loadOverpayments() {
+    api
+      .get<{ payments: { data: TxnRow[] } }>("/api/admin/payments/overpayments")
+      .then((d) => setOverpayments({ data: d.payments.data }))
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar overpayment."));
+  }
+
+  function refundOverpayment(row: TxnRow) {
+    api
+      .post<{ message: string }>(`/api/admin/payments/${row.ulid}/refund`, {})
+      .then(({ message }) => {
+        toast.success(message);
+        setRefundArmed(null);
+        loadOverpayments();
+        loadTxns(1);
+      })
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal menandai refund."));
+  }
 
   function loadTxns(page = txnPage) {
     const requestId = ++txnRequestId.current;
@@ -103,14 +130,18 @@ export default function ReportsPage() {
         if (requestId !== txnRequestId.current) return;
         setTxns(d.payments);
       })
-      .catch(() => {
+      .catch((err) => {
         if (requestId !== txnRequestId.current) return;
-        setTxns({ data: [], meta: { current_page: 1, last_page: 1, total: 0 } });
+        // A failed fetch is not an empty result (audit r2 2026-10-05): say
+        // so, and keep whatever was on screen instead of wiping it.
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat riwayat transaksi.");
+        setTxns((prev) => prev ?? { data: [], meta: { current_page: 1, last_page: 1, total: 0 } });
       });
   }
 
   useEffect(() => {
     loadTxns(1);
+    loadOverpayments();
     if (isCentral) {
       api.get<{ school_units: { code: string; label: string }[] }>("/api/admin/school-units")
         .then((d) => setUnitOptions(d.school_units))
@@ -291,6 +322,7 @@ export default function ReportsPage() {
                 <option value="processing">Diproses</option>
                 <option value="failed">Gagal</option>
                 <option value="expired">Kedaluwarsa</option>
+                <option value="refunded">Direfund</option>
               </select>
             </div>
             {isCentral && (
@@ -422,6 +454,74 @@ export default function ReportsPage() {
           </>
         )}
       </div>
+
+      {/* SECTION 1c: OVERPAYMENT / WORKLIST REFUND (audit r2 2026-10-05) */}
+      {overpayments !== null && overpayments.data.length > 0 && (
+        <div className="space-y-3 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4">
+          <h2 className="text-base font-bold text-foreground flex items-center gap-2">
+            <Undo2 className="size-4.5 text-amber-600" />
+            <span>Pembayaran Ganda Menunggu Refund</span>
+            <Badge variant="bad">{overpayments.data.length}</Badge>
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Uang keluarga yang masuk untuk tagihan yang sudah lunas lewat Virtual Account lain. Tandai <b>Refund</b> hanya
+            setelah transfer pengembalian dana benar-benar dikirim dari rekening sekolah — keluarga sudah diberi tahu lewat WhatsApp.
+          </p>
+          <Card className="overflow-x-auto p-0">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <th className="px-4 py-3">No. Referensi</th>
+                  <th className="px-4 py-3">Tanggal Bayar</th>
+                  <th className="px-4 py-3">Siswa</th>
+                  <th className="px-4 py-3">Tagihan</th>
+                  <th className="px-4 py-3 text-right">Nominal</th>
+                  <th className="px-4 py-3 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {overpayments.data.map((t) => {
+                  const first = t.bills[0];
+
+                  return (
+                    <tr key={t.ulid} className="border-b border-border/60 last:border-0 hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-3">
+                        <p className="font-mono text-xs font-bold text-foreground">{t.reference_number}</p>
+                        <p className="text-[11px] text-muted-foreground font-mono">{t.payment_number}</p>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {t.paid_at ? new Date(t.paid_at).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="text-xs font-semibold text-foreground">{first?.student?.nama_lengkap ?? "—"}</p>
+                        {first?.student?.school_unit?.label && <p className="text-[11px] text-muted-foreground">{first.student.school_unit.label}</p>}
+                      </td>
+                      <td className="px-4 py-3 text-xs">{first?.description ?? "—"}</td>
+                      <td className="px-4 py-3 text-right font-bold tabular text-foreground">{rupiah(t.amount)}</td>
+                      <td className="px-4 py-3 text-right">
+                        {refundArmed === t.ulid ? (
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => setRefundArmed(null)}>
+                              Batal
+                            </Button>
+                            <Button size="sm" variant="destructive" className="h-8 text-xs" onClick={() => refundOverpayment(t)}>
+                              Ya, Sudah Ditransfer
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setRefundArmed(t.ulid)}>
+                            <Undo2 className="size-3.5" /> Tandai Refund
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
 
       {/* SECTION 2: STATUS PIUTANG & TUNGGAKAN */}
       <div className="space-y-4 pt-4 border-t border-border">

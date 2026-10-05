@@ -40,8 +40,7 @@ class ReconcileOverpayments extends Command
             ->whereNotIn('status', ['cancelled', 'waived'])
             ->whereHas('allocations.payment', fn ($q) => $q->where('status', 'completed'))
             ->with(['allocations' => fn ($q) => $q
-                ->whereHas('payment', fn ($p) => $p->where('status', 'completed'))
-                ->orderBy('payment_id'),
+                ->whereHas('payment', fn ($p) => $p->where('status', 'completed')),
                 'allocations.payment'])
             ->get()
             ->filter(function (Bill $bill) {
@@ -59,11 +58,27 @@ class ReconcileOverpayments extends Command
         $owedTotal = 0.0;
 
         foreach ($bills as $bill) {
-            // Walk the applied allocations in payment order; past the total,
-            // every remaining row is refund money, not settlement.
+            // Walk the applied allocations in SETTLEMENT order (audit r2):
+            // paid_at first, payment id as the tiebreak. Creation order
+            // (payment_id alone) routinely differs from settlement order -
+            // webhook-vs-poller latency - and flagging the wrong row puts
+            // the WRONG payment on TU's refund worklist (totals stay
+            // right, attribution goes to the family that actually paid on
+            // time).
             $room = round((float) $bill->total_amount, 2);
 
-            foreach ($bill->allocations->where('applies_to_bill', true) as $allocation) {
+            $inOrder = $bill->allocations
+                ->where('applies_to_bill', true)
+                ->values()
+                ->sort(fn ($a, $b) => [
+                    $a->payment?->paid_at?->timestamp ?? 0,
+                    $a->payment_id,
+                ] <=> [
+                    $b->payment?->paid_at?->timestamp ?? 0,
+                    $b->payment_id,
+                ]);
+
+            foreach ($inOrder as $allocation) {
                 $amount = round((float) $allocation->amount, 2);
 
                 if ($amount <= $room + 0.01) {

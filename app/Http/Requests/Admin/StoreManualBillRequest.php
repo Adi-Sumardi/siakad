@@ -24,6 +24,13 @@ class StoreManualBillRequest extends FormRequest
             'amount' => ['required', 'numeric', 'min:1000', 'max:100000000'],
             'due_date' => ['required', 'date'],
 
+            // WAJIB untuk jenis biaya berulang (SPP bulanan dsb., audit
+            // 2026-10-05 r2): bulan periode inilah yang membuat tagihan
+            // manual memakai dedup_key gaya generator, sehingga constraint
+            // unik (siswa, dedup_key) mencegah dobel lintas jalur - manual
+            // vs manual MAUPUN manual vs generator bulan yang sama.
+            'period_month' => ['nullable', 'integer', 'min:1', 'max:12'],
+
             // Itemised breakdown (e.g. "Program Cambridge" + "Buku" on one
             // cambridge bill, paid with one VA). Absent = the single
             // description/amount line, exactly as before.

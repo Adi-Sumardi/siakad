@@ -63,7 +63,11 @@ export default function GenerateBillsPage() {
     api
       .get<{ runs: RunRow[] }>("/api/admin/billing-runs")
       .then((d) => setRuns(d.runs))
-      .catch(() => setRuns([]));
+      .catch((err) => {
+        // A failed fetch is not "no runs yet" (audit r2 2026-10-05).
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat riwayat run.");
+        setRuns([]);
+      });
   }, []);
 
   useEffect(() => {

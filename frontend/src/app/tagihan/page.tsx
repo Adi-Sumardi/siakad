@@ -64,6 +64,17 @@ export default function BillsPage() {
       .then((data) => {
         setBills(data.bills);
         setSummary(data.summary);
+
+        // ?bayar=<ulid> from the detail page's "Bayar Sekarang" (audit r2
+        // 2026-10-05): preselect exactly that bill in the basket, once -
+        // the param is consumed on sight so a refresh starts clean.
+        const wanted = new URLSearchParams(window.location.search).get("bayar");
+        if (wanted) {
+          window.history.replaceState(null, "", window.location.pathname);
+          if (data.bills.some((b) => b.ulid === wanted)) {
+            setSelected(new Set([wanted]));
+          }
+        }
       })
       .catch((err) => {
         toast.error(err instanceof ApiError ? err.message : "Gagal memuat tagihan. Muat ulang halaman.");
@@ -189,8 +200,10 @@ export default function BillsPage() {
     if (!customBill) return;
 
     const amount = parseFloat(customAmount);
-    if (isNaN(amount) || amount <= 0 || amount > customBill.remaining_amount) {
-      toast.error("Nominal pembayaran tidak valid.");
+    // Same floor the server enforces (audit r2 2026-10-05): the browser min
+    // is only a hint, and the server's refusal cost one wasted submit.
+    if (isNaN(amount) || amount < 10000 || amount > customBill.remaining_amount) {
+      toast.error(`Nominal pembayaran minimal Rp 10.000 dan tidak boleh melebihi sisa tagihan (Rp ${customBill.remaining_amount.toLocaleString("id-ID")}).`);
       return;
     }
 
@@ -354,6 +367,9 @@ export default function BillsPage() {
                           {statusBadge(bill)}
                           {bill.discount_amount > 0 && (
                             <Badge variant="primary">Diskon {rupiah(bill.discount_amount)}</Badge>
+                          )}
+                          {bill.late_fee > 0 && (
+                            <Badge variant="bad">Denda {rupiah(bill.late_fee)}</Badge>
                           )}
                         </div>
 

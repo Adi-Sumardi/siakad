@@ -38,6 +38,13 @@ class DailyAttendanceSettingController extends Controller
         $service->ensureSessionsForDate($setting->fresh());
         $service->resyncTodayWindows($setting->fresh(), $request->user());
 
+        // Changing attendance windows changes what counts as alpa - that is
+        // an auditable decision, like every other staff act of its weight
+        // (audit 2026-10-05 r2).
+        \App\Models\ActivityLog::record($request->user(), 'daily_attendance.settings_updated', $setting->fresh(), [
+            'unit' => $setting->schoolUnit->label,
+        ]);
+
         return response()->json($this->present($setting->fresh()));
     }
 
@@ -52,6 +59,10 @@ class DailyAttendanceSettingController extends Controller
 
         if (! $setting->public_slug) {
             $setting->forceFill(['public_slug' => Str::random(16)])->save();
+
+            \App\Models\ActivityLog::record($request->user(), 'daily_attendance.public_link_issued', $setting->fresh(), [
+                'unit' => $setting->schoolUnit->label,
+            ]);
         }
 
         return response()->json($this->present($setting->fresh()));
@@ -62,6 +73,14 @@ class DailyAttendanceSettingController extends Controller
     {
         $setting = $service->ensureSettings($this->resolveUnit($request));
         $setting->forceFill(['public_slug' => Str::random(16)])->save();
+
+        // Rotating the public check-in credential is exactly the kind of act
+        // log-aktivitas exists for (audit 2026-10-05 r2): "siapa yang
+        // mematikan tautan lama jam berapa" must be answerable after the
+        // fact, not only from the rotating slug itself.
+        \App\Models\ActivityLog::record($request->user(), 'daily_attendance.public_link_reset', $setting->fresh(), [
+            'unit' => $setting->schoolUnit->label,
+        ]);
 
         return response()->json($this->present($setting->fresh()));
     }

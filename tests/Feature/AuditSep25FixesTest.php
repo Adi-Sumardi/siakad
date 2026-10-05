@@ -1388,10 +1388,16 @@ class AuditSep25FixesTest extends TestCase
             'school_unit_id' => $this->sdUnit->id, 'entry_year_id' => $this->year->id, 'status' => 'active',
         ]);
 
+        // A ONCE type: recurring types gained their own period-level dedup
+        // (audit r2 2026-10-05) and would refuse the duplicate on that
+        // ground instead - this test's subject is the payload FINGERPRINT
+        // guard, which remains the only protection for once-types.
+        $once = \App\Models\FeeType::create(['code' => 'seragam-r2', 'name' => 'Seragam R2', 'recurrence' => 'once']);
+
         $payload = [
             'student_ulid' => $student->ulid,
-            'fee_type_ulid' => $this->spp->ulid,
-            'description' => 'SPP tertunggak bulan Agustus',
+            'fee_type_ulid' => $once->ulid,
+            'description' => 'Seragam pengganti',
             'amount' => 650000,
             'due_date' => now()->addDays(10)->toDateString(),
         ];

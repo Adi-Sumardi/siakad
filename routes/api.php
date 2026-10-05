@@ -340,10 +340,15 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/payments', [PaymentHistoryController::class, 'index']);
     Route::get('/payments/overpayments', [PaymentHistoryController::class, 'overpayments']);
     Route::get('/payments/{ulid}/receipt', [PaymentHistoryController::class, 'receiptPdf']);
-    Route::post('/payments/{ulid}/share-link', [PaymentHistoryController::class, 'shareLink']);
+    // Throttled like the other credential-minting/money POSTs (audit
+    // 2026-10-05 r2): a public receipt token leaves the building here, and
+    // refund is a money decision - neither should be hammerable.
+    Route::post('/payments/{ulid}/share-link', [PaymentHistoryController::class, 'shareLink'])
+        ->middleware('throttle:20,1');
     // The overpayment refund lane (audit 2026-10-05): worklist + one-shot
     // decision on TU's side, once the bank transfer has actually gone out.
-    Route::post('/payments/{ulid}/refund', [PaymentHistoryController::class, 'refund']);
+    Route::post('/payments/{ulid}/refund', [PaymentHistoryController::class, 'refund'])
+        ->middleware('throttle:20,1');
 
     Route::get('/achievements', [AdminAchievementController::class, 'index']);
     Route::post('/achievements/{ulid}/verify', [AdminAchievementController::class, 'verify']);
@@ -378,6 +383,12 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     // shared group.
     Route::get('/users', [UserController::class, 'index']);
     Route::post('/users', [UserController::class, 'store']);
+    // The non-destructive recovery lane (audit r2 2026-10-05): accounts made
+    // in-app or via import never got a link, and an expired one used to be
+    // reset-access-or-nothing. Throttled like reset-access - it mints a
+    // single-use credential too.
+    Route::post('/users/{user}/send-invitation', [UserController::class, 'sendInvitation'])
+        ->middleware('throttle:20,1');
     // Bulk counterpart: a whole year's staff in one CSV. Same forced-unit
     // and role limits for a per-unit admin, inside ImportController.
     Route::post('/import/users', [ImportController::class, 'importUsers']);
@@ -413,8 +424,12 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/daily-attendance/today', [DailyAttendanceSessionController::class, 'today']);
     // Gate mode: the unit's public check-in link (issue once, rotate on a
     // leak), the rotating QR the TU screen polls, and the manual mark lane.
-    Route::post('/daily-attendance/public-link', [DailyAttendanceSettingController::class, 'issuePublicLink']);
-    Route::post('/daily-attendance/public-link/reset', [DailyAttendanceSettingController::class, 'resetPublicLink']);
+    // Throttled (audit 2026-10-05 r2): these mint and rotate the unit's
+    // public check-in credential - same weight as reset-access above.
+    Route::post('/daily-attendance/public-link', [DailyAttendanceSettingController::class, 'issuePublicLink'])
+        ->middleware('throttle:20,1');
+    Route::post('/daily-attendance/public-link/reset', [DailyAttendanceSettingController::class, 'resetPublicLink'])
+        ->middleware('throttle:20,1');
     Route::get('/daily-attendance/sessions/{ulid}/gate-qr', [DailyAttendanceSessionController::class, 'gateQr']);
     Route::post('/daily-attendance/sessions/{ulid}/records', [DailyAttendanceSessionController::class, 'mark']);
 });

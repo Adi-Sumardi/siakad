@@ -107,6 +107,9 @@ export default function AnnouncementsPage() {
                   {SCOPE_LABEL[a.scope]}
                   {a.classroom && ` · Kelas ${a.classroom}`}
                   {!a.classroom && a.school_unit && ` · ${a.school_unit}`}
+                  {/* Same target labels the admin list shows (audit r2
+                      2026-10-05): "Jenjang" alone never said WHICH. */}
+                  {a.scope === "jenjang" && a.jenjang_targets && ` · ${a.jenjang_targets.map((j) => j.label).join(", ")}`}
                 </Badge>
 
                 {a.has_file && (

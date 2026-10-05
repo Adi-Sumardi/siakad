@@ -12,6 +12,7 @@ use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Bill;
 use App\Models\BillLine;
+use App\Models\FeeRate;
 use App\Models\FeeType;
 use App\Models\Student;
 use App\Models\Term;
@@ -83,6 +84,15 @@ class BillController extends Controller
             ->where('ulid', $validated['student_ulid'])
             ->firstOrFail();
 
+        // Same refusal the generator makes (audit 2026-10-05 r2): billing a
+        // family whose child is not there - graduated, transferred,
+        // prospective - is a bill nobody can explain on the phone.
+        if ($student->status !== 'active') {
+            return response()->json([
+                'message' => "Siswa {$student->nama_lengkap} berstatus {$student->status} - hanya siswa aktif yang bisa ditagih.",
+            ], 422);
+        }
+
         $feeType = FeeType::where('ulid', $validated['fee_type_ulid'])
             ->where('is_active', true)
             ->firstOrFail();
@@ -117,6 +127,60 @@ class BillController extends Controller
 
         $amount = round((float) $validated['amount'], 2);
 
+        // Cross-lane dedup for RECURRING types (audit 2026-10-05 r2): the
+        // manual lane used to mint 'manual:{id}:{uniqid}' regardless of
+        // recurrence, so a manual SPP for month X plus the month-X generator
+        // run issued the same period TWICE - the exact double charge the
+        // generator's dedup exists to prevent. A recurring manual bill now
+        // carries the generator's own key shape ({code}:{year}:{month}), so
+        // the (student, dedup_key) unique constraint guards both lanes in
+        // both orders. Once-types keep their uniqid shape: their cross-lane
+        // guard is the (student, type, year) tuple evaluate() checks.
+        $dedupKey = 'manual:'.$student->id.':'.uniqid();
+        $periodMonth = null;
+
+        if ($feeType->recurrence !== 'once') {
+            $periodMonth = $validated['period_month'] ?? null;
+
+            if (! $periodMonth) {
+                return response()->json([
+                    'message' => "Jenis biaya {$feeType->name} berulang - pilih bulan periode tagihannya agar tidak dobel dengan generator.",
+                ], 422);
+            }
+
+            $dedupKey = $feeType->code.':'.str_replace('/', '-', $year->year).':'.str_pad((string) $periodMonth, 2, '0', STR_PAD_LEFT);
+
+            $existing = Bill::where('student_id', $student->id)
+                ->where('dedup_key', $dedupKey)
+                ->first();
+
+            if ($existing) {
+                // Same key shape for both lanes now, so the ORIGIN is read
+                // off the run link: a generator bill carries billing_run_id,
+                // a manual one does not.
+                $fromGenerator = $existing->billing_run_id !== null;
+
+                return response()->json([
+                    'message' => "Tagihan {$feeType->name} periode ini sudah terbit".($fromGenerator ? ' (dari generator)' : ' (dibuat manual)').": {$existing->bill_number}.",
+                ], 422);
+            }
+        }
+
+        // Rate context for denda (audit 2026-10-05 r2): manual bills carried
+        // no fee_rate_id, so ApplyLateFees could never charge them - a
+        // manually issued SPP stayed denda-free forever regardless of the
+        // school's rate policy. Resolved the same way the generator
+        // resolves; absent rates simply keep fee_rate_id null (and denda 0),
+        // unchanged behaviour.
+        $rate = FeeRate::resolve($feeType, $student, $year, $student->currentEnrollment()?->classroom?->tingkat);
+        $dueDate = \Illuminate\Support\Carbon::parse($validated['due_date']);
+
+        // Birth status mirrors the generator (audit 2026-10-05 r2): a
+        // catch-up bill whose due date already passed is born OVERDUE, not
+        // 'unpaid'-until-the-01:00-sweep - stored status is what every
+        // reader (tunggakan KPIs, watchlist) keys on.
+        $birthStatus = $dueDate->isBefore(now()->startOfDay()) ? 'overdue' : 'unpaid';
+
         // Double-submit guard (audit T55-d): the manual lane has no
         // generator-style unique key - dedup_key was manual:{id}:{uniqid},
         // so a double click minted two real bills (and the second checkout
@@ -150,7 +214,8 @@ class BillController extends Controller
                     'fee_type_id' => $feeType->id,
                     'academic_year_id' => $year->id,
                     'term_id' => Term::current()?->id,
-                    'dedup_key' => 'manual:'.$student->id.':'.uniqid(),
+                    'dedup_key' => $dedupKey,
+                    'period_month' => $periodMonth,
                     'description' => $validated['description'],
                     'subtotal' => $amount,
                     'discount_amount' => 0,
@@ -158,8 +223,12 @@ class BillController extends Controller
                     'total_amount' => $amount,
                     'paid_amount' => 0,
                     'remaining_amount' => $amount,
-                    'status' => 'unpaid',
+                    'status' => $birthStatus,
                     'due_date' => $validated['due_date'],
+                    'fee_rate_id' => $rate?->id,
+                    'grace_period_end' => ($rate?->late_fee_grace_days)
+                        ? $dueDate->copy()->addDays((int) $rate->late_fee_grace_days)
+                        : null,
                     'allow_installment' => (bool) $feeType->allow_installment,
                     'issued_at' => now(),
                     'issued_by' => $request->user()->id,

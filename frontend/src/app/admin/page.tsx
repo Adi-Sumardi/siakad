@@ -106,7 +106,7 @@ type SummaryResponse = {
   alerts: AlertItem[];
 };
 
-type FailureSummary = { failed_24h: number; failed_7d: number; exhausted_7d: number };
+type FailureSummary = { failed_24h: number; failed_7d: number; exhausted_7d: number; log_only_7d: number };
 
 const num = (n: number) => new Intl.NumberFormat("id-ID").format(n);
 const SEVERITY_ORDER = { bad: 0, warn: 1, good: 2 } as const;
@@ -185,6 +185,20 @@ export default function AdminHomePage() {
 
   const alerts: AlertItem[] = [
     ...(data?.alerts ?? []),
+    ...(failures && failures.log_only_7d > 0
+      ? [{
+          // The "prod looks green while nothing left the building" signal
+          // (audit r2 2026-10-05): gateway credentials blank means every
+          // send was only logged - including login OTPs for phone users.
+          id: "notification-log-only",
+          label: "Gateway notifikasi belum dikonfigurasi (mode log-only)",
+          detail: `${num(failures.log_only_7d)} pesan 7 hari terakhir TIDAK benar-benar terkirim - periksa env QONTAK_*/SENDAGO*`,
+          count: failures.log_only_7d,
+          severity: "bad" as AlertItem["severity"],
+          href: "/admin/monitoring",
+          units: [],
+        }]
+      : []),
     ...(failures && failures.failed_24h > 0
       ? [{
           id: "notification-failures",

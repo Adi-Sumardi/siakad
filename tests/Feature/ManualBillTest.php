@@ -70,6 +70,9 @@ class ManualBillTest extends TestCase
         return array_merge([
             'student_ulid' => $this->student->ulid,
             'fee_type_ulid' => $this->spp->ulid,
+            // The default payload bills a recurring type, which since audit
+            // r2 2026-10-05 must name its period month (cross-lane dedup).
+            'period_month' => 9,
             'description' => 'SPP tertunggak bulan masuk tengah semester',
             'amount' => 650000,
             'due_date' => now()->addDays(7)->toDateString(),
@@ -160,5 +163,88 @@ class ManualBillTest extends TestCase
         $this->actingAs($this->admin('admin'))
             ->postJson('/api/admin/bills/manual', $this->payload(['fee_type_ulid' => $retired->ulid]))
             ->assertNotFound();
+    }
+
+    public function test_a_recurring_manual_bill_requires_its_period_month(): void
+    {
+        $this->actingAs($this->admin('admin'))
+            ->postJson('/api/admin/bills/manual', $this->payload(['period_month' => null]))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Jenis biaya SPP berulang - pilih bulan periode tagihannya agar tidak dobel dengan generator.');
+    }
+
+    public function test_a_recurring_manual_bill_shares_the_generators_period_dedup(): void
+    {
+        $response = $this->actingAs($this->admin('admin'))
+            ->postJson('/api/admin/bills/manual', $this->payload(['period_month' => 9]));
+        $response->assertCreated();
+
+        // The generator's own key shape - the (student, dedup_key) unique
+        // then guards BOTH lanes in BOTH orders (audit r2 2026-10-05: a
+        // manual month-X bill plus the month-X run used to double-bill).
+        $bill = Bill::where('bill_number', $response->json('bill.bill_number'))->first();
+        $this->assertSame('spp:2026-2027:09', $bill->dedup_key);
+        $this->assertSame(9, $bill->period_month);
+
+        // Manual-vs-manual for the same period...
+        $this->actingAs($this->admin('admin'))
+            ->postJson('/api/admin/bills/manual', $this->payload(['period_month' => 9, 'amount' => 700000]))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Tagihan SPP periode ini sudah terbit (dibuat manual): '.$bill->bill_number.'.');
+
+        // ...and generator-vs-manual: a generator-style row for October
+        // blocks the manual lane for October with the "from generator" note
+        // (origin read off billing_run_id - the key shape is shared now).
+        $year = \App\Models\AcademicYear::where('is_active', true)->first();
+        $run = \App\Models\BillingRun::create([
+            'fee_type_id' => $this->spp->id,
+            'academic_year_id' => $year->id,
+            'period_month' => 10,
+            'status' => 'completed',
+            'bills_created' => 1,
+            'total_amount' => 650000,
+        ]);
+        Bill::create([
+            'bill_number' => 'SPP/2026/10/GEN',
+            'dedup_key' => 'spp:2026-2027:10',
+            'period_month' => 10,
+            'description' => 'SPP Oktober 2026',
+            'student_id' => $this->student->id,
+            'academic_year_id' => $year->id,
+            'fee_type_id' => $this->spp->id,
+            'billing_run_id' => $run->id,
+            'subtotal' => 650000,
+            'total_amount' => 650000,
+            'remaining_amount' => 650000,
+            'status' => 'unpaid',
+            'due_date' => now()->addDays(10)->toDateString(),
+            'issued_at' => now(),
+        ]);
+
+        $blocked = $this->actingAs($this->admin('admin'))
+            ->postJson('/api/admin/bills/manual', $this->payload(['period_month' => 10]));
+        $blocked->assertStatus(422);
+        $this->assertStringContainsString('dari generator', (string) $blocked->json('message'));
+    }
+
+    public function test_a_past_due_manual_bill_is_born_overdue(): void
+    {
+        // Mirrors the generator's birth status (audit r2 2026-10-05): a
+        // catch-up bill is visible in tunggakan the moment it exists, not
+        // after the next 01:00 sweep.
+        $this->actingAs($this->admin('admin'))
+            ->postJson('/api/admin/bills/manual', $this->payload(['due_date' => now()->subDay()->toDateString()]))
+            ->assertCreated()
+            ->assertJsonPath('bill.status', 'overdue');
+    }
+
+    public function test_a_non_active_student_cannot_be_billed(): void
+    {
+        $this->student->forceFill(['status' => 'graduated'])->save();
+
+        $response = $this->actingAs($this->admin('admin'))
+            ->postJson('/api/admin/bills/manual', $this->payload());
+        $response->assertStatus(422);
+        $this->assertStringContainsString('berstatus graduated', (string) $response->json('message'));
     }
 }

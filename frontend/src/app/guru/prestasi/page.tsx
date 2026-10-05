@@ -54,7 +54,11 @@ export default function GuruAchievementPage() {
     api
       .get<{ achievements: PendingAchievement[] }>("/api/guru/achievements")
       .then((d) => setPending(d.achievements))
-      .catch(() => setPending([]));
+      .catch((err) => {
+        // A failed fetch is not an empty queue (audit r2 2026-10-05).
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat antrean prestasi.");
+        setPending([]);
+      });
   }
 
   useEffect(() => {

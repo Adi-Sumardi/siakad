@@ -85,8 +85,9 @@ class ManualBillCambridgeTest extends TestCase
             ->postJson('/api/admin/bills/manual', $this->payload())
             ->assertCreated();
 
+        // SPP is recurring - it names its period month (audit r2 2026-10-05).
         $this->actingAs($this->admin('admin'))
-            ->postJson('/api/admin/bills/manual', $this->payload(['fee_type_ulid' => $this->spp->ulid]))
+            ->postJson('/api/admin/bills/manual', $this->payload(['fee_type_ulid' => $this->spp->ulid, 'period_month' => 9]))
             ->assertCreated();
 
         $this->assertSame(2, Bill::count());

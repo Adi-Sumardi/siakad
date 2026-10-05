@@ -153,6 +153,14 @@ class Student extends Model
      * this method sat underneath three N+1 hot paths (the receivables
      * screen, the daily-attendance sweep holding a session lock, and the
      * monthly SPP generator walking the whole school).
+     *
+     * CONTRACT (audit r2 2026-10-05): the memory path honours whatever
+     * constraint the eager load carried, BY DESIGN. A caller that filters
+     * the load to one academic year (the admin roster's year picker) sees
+     * that year's placement - the historical view it asked for - while
+     * unconstrained loaders keep the query path's semantics (latest active
+     * enrollment across all years). Constrain the load only when you mean
+     * to narrow this answer too.
      */
     public function currentEnrollment(): ?Enrollment
     {

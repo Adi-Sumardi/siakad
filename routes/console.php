@@ -108,6 +108,15 @@ Schedule::command('attendance:daily-sweep')
 // - beyond that, the failure is a human's problem and the exhaustion digest
 // in the log plus the dashboard card are how a human notices. OTP rows are
 // excluded on purpose; see the command's docblock.
+// Retention (audit r2 2026-10-05): notification_logs/login_otps/invitations
+// grow a row per send with nothing ever deleting them. Sent rows go after
+// 180 days, the failed audit trail after a year, in one bounded nightly run.
+Schedule::command('notifications:prune')
+    ->dailyAt('03:30')
+    ->name('prune-notifications')
+    ->withoutOverlapping(10)
+    ->description('Pangkaskan riwayat notifikasi, OTP, dan undangan kedaluwarsa');
+
 Schedule::command('notifications:retry-failed')
     ->everyThirtyMinutes()
     ->name('retry-failed-notifications')

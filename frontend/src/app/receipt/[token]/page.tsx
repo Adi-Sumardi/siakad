@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { BadgeCheck, Printer } from "lucide-react";
 import { api } from "@/lib/api";
+import { YAYASAN_NAME } from "@/lib/brand";
 import { rupiah, tanggalWaktu } from "@/lib/format";
 
 type Receipt = {
@@ -65,7 +66,7 @@ export default function PublicReceiptPage({ params }: { params: Promise<{ token:
           <img src="/images/logo-yapi.png" alt="YAPI" className="h-12" />
           <div>
             <h1 className="text-sm font-extrabold tracking-wide text-[#14532D]">
-              YAYASAN PENDIDIKAN ISLAM AL-AZHAR (YAPI)
+              {YAYASAN_NAME}
             </h1>
             <p className="text-[11px] text-muted-foreground">Kuitansi Pembayaran Siswa — Bukti Transaksi Sah</p>
           </div>

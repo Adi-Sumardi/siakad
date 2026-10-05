@@ -98,6 +98,56 @@ class UserController extends Controller
     }
 
     /**
+     * (Re)send the activation invitation for an account the app itself
+     * created (audit r2 2026-10-05): accounts from store() and the CSV
+     * import never receive a link, and an expired one had no non-destructive
+     * recovery - resetAccess is for a LOST contact and deliberately drops
+     * the other channel. This lane reuses the handoff's own sender, which
+     * consumes any earlier unused invitation first, so exactly one working
+     * link exists after a resend.
+     */
+    public function sendInvitation(Request $request, User $user): JsonResponse
+    {
+        // A per-unit admin only reaches their own unit's accounts; central
+        // admin reaches everything - the same scope line update() draws.
+        if ($request->user()->isUnitScoped() && $user->school_unit_id !== $request->user()->school_unit_id) {
+            abort(404);
+        }
+
+        if ($user->hasActivated()) {
+            return response()->json(['message' => 'Akun ini sudah aktif - tidak perlu undangan.'], 422);
+        }
+
+        if (! $user->email && ! $user->phone) {
+            return response()->json(['message' => 'Akun ini tidak punya email maupun nomor HP untuk dikirimi undangan.'], 422);
+        }
+
+        // Same context shape the PMB handoff sends, built from whichever
+        // student this guardian is linked to (first one wins for a
+        // multi-child parent - the template wants a recognisable name, not
+        // the census).
+        $student = $user->guardian?->students()->first();
+
+        $result = app(\App\Services\Handoff\AccountInvitationSender::class)->send($user, [
+            'student_name' => $student?->nama_lengkap ?? $user->name,
+            'nama_panggilan' => $student?->nama_panggilan ?: ($student?->nama_lengkap ?? $user->name),
+            'unit_label' => $student?->schoolUnit?->label ?? $user->schoolUnit?->label ?? '-',
+            'academic_year' => '-',
+        ], $request->user());
+
+        \App\Models\ActivityLog::record($request->user(), 'user.invitation_resent', $user, [
+            'user' => $user->name,
+            'delivered' => $result->success,
+        ]);
+
+        if (! $result->success) {
+            return response()->json(['message' => 'Undangan gagal terkirim: '.$result->message], 422);
+        }
+
+        return response()->json(['message' => 'Undangan aktivasi dikirim ke '.($user->email ?: $user->phone).'.']);
+    }
+
+    /**
      * Create a new user.
      */
     public function store(StoreUserRequest $request): JsonResponse

@@ -300,22 +300,24 @@ function AdminBillsContent() {
   }, [load]);
 
   useEffect(() => {
+    // Failed filter loads must not masquerade as "no options" (audit r2
+    // 2026-10-05): a picker that silently empties looks like missing data.
     api
       .get<{ school_units: Option[] }>("/api/admin/school-units")
       .then((d) => setUnits(d.school_units))
-      .catch(() => {});
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar unit."));
 
     api
       .get<{ academic_years: { ulid: string; year: string; is_active: boolean }[] }>("/api/admin/academic-years")
       .then((d) => setYears(d.academic_years))
-      .catch(() => {});
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat tahun ajaran."));
 
     // The jenis filter needs the catalogue even before the manual-bill modal
     // is ever opened (that modal has its own lazy load with the same guard).
     api
       .get<{ fee_types: FeeTypeOption[] }>("/api/admin/fee-types")
       .then((d) => setFeeTypes(d.fee_types.filter((t) => t.is_active)))
-      .catch(() => {});
+      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat jenis biaya."));
   }, []);
 
   // The one shared blob-download (src/lib/download.ts) since audit
@@ -551,6 +553,11 @@ function AdminBillsContent() {
                 {bill.discount_amount > 0 && (
                   <p className="text-xs text-emerald-600 font-semibold mt-1">
                     Diskon/Beasiswa: {rupiah(bill.discount_amount)}
+                  </p>
+                )}
+                {bill.late_fee > 0 && (
+                  <p className="text-xs text-amber-600 font-semibold mt-1">
+                    Denda keterlambatan: {rupiah(bill.late_fee)}
                   </p>
                 )}
               </div>

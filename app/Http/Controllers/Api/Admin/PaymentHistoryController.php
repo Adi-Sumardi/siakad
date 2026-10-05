@@ -105,6 +105,14 @@ class PaymentHistoryController extends Controller
 
                 return $fresh;
             });
+
+            // Minting a public receipt credential is a money-adjacent act
+            // (audit 2026-10-05 r2): every other lane that hands something
+            // out logs it, and log-aktivitas is where "who shared this
+            // family's receipt link" should be answerable from.
+            \App\Models\ActivityLog::record($request->user(), 'payment.share_link_minted', $payment, [
+                'payment' => $payment->payment_number,
+            ]);
         }
 
         return response()->json(['url' => "/receipt/{$payment->receipt_public_token}"]);
@@ -155,7 +163,13 @@ class PaymentHistoryController extends Controller
             return response()->json(['message' => 'Pembayaran ini sebagian melunasi tagihan - refund parsial harus diproses manual oleh pusat.'], 422);
         }
 
-        DB::transaction(function () use ($payment, $request) {
+        // The claim returns whether THIS call wrote the decision (audit
+        // 2026-10-05 r2): the old closure returned silently on a lost race
+        // and the method still answered 200 "ditandai refunded" though
+        // nothing was written - and a concurrent loser's firstOrFail
+        // surfaced as a raw 404 mid-transaction. Now both races answer a
+        // clean 422.
+        $refunded = DB::transaction(function () use ($payment, $request) {
             // Claim under a row lock, same discipline as settle()/fail():
             // two admins clicking refund concurrently, or a refund racing
             // some future lane, must write this decision exactly once.
@@ -163,12 +177,12 @@ class PaymentHistoryController extends Controller
                 ->whereKey($payment->id)
                 ->where('status', 'completed')
                 ->lockForUpdate()
-                ->firstOrFail();
+                ->first();
 
-            $overpayment = $fresh->metadata['overpayment'] ?? null;
+            $overpayment = $fresh?->metadata['overpayment'] ?? null;
 
-            if (! $overpayment) {
-                return;
+            if (! $fresh || ! $overpayment) {
+                return false;
             }
 
             // The annotation moves aside rather than vanishing: the worklist
@@ -188,7 +202,22 @@ class PaymentHistoryController extends Controller
                 'rejection_reason' => 'Overpayment direfund oleh TU.',
                 'metadata' => $metadata,
             ])->save();
+
+            // The money-return decision belongs in log-aktivitas beside
+            // every other money lane (audit 2026-10-05 r2) - waived and
+            // cancelled bills, billing runs, VA issues all log theirs.
+            \App\Models\ActivityLog::record($request->user(), 'payment.refunded', $fresh, [
+                'payment' => $fresh->payment_number,
+                'amount' => (float) $fresh->amount,
+                'refunded_by' => $request->user()->name,
+            ]);
+
+            return true;
         });
+
+        if (! $refunded) {
+            return response()->json(['message' => 'Pembayaran ini sudah direfund atau bukan overpayment yang menunggu refund.'], 422);
+        }
 
         return response()->json(['message' => 'Pembayaran ditandai refunded. Pastikan transfer pengembalian dana sudah dikirim.']);
     }
