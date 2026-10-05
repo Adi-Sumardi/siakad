@@ -2,10 +2,11 @@
 
 import {
   Bell,
+  BookOpen,
   CircleHelp,
   GraduationCap,
   LayoutGrid,
-  Receipt,
+  SlidersHorizontal,
   Sparkles,
   Users,
   Wallet,
@@ -17,9 +18,11 @@ import { FeatureTour, type TourStep } from "@/components/feature-tour";
  * through, on top of the shared engine (components/feature-tour.tsx).
  * Module-level so the array identity stays stable across renders. Central
  * admin (role "admin") does not run a tour today; if it ever does, its extra
- * nav items (Manajemen Unit, Log Aktivitas, Monitoring) can join as optional
- * steps - they are filtered out of the DOM for a unit admin, and optional
- * steps slip past exactly then.
+ * nav items (Manajemen Unit, Log Aktivitas, Monitoring) simply join the
+ * "Sistem" grouping's description - the steps below highlight whole sidebar
+ * GROUPS ("nav-group-<slug>", heading + items together), not single menu
+ * entries, because that is how the portal is organised: a unit admin thinks
+ * in "keuangan / akademik / kesiswaan", not in 21 flat links.
  */
 const ADMIN_UNIT_STEPS: TourStep[] = [
   {
@@ -42,34 +45,42 @@ const ADMIN_UNIT_STEPS: TourStep[] = [
     placement: "below",
   },
   {
-    target: "nav-siswa",
-    title: "Data Siswa & SPP",
-    body: "Database siswa unit Anda beserta kelas dan tagihannya. Grup Siswa & Kelas juga menampung kenaikan kelas tiap akhir tahun ajaran.",
+    target: "nav-group-siswa-kelas",
+    title: "Grup Siswa & Kelas",
+    body: "Database siswa unit Anda beserta kelas dan tagihannya: Data Siswa & SPP, Data Kelas, sampai Kenaikan Kelas tiap akhir tahun ajaran.",
     icon: GraduationCap,
     placement: "right",
     nav: true,
   },
   {
-    target: "nav-tagihan",
-    title: "Tagihan & Transaksi",
-    body: "Semua tagihan SPP dan pembayaran di unit Anda, lengkap dengan status dan riwayat transaksinya.",
-    icon: Receipt,
+    target: "nav-group-akademik",
+    title: "Grup Akademik",
+    body: "Urusan akademik harian: Jadwal Pelajaran, Presensi Harian per kelas, serta Nilai & Rapor siswa.",
+    icon: BookOpen,
     placement: "right",
     nav: true,
   },
   {
-    target: "nav-generate",
-    title: "Terbitkan SPP Massal",
-    body: "Terbitkan tagihan SPP untuk banyak siswa sekaligus per kelas dan jenis biaya - tombol Terbitkan SPP di Beranda juga mengarah ke sini.",
+    target: "nav-group-kesiswaan",
+    title: "Grup Kesiswaan",
+    body: "Kehidupan siswa di luar pelajaran: Ekstrakurikuler, Poin & Tata Tertib, Prestasi Siswa, dan Pengumuman.",
+    icon: Users,
+    placement: "right",
+    nav: true,
+  },
+  {
+    target: "nav-group-keuangan",
+    title: "Grup Keuangan",
+    body: "Semua urusan SPP dan biaya ada di sini: Tagihan & Transaksi, Terbitkan SPP Massal, Laporan Keuangan, Pengaturan Biaya & SPP, hingga Diskon & Beasiswa.",
     icon: Wallet,
     placement: "right",
     nav: true,
   },
   {
-    target: "nav-users",
-    title: "Manajemen Pengguna",
-    body: "Buat akun guru di unit Anda, satu per satu atau lewat impor CSV. Mengubah dan menghapus akun tetap urusan admin pusat.",
-    icon: Users,
+    target: "nav-group-sistem",
+    title: "Grup Sistem",
+    body: "Perkakas akun dan sistem: buat akun guru unit Anda (satu per satu atau impor CSV) lewat Manajemen Pengguna. Mengubah dan menghapus akun tetap urusan admin pusat.",
+    icon: SlidersHorizontal,
     placement: "right",
     nav: true,
   },

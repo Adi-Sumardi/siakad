@@ -150,6 +150,16 @@ export function StaffShell({
   );
 }
 
+/** "Siswa & Kelas" -> "siswa-kelas": the slug half of a section's data-tour
+ *  anchor ("nav-group-<slug>"), so the feature tour can spotlight a whole
+ *  grouping (heading + its items) instead of one item at a time. */
+function groupSlug(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 /**
  * The nav list, split into headed sections by each item's `group`. A nav
  * with no groups at all (guru) keeps the single "Menu Navigasi" heading;
@@ -177,7 +187,7 @@ function NavSections({
   return (
     <div className="flex flex-col gap-4">
       {sections.map((section, i) => (
-        <div key={`${section.title ?? "top"}-${i}`}>
+        <div key={`${section.title ?? "top"}-${i}`} data-tour={section.title ? `nav-group-${groupSlug(section.title)}` : undefined}>
           {section.title && (
             <p className="mb-1.5 px-3 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">{section.title}</p>
           )}
