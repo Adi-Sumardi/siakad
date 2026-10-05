@@ -66,18 +66,28 @@ class PollBillingVaPayments extends Command
                 $remaining = (float) ($response['sisa'] ?? $response['data']['sisa'] ?? -1);
 
                 if ($remaining === 0.0) {
-                    $allocator->settle($payment, $response['uuid'] ?? $vaLookup, array_merge($response, [
+                    $result = $allocator->settle($payment, $response['uuid'] ?? $vaLookup, array_merge($response, [
                         'settled_via' => 'billing_api_poller',
                         'polled_at' => now()->toIso8601String(),
                     ]));
 
                     $settledCount++;
-                    $this->info("Payment {$payment->payment_number} (VA: {$vaLookup}) settled!");
+
+                    if ($result->overpaid) {
+                        // The bill was already covered by another completed
+                        // payment - settle() refused to double-book and the
+                        // excess waits on metadata.overpayment (TU refund).
+                        $this->warn('Payment '.$payment->payment_number.' (VA: '.$vaLookup.') settled WITH an overpayment of Rp '
+                            .number_format($result->excess, 0, ',', '.').' - flagged for TU.');
+                    } else {
+                        $this->info("Payment {$payment->payment_number} (VA: {$vaLookup}) settled!");
+                    }
 
                     // Sibling-VAs of a settled payment are superseded inside
                     // PaymentAllocator::settle() itself (audit 25-9) - the
                     // same choke point the webhook settles through, so both
-                    // lanes and every metadata.source carry the guard.
+                    // lanes and every metadata.source carry the guard. The
+                    // overpayment flag above lives in that same choke point.
                 } elseif ($payment->expires_at && $payment->expires_at->isPast()) {
                     $allocator->fail($payment, 'expired', 'Virtual Account telah kedaluwarsa.');
                     $this->warn("Payment {$payment->payment_number} (VA: {$vaLookup}) marked as expired.");

@@ -29,6 +29,7 @@ class PaymentAllocator
     public function __construct(
         private PaymentReceiptNotifier $receipts,
         private PaymentReceiptSender $whatsappReceipts,
+        private OverpaymentNotifier $overpayments,
     ) {}
 
     /**
@@ -72,15 +73,29 @@ class PaymentAllocator
      * is technically still sitting out there and gets paid late - completing
      * it here would double-count the bill exactly the way two live invoices
      * for one bill did before checkout started superseding them.
+     *
+     * Race-proof across DIFFERENT payment rows (audit 2026-10-05): the
+     * reminder pair deliberately had two banks' VAs live for one bill, and
+     * two near-simultaneous payments on that pair each claimed their OWN row
+     * (two rows, two claims) and both completed - paid_amount overshot the
+     * total and max(0, ...) buried the excess. Now the claim transaction
+     * also locks the bills themselves (ordered by id, so two settles on the
+     * same bills serialize instead of deadlocking) and, still inside that
+     * lock, flags any allocation the bill can no longer absorb
+     * applies_to_bill=false: the second payment still completes (the money
+     * really arrived) but settles nothing - its excess is recorded on
+     * metadata.overpayment, never on paid_amount, and the caller learns
+     * through the SettlementResult so the family gets told about the refund
+     * instead of discovering it weeks later.
      */
-    public function settle(Payment $payment, ?string $externalId = null, array $gatewayResponse = []): void
+    public function settle(Payment $payment, ?string $externalId = null, array $gatewayResponse = []): SettlementResult
     {
         // The claim is one conditional, locked UPDATE (audit T39-a): the
         // old in-memory status check let the webhook and the poller - two
         // snapshots of the same row - both pass it and both run the full
         // settle, double-sending receipts. The loser here changes nothing
         // and sends nothing.
-        $claimed = DB::transaction(function () use ($payment, $externalId, $gatewayResponse) {
+        $outcome = DB::transaction(function () use ($payment, $externalId, $gatewayResponse) {
             $fresh = Payment::query()
                 ->whereKey($payment->id)
                 ->whereIn('status', ['pending', 'processing'])
@@ -88,7 +103,64 @@ class PaymentAllocator
                 ->first();
 
             if (! $fresh) {
-                return false;
+                return null;
+            }
+
+            // Lock the bills this payment touches, ordered by id so any two
+            // concurrent settles on overlapping bills take the same lock
+            // order and serialize instead of deadlocking. This is the actual
+            // two-row race fix: both payments can claim their own row, but
+            // only one at a time may decide what these bills still owe.
+            $allocations = $fresh->allocations()->orderBy('bill_id')->get();
+
+            $bills = Bill::query()
+                ->whereIn('id', $allocations->pluck('bill_id')->unique()->values()->all())
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+            $overpayment = [];
+
+            foreach ($allocations as $allocation) {
+                $bill = $bills->firstWhere('id', $allocation->bill_id);
+
+                if (! $bill) {
+                    continue;
+                }
+
+                // Current read, deliberately not a plain aggregate: under
+                // MySQL REPEATABLE READ an unforced SELECT sums the
+                // transaction snapshot and can miss the sibling settle that
+                // committed while this transaction waited on the bill lock -
+                // resurrecting this exact bug in production only (SQLite,
+                // which the test suite runs on, ignores FOR UPDATE
+                // entirely). Row counts per bill are tiny; hydrating them is
+                // nothing.
+                $appliedElsewhere = (float) PaymentAllocation::query()
+                    ->where('bill_id', $bill->id)
+                    ->where('applies_to_bill', true)
+                    ->where('payment_id', '!=', $fresh->id)
+                    ->whereHas('payment', fn ($q) => $q->where('status', 'completed'))
+                    ->lockForUpdate()
+                    ->get()
+                    ->sum('amount');
+
+                $headroom = round(max(0, (float) $bill->total_amount - $appliedElsewhere), 2);
+
+                // Full-count-or-nothing per row: a partly-absorbable
+                // allocation leaves the remainder visible on the bill
+                // (conservative) rather than paid past its total (hidden).
+                // The allocation row itself is NEVER deleted - see the
+                // migration that added this flag for every reader that
+                // would silently lose the payment.
+                if ((float) $allocation->amount > $headroom + 0.01) {
+                    $allocation->forceFill(['applies_to_bill' => false])->save();
+
+                    $overpayment['bills'][$bill->ulid] = [
+                        'allocation_amount' => (float) $allocation->amount,
+                        'headroom' => $headroom,
+                    ];
+                }
             }
 
             // Merged, never replaced (audit T38-b): the webhook and poller
@@ -102,7 +174,7 @@ class PaymentAllocator
             // payload, not on the webhook/poller verification data.
             $mergedResponse = array_merge($fresh->gateway_response ?? [], $gatewayResponse);
 
-            $fresh->forceFill([
+            $forceFill = [
                 'status' => 'completed',
                 'paid_at' => $fresh->paid_at ?? now(),
                 'external_transaction_id' => $externalId ?? $fresh->external_transaction_id,
@@ -116,31 +188,63 @@ class PaymentAllocator
                 // (gateway_response is never JSON-queried).
                 'receipt_public_token' => $fresh->receipt_public_token ?? Str::random(32),
                 'channel' => $fresh->channel ?? ($mergedResponse['bank_name'] ?? null),
-            ])->save();
+            ];
 
-            return true;
+            if ($overpayment !== []) {
+                // Same merge discipline as gateway_response: an overpayment
+                // annotation must not clobber whatever else metadata holds,
+                // and TU clearing it after the refund simply overwrites the
+                // key next time something writes here.
+                $forceFill['metadata'] = array_merge($fresh->metadata ?? [], [
+                    'overpayment' => $overpayment + ['detected_at' => now()->toIso8601String()],
+                ]);
+            }
+
+            $fresh->forceFill($forceFill)->save();
+
+            // Inside the lock on purpose (used to run after commit): the
+            // bill row is still held, so claim -> flag -> recompute cannot
+            // interleave with a sibling settle's own pass over these bills.
+            $bills->each(fn (Bill $bill) => $this->recompute($bill));
+
+            return ['overpayment' => $overpayment];
         });
 
-        if (! $claimed) {
-            return;
+        if ($outcome === null) {
+            return SettlementResult::notClaimed();
         }
 
         $payment->refresh();
 
-        $this->recomputeFor($payment->allocations()->pluck('bill_id')->all());
+        $excess = round((float) collect($outcome['overpayment']['bills'] ?? [])->sum('allocation_amount'), 2);
+
+        if ($excess > 0) {
+            // Lane-independent TU alarm: the webhook also marks its
+            // integration_event failed (visible on the monitoring screen),
+            // but the poller and checkout-stale lanes land here only.
+            Log::critical('[PaymentAllocator] Double payment booked as overpayment - the bill was already settled by another VA, TU owes the family a refund', [
+                'payment' => $payment->payment_number,
+                'amount' => (float) $payment->amount,
+                'excess' => $excess,
+                'bills' => array_keys($outcome['overpayment']['bills'] ?? []),
+            ]);
+        }
 
         // The sibling-VA choke point (audit 25-9, sharpens T39): settling
         // one live VA must kill every OTHER still-live payment sharing these
-        // bills, whatever lane created them and whatever settles first. The
-        // reminder flow deliberately runs two banks at once
-        // (BillingApiGateway::ensureReminderVaPair), and it reuses an
-        // already-live checkout VA as one half of its pair - so the settled
-        // payment often carries no 'spp_reminder' marker at all, which is
-        // why this guard may not key off metadata.source (the old poller-
-        // only, source-matched guard let exactly that case through: family
-        // pays the checkout Muamalat VA, webhook settles it, nothing kills
-        // the BSI half, family pays that too - two completed payments, one
-        // bill, the overpayment swallowed by max(0, ...) in recompute()).
+        // bills, whatever lane created them and whatever settles first. It
+        // was born when the reminder flow still ran two banks at once (the
+        // pair removed 2026-10-05), and it reuses an already-live checkout
+        // VA - so the settled payment often carries no 'spp_reminder' marker
+        // at all, which is why this guard may not key off metadata.source
+        // (the old poller-only, source-matched guard let exactly that case
+        // through: family pays the checkout Muamalat VA, webhook settles it,
+        // nothing kills the BSI half, family pays that too - two completed
+        // payments, one bill, the overpayment swallowed by max(0, ...) in
+        // recompute()). Cross-bank pairs still arise today via an abandoned
+        // checkout bank-switch (expireVa is broken at e-SPP, so the old VA
+        // stays payable), so this stays load-bearing alongside settle()'s
+        // own overpayment guard, which catches whatever slips through here.
         // Webhook and poller both land here, so one implementation covers
         // every settle lane. Best-effort on purpose: the money is already
         // booked, and a sibling cleanup hiccup must never fail the settle
@@ -172,6 +276,23 @@ class PaymentAllocator
                 'payment' => $payment->payment_number,
             ]);
         }
+
+        // The family must hear about the double payment from us, not from
+        // their bank statement weeks later: this is the message that says
+        // the money arrived, settles nothing, and a refund is coming. Same
+        // best-effort discipline as the receipts - the overpayment is
+        // already booked and alerted by the time this runs.
+        if ($excess > 0) {
+            try {
+                $this->overpayments->notify($payment->fresh());
+            } catch (Throwable $e) {
+                Log::warning('[PaymentAllocator] Overpayment WhatsApp failed: '.$e->getMessage(), [
+                    'payment' => $payment->payment_number,
+                ]);
+            }
+        }
+
+        return SettlementResult::settled($outcome['overpayment'], $excess);
     }
 
     /** A failed or expired checkout releases the bills it was holding. */
@@ -261,7 +382,9 @@ class PaymentAllocator
     /** @param  list<int>  $billIds */
     public function recomputeFor(array $billIds): void
     {
-        Bill::whereIn('id', array_unique($billIds))->get()->each(fn (Bill $bill) => $this->recompute($bill));
+        // Ordered by id so every multi-bill recompute touches bills in the
+        // same order settle() takes its locks - deterministic lock ordering.
+        Bill::whereIn('id', array_unique($billIds))->orderBy('id')->get()->each(fn (Bill $bill) => $this->recompute($bill));
     }
 
     public function recompute(Bill $bill): void
@@ -272,8 +395,17 @@ class PaymentAllocator
             return;
         }
 
+        // applies_to_bill=false rows are the double-booked half of two
+        // near-simultaneous VA payments (see settle()): real money that
+        // settles nothing, waiting on a TU refund - counting it here is the
+        // exact overcounting this flag exists to prevent. Current read via
+        // lockForUpdate for the same REPEATABLE READ reason as settle()'s
+        // headroom query; a no-op outside a transaction and on SQLite.
         $paid = (float) PaymentAllocation::where('bill_id', $bill->id)
+            ->where('applies_to_bill', true)
             ->whereHas('payment', fn ($q) => $q->where('status', 'completed'))
+            ->lockForUpdate()
+            ->get()
             ->sum('amount');
 
         $total = (float) $bill->total_amount;

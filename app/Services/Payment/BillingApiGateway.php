@@ -26,7 +26,7 @@ class BillingApiGateway implements PaymentGateway
 
     /**
      * Optional $expiresAt overrides the config va_due_days window - used by
-     * ensureReminderVaPair() so a reminder's VA stays payable through the
+     * ensureReminderVa() so a reminder's VA stays payable through the
      * bill's own due date instead of dying mid-beat (audit T62-b). Optional
      * extra parameters on an interface implementation are signature-
      * compatible, so PaymentGateway itself stays unchanged.
@@ -193,97 +193,99 @@ class BillingApiGateway implements PaymentGateway
     }
 
     /**
-     * Registers BOTH banks' VA for one bill simultaneously - deliberately
-     * NOT through CheckoutService::start(), whose own supersede logic
-     * (supersedePendingPaymentsFor()/supersedeOtherVaPaymentsForSameGroup())
-     * would kill one the instant the other is created, enforcing this app's
-     * normal "one live VA per bill" rule. Exists only for the SPP reminder
-     * flow (BillReminderSender), which needs to show a family both payment
-     * options at once, same as the school's old (pre-Billing-API) WhatsApp
-     * reminder used to.
+     * Registers ONE bank's Virtual Account for a reminder - or reuses
+     * whatever VA payment is already live for the bill, whichever bank
+     * issued it.
      *
-     * Idempotent per bank: reuses an already-live (pending/processing) VA
-     * payment for that bank+bill instead of creating a new one on every
-     * reminder beat (h7/h1/overdue), so a bill's reminder history doesn't
-     * accumulate a fresh Payment row every few days.
+     * Replaces the deliberate two-bank pair (removed 2026-10-05): the pair
+     * was the only lane that kept two banks' VAs live for one bill at once,
+     * and a family that paid both within seconds produced two completed
+     * payments with the overpayment buried by max(0, ...). The reminder now
+     * carries a single VA - the bank a still-live checkout already chose
+     * when one exists, otherwise services.billing_api.reminder_bank
+     * (Muamalat by default). BSI stays one tap away in the app's checkout
+     * (its own bank selector), whose supersede guards keep the one-live-VA-
+     * per-bill rule; and any cross-lane pair that still slips through is
+     * caught by the overpayment guard in PaymentAllocator::settle() itself.
      *
-     * SAFETY: two simultaneously live VAs for one bill is a real change to
-     * this app's payment model - if the family pays BOTH by mistake, both
-     * would independently reach `completed` status without anything here
-     * stopping the second one. The other half of the safety net lives in
-     * PaymentAllocator::settle() itself (audit 25-9): the moment any lane
-     * settles one of the pair, every other still-live payment on those
-     * bills is failed - no metadata.source filter, because this method
-     * deliberately REUSES an already-live checkout VA as one half of its
-     * pair, and that half carries no reminder marker at all.
+     * Still idempotent: a re-beat (h7/h1/overdue) reuses the live payment
+     * instead of minting a fresh Payment row every few days.
      *
-     * @return array{muamalat: array{va_number: string, bank_name: string}, bsi: array{va_number: string, bank_name: string}}
+     * @return array{bank: string, va_number: string, bank_name: string}
      */
-    public function ensureReminderVaPair(Bill $bill, Guardian $payer): array
+    public function ensureReminderVa(Bill $bill, Guardian $payer): array
     {
-        $result = [];
+        $payment = $this->liveVaPaymentFor($bill);
 
-        foreach (['muamalat', 'bsi'] as $bank) {
-            $payment = $this->liveVaPaymentFor($bill, $bank);
+        if (! $payment) {
+            $bank = strtolower((string) config('services.billing_api.reminder_bank', 'muamalat'));
+            $bank = in_array($bank, ['muamalat', 'bsi'], true) ? $bank : 'muamalat';
 
-            if (! $payment) {
-                // Whole rupiah, exactly like the checkout lane (audit
-                // 2026-09-28): rounding to 2dp here re-opened the T38-d
-                // class - a percent-discount remainder like ...001,50 made
-                // the VA amount and payment.amount disagree with the
-                // webhook's (int) comparison, failing every such settlement
-                // into integration_events noise even though the poller
-                // still landed the money.
-                $remaining = (int) round((float) $bill->remaining_amount);
+            // Whole rupiah, exactly like the checkout lane (audit
+            // 2026-09-28): rounding to 2dp here re-opened the T38-d
+            // class - a percent-discount remainder like ...001,50 made
+            // the VA amount and payment.amount disagree with the
+            // webhook's (int) comparison, failing every such settlement
+            // into integration_events noise even though the poller
+            // still landed the money.
+            $remaining = (int) round((float) $bill->remaining_amount);
 
-                $payment = Payment::create([
-                    'payment_number' => Payment::generateNumber(),
-                    'payer_guardian_id' => $payer->id,
-                    'amount' => $remaining,
-                    'method' => 'virtual_account',
-                    'status' => 'pending',
-                    'metadata' => [
-                        'bill_ulids' => [$bill->ulid],
-                        'bank_channel' => $bank,
-                        // Marks this row as reminder-created, not a normal
-                        // checkout - not load-bearing for any logic today,
-                        // but distinguishes the two if a future admin screen
-                        // or report ever needs to tell them apart.
-                        'source' => 'spp_reminder',
-                    ],
-                ]);
+            $payment = Payment::create([
+                'payment_number' => Payment::generateNumber(),
+                'payer_guardian_id' => $payer->id,
+                'amount' => $remaining,
+                'method' => 'virtual_account',
+                'status' => 'pending',
+                'metadata' => [
+                    'bill_ulids' => [$bill->ulid],
+                    'bank_channel' => $bank,
+                    // Marks this row as reminder-created, not a normal
+                    // checkout - not load-bearing for any logic today,
+                    // but distinguishes the two if a future admin screen
+                    // or report ever needs to tell them apart.
+                    'source' => 'spp_reminder',
+                ],
+            ]);
 
-                $this->allocator->allocate($payment, [$bill->id => $remaining]);
+            $this->allocator->allocate($payment, [$bill->id => $remaining]);
 
-                // Reminder VAs must outlive the beat that minted them (audit
-                // T62-b): a 3-day va_due_days window dies mid-flight for an
-                // H-7 beat, leaving days 4-5 holding a number the bank
-                // already refuses. The window stretches to the bill's own
-                // due date when that is further out; nearer due dates (H-1,
-                // overdue) keep the plain va_due_days floor.
-                $window = now()->addDays((int) config('services.billing_api.va_due_days', 3));
-                $expiresAt = $bill->due_date->endOfDay()->gt($window) ? $bill->due_date->endOfDay() : $window;
+            // Reminder VAs must outlive the beat that minted them (audit
+            // T62-b): a 3-day va_due_days window dies mid-flight for an
+            // H-7 beat, leaving days 4-5 holding a number the bank
+            // already refuses. The window stretches to the bill's own
+            // due date when that is further out; nearer due dates (H-1,
+            // overdue) keep the plain va_due_days floor.
+            $window = now()->addDays((int) config('services.billing_api.va_due_days', 3));
+            $expiresAt = $bill->due_date->endOfDay()->gt($window) ? $bill->due_date->endOfDay() : $window;
 
-                $payment = $this->createInvoice($payment, collect([$bill]), $payer, $expiresAt);
-            }
-
-            $result[$bank] = [
-                'va_number' => (string) ($payment->gateway_response['va_number'] ?? ''),
-                'bank_name' => (string) ($payment->gateway_response['bank_name'] ?? ''),
-            ];
+            $payment = $this->createInvoice($payment, collect([$bill]), $payer, $expiresAt);
         }
 
-        return $result;
+        return [
+            'bank' => (string) ($payment->gateway_response['bank_key'] ?? ''),
+            'va_number' => (string) ($payment->gateway_response['va_number'] ?? ''),
+            'bank_name' => (string) ($payment->gateway_response['bank_name'] ?? ''),
+        ];
     }
 
-    /** An already-registered, still-payable VA for this bank+bill, or null. */
-    private function liveVaPaymentFor(Bill $bill, string $bank): ?Payment
+    /**
+     * An already-registered, still-payable VA payment for this bill, on
+     * whichever bank issued it. Bank-agnostic on purpose: the reminder must
+     * reuse the bank a live checkout chose, not blindly re-register the
+     * default bank - that would mint the second simultaneous VA the
+     * single-VA reminder exists to avoid.
+     */
+    private function liveVaPaymentFor(Bill $bill): ?Payment
     {
         $paymentIds = PaymentAllocation::where('bill_id', $bill->id)->pluck('payment_id');
 
         return Payment::whereIn('id', $paymentIds)
             ->whereIn('status', ['pending', 'processing'])
-            ->where('gateway_response->provider', 'bank_'.$bank)
+            ->where(function ($q) {
+                $q->whereIn('gateway_response->provider', ['bank_muamalat', 'bank_bsi'])
+                    ->orWhereNotNull('gateway_response->va_number');
+            })
+            ->latest('id')
             ->first();
     }
 
@@ -374,7 +376,11 @@ class BillingApiGateway implements PaymentGateway
             return;
         }
 
-        $sisa = $data['sisa'] ?? null;
+        // Same dual-shape read as the webhook and the poller: e-SPP has been
+        // seen answering both flat and nested under 'data', and this net is
+        // the one lane that used to read only the flat shape - a nested
+        // answer kept it permanently blind to money it existed to catch.
+        $sisa = $data['sisa'] ?? $data['data']['sisa'] ?? null;
 
         if ($sisa === null || (float) $sisa > 0) {
             return;

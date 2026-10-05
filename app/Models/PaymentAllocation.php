@@ -10,9 +10,12 @@ class PaymentAllocation extends Model
 {
     use HasUlidKey;
 
-    protected $fillable = ['payment_id', 'bill_id', 'amount'];
+    protected $fillable = ['payment_id', 'bill_id', 'amount', 'applies_to_bill'];
 
-    protected $casts = ['amount' => 'decimal:2'];
+    protected $casts = [
+        'amount' => 'decimal:2',
+        'applies_to_bill' => 'boolean',
+    ];
 
     public function payment(): BelongsTo
     {

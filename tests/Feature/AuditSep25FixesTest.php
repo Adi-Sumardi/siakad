@@ -106,17 +106,18 @@ class AuditSep25FixesTest extends TestCase
     }
 
     /** The container gateway override BillReminderTest uses, parameterised. */
-    private function fakeReminderPair(string $muamalatVa = '8020012627000001', string $bsiVa = '7895012627000001'): void
+    private function fakeReminderVa(string $va = '8020012627000001'): void
     {
-        $this->app->bind(BillingApiGateway::class, fn () => new class($muamalatVa, $bsiVa) extends BillingApiGateway
+        $this->app->bind(BillingApiGateway::class, fn () => new class($va) extends BillingApiGateway
         {
-            public function __construct(private string $muamalatVa, private string $bsiVa) {}
+            public function __construct(private string $va) {}
 
-            public function ensureReminderVaPair(\App\Models\Bill $bill, \App\Models\Guardian $payer): array
+            public function ensureReminderVa(\App\Models\Bill $bill, \App\Models\Guardian $payer): array
             {
                 return [
-                    'muamalat' => ['va_number' => $this->muamalatVa, 'bank_name' => 'Bank Muamalat'],
-                    'bsi' => ['va_number' => $this->bsiVa, 'bank_name' => 'Bank Syariah Indonesia (BSI)'],
+                    'bank' => 'muamalat',
+                    'va_number' => $this->va,
+                    'bank_name' => 'Bank Muamalat',
                 ];
             }
         });
@@ -127,7 +128,7 @@ class AuditSep25FixesTest extends TestCase
     public function test_a_reminder_spp_resend_requeues_the_job_instead_of_faking_sent(): void
     {
         $bill = $this->billedStudent();
-        $this->fakeReminderPair();
+        $this->fakeReminderVa();
 
         $row = NotificationLog::create([
             'channel' => 'whatsapp',
@@ -160,18 +161,18 @@ class AuditSep25FixesTest extends TestCase
 
     // --------------------------------------------------------------- T59
 
-    public function test_a_va_pair_registration_failure_leaves_a_retryable_row_and_does_not_burn_the_beat(): void
+    public function test_a_reminder_va_registration_failure_leaves_a_retryable_row_and_does_not_burn_the_beat(): void
     {
         $bill = $this->billedStudent();
 
         // e-SPP is down exactly when the H-7 sweep tries to register the
-        // reminder's VA pair - the audit's "whole cohort's reminder erased
+        // reminder's VA - the audit's "whole cohort's reminder erased
         // silently" scenario.
         $this->app->bind(BillingApiGateway::class, fn () => new class extends BillingApiGateway
         {
             public function __construct() {}
 
-            public function ensureReminderVaPair(\App\Models\Bill $bill, \App\Models\Guardian $payer): array
+            public function ensureReminderVa(\App\Models\Bill $bill, \App\Models\Guardian $payer): array
             {
                 throw new \RuntimeException('e-SPP unreachable');
             }
@@ -191,23 +192,23 @@ class AuditSep25FixesTest extends TestCase
         $this->assertSame('failed', $row->status);
         $this->assertStringContainsString('e-SPP unreachable', (string) $row->error);
 
-        // e-SPP recovers; the sweep's second chance rebuilds the VA pair
+        // e-SPP recovers; the sweep's second chance rebuilds the VA
         // fresh and re-queues through the same throttled job.
-        $this->fakeReminderPair($freshMuamalat = '8020012627099999');
+        $this->fakeReminderVa($freshVa = '8020012627099999');
         Queue::fake();
 
         $result = app(NotificationRetryService::class)->retryOne($row->fresh());
 
         $this->assertTrue($result->success);
         Queue::assertPushed(\App\Jobs\SendQontakTemplateMessage::class, 1);
-        Queue::assertPushed(\App\Jobs\SendQontakTemplateMessage::class, fn ($job) => in_array($freshMuamalat, $job->bodyValues));
+        Queue::assertPushed(\App\Jobs\SendQontakTemplateMessage::class, fn ($job) => in_array($freshVa, $job->bodyValues));
         $this->assertDatabaseHas('notification_logs', ['ulid' => $row->ulid, 'status' => 'queued', 'attempts' => 2]);
     }
 
     public function test_a_reminder_spp_resend_refuses_a_bill_that_is_no_longer_open(): void
     {
         $bill = $this->billedStudent(['status' => 'paid', 'remaining_amount' => 0, 'paid_amount' => 700000]);
-        $this->fakeReminderPair();
+        $this->fakeReminderVa();
 
         $row = NotificationLog::create([
             'channel' => 'whatsapp',
@@ -363,19 +364,19 @@ class AuditSep25FixesTest extends TestCase
 
         $captured = [];
         $mockClient = Mockery::mock(BillingApiClient::class);
-        $mockClient->shouldReceive('createBilling')->twice()->andReturnUsing(function (array $main, array $bmi, array $bsm) use (&$captured) {
+        $mockClient->shouldReceive('createBilling')->once()->andReturnUsing(function (array $main, array $bmi, array $bsm) use (&$captured) {
             $captured[] = $main;
 
             return ['uuid' => 'reminder-va-'.uniqid(), 'status' => 'success'];
         });
         $this->app->instance(BillingApiClient::class, $mockClient);
 
-        app(BillingApiGateway::class)->ensureReminderVaPair($bill, $bill->student->guardians->first());
+        app(BillingApiGateway::class)->ensureReminderVa($bill, $bill->student->guardians->first());
 
         // The H-7 beat's VA window must reach the bill's own due date, not
         // die on day 3 while the reminder message is still in the family's
         // chat for four more days.
-        $this->assertCount(2, $captured);
+        $this->assertCount(1, $captured);
         foreach ($captured as $main) {
             $this->assertSame($bill->due_date->toDateString(), $main['date_end']);
         }

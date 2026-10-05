@@ -94,18 +94,19 @@ class BillReminderTest extends TestCase
             }
         });
 
-        // ensureReminderVaPair() otherwise calls the real e-SPP Billing API -
-        // faked to return fixed, obviously-fake VA numbers rather than
+        // ensureReminderVa() otherwise calls the real e-SPP Billing API -
+        // faked to return a fixed, obviously-fake VA number rather than
         // mocking BillingApiClient's HTTP layer directly.
         $this->app->bind(BillingApiGateway::class, fn () => new class extends BillingApiGateway
         {
             public function __construct() {}
 
-            public function ensureReminderVaPair(\App\Models\Bill $bill, \App\Models\Guardian $payer): array
+            public function ensureReminderVa(\App\Models\Bill $bill, \App\Models\Guardian $payer): array
             {
                 return [
-                    'muamalat' => ['va_number' => '8020012627000001', 'bank_name' => 'Bank Muamalat'],
-                    'bsi' => ['va_number' => '7895012627000001', 'bank_name' => 'Bank Syariah Indonesia (BSI)'],
+                    'bank' => 'muamalat',
+                    'va_number' => '8020012627000001',
+                    'bank_name' => 'Bank Muamalat',
                 ];
             }
         });
@@ -257,10 +258,10 @@ class BillReminderTest extends TestCase
         $sent0 = $this->sentQontakTemplates[0];
         $this->assertSame('081234567890', $sent0['phone']);
         $this->assertSame('Aisyah Nur Ramadhani', $sent0['bodyValues'][0]);
+        // Single VA since 2026-10-05: 4 positional values, the VA itself
+        // last - never a second bank's number beside it.
+        $this->assertCount(4, $sent0['bodyValues']);
         $this->assertSame('8020012627000001', $sent0['bodyValues'][3]);
-        // BSI's fixed 4-digit institution code (7895) is stripped before
-        // this value - the template shows it separately as static text.
-        $this->assertSame('012627000001', $sent0['bodyValues'][4]);
 
         $log = \App\Models\NotificationLog::where('channel', 'whatsapp')->where('template', 'reminder_spp')->first();
         $this->assertNotNull($log);

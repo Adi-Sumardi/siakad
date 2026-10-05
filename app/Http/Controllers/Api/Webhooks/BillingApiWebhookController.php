@@ -96,6 +96,37 @@ class BillingApiWebhookController extends Controller
         }
 
         if ($payment->isSettled()) {
+            // The inbox above already swallowed same-event redeliveries, so a
+            // callback reaching a COMPLETED payment carries an event id never
+            // seen before - most plausibly a second, mistaken payment into
+            // the same VA number (the bill is paid, the family pays the old
+            // number again from an earlier message). e-SPP's own record
+            // arbitrates (audit 2026-10-05): a registration it still shows
+            // settled is escalated for reconciliation instead of quietly
+            // acknowledged, because money may have landed twice; a VA that
+            // is unreachable, or outstanding again (re-registered by a newer
+            // checkout), is answered as before.
+            $settledVa = $payment->gateway_response['va_number'] ?? null;
+
+            if ($settledVa) {
+                try {
+                    $res = $this->client->getByVaNumber($settledVa);
+                    $sisa = $res['sisa'] ?? $res['data']['sisa'] ?? null;
+
+                    if ($sisa !== null && is_numeric($sisa) && (float) $sisa <= 0) {
+                        $event->markFailed(
+                            "Callback e-SPP baru untuk VA {$settledVa} padahal pembayaran {$payment->payment_number} sudah lunas - kemungkinan pembayaran kedua ke VA yang sama, perlu pemeriksaan/refund manual."
+                        );
+
+                        return response()->json(['success' => true, 'message' => 'Second payment on a settled VA; flagged.'], 200);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('[BillingApiWebhook] Could not re-verify a settled VA behind a fresh callback: '.$e->getMessage(), [
+                        'payment' => $payment->payment_number,
+                    ]);
+                }
+            }
+
             $event->markProcessed();
 
             return response()->json(['success' => true, 'message' => 'Payment already settled.'], 200);
@@ -191,11 +222,28 @@ class BillingApiWebhookController extends Controller
             return response()->json(['success' => true, 'message' => 'Amount mismatch.'], 200);
         }
 
-        $this->allocator->settle($payment, $transactionId, array_merge($payload, [
+        $result = $this->allocator->settle($payment, $transactionId, array_merge($payload, [
             'settled_via' => 'billing_api_webhook',
             'settled_at' => now()->toIso8601String(),
         ]));
-        $event->markProcessed();
+
+        if ($result->claimed && $result->overpaid) {
+            // Money arrived for a bill another completed payment had already
+            // covered: the allocator refused to double-book it - the excess
+            // sits on metadata.overpayment awaiting a TU refund, and the
+            // family is told by the overpayment WhatsApp. The event is
+            // marked failed on purpose so the ruang kontrol surfaces it;
+            // "failed" here means "needs a human", the same convention the
+            // closed-payment branch above uses.
+            $event->markFailed(
+                "Pembayaran ganda terdeteksi: {$payment->payment_number} (VA {$vaLookup}) sebesar Rp "
+                .number_format((float) $payment->amount, 0, ',', '.')
+                .' untuk tagihan yang sudah lunas - kelebihan Rp '.number_format($result->excess, 0, ',', '.')
+                .' tidak dibukukan sebagai pelunasan dan menunggu refund manual oleh TU.'
+            );
+        } else {
+            $event->markProcessed();
+        }
 
         Log::info('[BillingApiWebhook] Payment successfully settled', [
             'payment_number' => $payment->payment_number,

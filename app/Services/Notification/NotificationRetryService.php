@@ -4,6 +4,7 @@ namespace App\Services\Notification;
 
 use App\Models\NotificationLog;
 use App\Services\Billing\BillReminderSender;
+use App\Services\Billing\OverpaymentNotifier;
 use App\Services\Billing\PaymentReceiptNotifier;
 use App\Services\Billing\PaymentReceiptSender;
 use App\Services\Billing\VaIssuedNotifier;
@@ -50,6 +51,7 @@ class NotificationRetryService
         private PaymentReceiptNotifier $paymentReceipts,
         private PaymentReceiptSender $whatsappReceipts,
         private VaIssuedNotifier $vaIssued,
+        private OverpaymentNotifier $overpayments,
     ) {}
 
     /** @return Collection<int, NotificationLog> */
@@ -252,6 +254,11 @@ class NotificationRetryService
             // lane (sweep skipped it, the manual button 422'd).
             'reminder_spp' => fn (NotificationLog $log) => $this->billReminders->resend($log),
             'receipt_spp_school' => fn (NotificationLog $log) => $this->whatsappReceipts->resend($log),
+            // The double-payment notice (audit 2026-10-05): a family that
+            // paid two VAs for one bill must hear about the pending refund,
+            // and its sender re-checks metadata.overpayment itself so a
+            // refund TU already finished is never re-announced.
+            'payment_overpayment' => fn (NotificationLog $log) => $this->overpayments->resend($log),
             default => null,
         };
     }

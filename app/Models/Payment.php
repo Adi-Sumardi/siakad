@@ -42,7 +42,7 @@ class Payment extends Model
     public function bills()
     {
         return $this->belongsToMany(Bill::class, 'payment_allocations')
-            ->withPivot('amount')
+            ->withPivot('amount', 'applies_to_bill')
             ->withTimestamps();
     }
 

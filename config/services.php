@@ -76,9 +76,10 @@ return [
         'otp_template_id' => env('QONTAK_OTP_TEMPLATE_ID'),
         // UUID of the approved 'reminder_spp_school' Utility template (asks
         // for money) - SPP only for now (see
-        // BillReminderSender::queueSppReminderTemplate()). 5 positional
-        // variables: nama anak, bulan tagihan, jumlah, VA Muamalat, kode
-        // bayar BSI (VA BSI minus its 4-digit institution code, 7895 for SPP).
+        // BillReminderSender::queueSppReminderTemplate()). 4 positional
+        // variables: nama anak, bulan tagihan, jumlah, nomor VA. Single VA
+        // since 2026-10-05 (was 5 with a BSI payment code); the template
+        // copy points families that prefer BSI to the app's checkout.
         'spp_reminder_template_id' => env('QONTAK_SPP_REMINDER_TEMPLATE_ID'),
         // UUID of the approved 'receipt_spp_school' Utility template
         // (confirms money arrived) - see PaymentReceiptSender. 6 positional
@@ -116,6 +117,10 @@ return [
         'bank_id' => env('BILLING_API_BANK_ID', '1'),
         'va_due_days' => env('BILLING_API_VA_DUE_DAYS', 3),
         'va_admin_fee' => env('BILLING_API_ADMIN_FEE', 0),
+        // The one bank a fresh SPP reminder registers its VA on when no live
+        // checkout VA exists to reuse (BillingApiGateway::ensureReminderVa).
+        // Muamalat by default; BSI stays selectable in the app's checkout.
+        'reminder_bank' => env('BILLING_API_REMINDER_BANK', 'muamalat'),
 
         // One bill belongs to exactly one bank_id at e-SPP (main_form.bank_id
         // is singular) - each channel's own id, name, code, institution code,

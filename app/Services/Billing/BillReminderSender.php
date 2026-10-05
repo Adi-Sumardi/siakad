@@ -157,7 +157,7 @@ class BillReminderSender
         // The Qontak template lane (audit T43, rebuilt audit T59): values are
         // rebuilt FRESH from the bill, not replayed from the row's frozen
         // payload - a resend can happen hours after the failure, by which time
-        // the VA pair may have expired at e-SPP or the bill may have been
+        // the reminder VA may have expired at e-SPP or the bill may have been
         // part-paid. Sending the frozen payload would hand the family a dead
         // VA number (or a paid bill's old balance), so the same guard applies
         // as the non-SPP lane below: still open, or no send at all.
@@ -339,11 +339,15 @@ class BillReminderSender
     }
 
     /**
-     * Registers both banks' VA for this bill (idempotent - see
-     * BillingApiGateway::ensureReminderVaPair()) and queues the approved
-     * template with both numbers. Body variables, in order: nama anak, bulan
-     * tagihan, jumlah, VA Muamalat, kode bayar BSI (the VA minus its
-     * 4-digit institution code - 7895 for SPP).
+     * Registers the bill's reminder VA (idempotent - see
+     * BillingApiGateway::ensureReminderVa()) and queues the approved
+     * template with that one number. Body variables, in order: nama anak,
+     * bulan tagihan, jumlah, nomor VA. Single VA since 2026-10-05: the
+     * reminder used to carry both banks' numbers at once, the one lane that
+     * kept two simultaneously live VAs for one bill - and the family that
+     * paid both within seconds lost the excess to a buried overpayment. BSI
+     * remains selectable in the app's checkout; the Qontak template copy
+     * points there (see the template note on services.qontak).
      */
     private function queueSppReminderTemplate(Bill $bill, Guardian $guardian, string $phone): NotificationResult
     {
@@ -357,7 +361,7 @@ class BillReminderSender
             // shown on the failure dashboard - e-SPP being down for half an
             // hour at sweep time erased the whole cohort's reminder. A
             // failed row re-enters through the existing retry lane, whose
-            // resend() rebuilds the VA pair fresh once e-SPP is back.
+            // resend() rebuilds the VA fresh once e-SPP is back.
             NotificationLog::create([
                 'channel' => 'whatsapp',
                 'template' => 'reminder_spp',
@@ -406,7 +410,7 @@ class BillReminderSender
      * Everything a reminder_spp delivery needs, derived from the bill as it
      * stands right now. Shared by the queue-time send and the resend lane so
      * the two can never drift - a resend hours later must reflect the bill's
-     * CURRENT balance and a freshly registered VA pair, not queue-time
+     * CURRENT balance and a freshly registered VA, not queue-time
      * snapshots (audit T59).
      *
      * @return array{error: string}|array{values: list<string>, payload: array<string, string>}
@@ -414,9 +418,9 @@ class BillReminderSender
     private function buildSppReminderValues(Bill $bill, Guardian $guardian): array
     {
         try {
-            $va = $this->billingApi->ensureReminderVaPair($bill, $guardian);
+            $va = $this->billingApi->ensureReminderVa($bill, $guardian);
         } catch (\Throwable $e) {
-            Log::warning('[BillReminderSender] Failed to register VA pair for SPP reminder', [
+            Log::warning('[BillReminderSender] Failed to register a reminder VA', [
                 'bill' => $bill->bill_number,
                 'error' => $e->getMessage(),
             ]);
@@ -424,9 +428,7 @@ class BillReminderSender
             return ['error' => 'Gagal mendaftarkan Virtual Account: '.$e->getMessage()];
         }
 
-        $muamalatVa = $va['muamalat']['va_number'] ?? '';
-        $bsiVa = $va['bsi']['va_number'] ?? '';
-        $bsiPaymentCode = mb_strlen($bsiVa) > 4 ? mb_substr($bsiVa, 4) : $bsiVa;
+        $vaNumber = $va['va_number'] ?? '';
         // The bill's OWN period when it has one (audit T55-b, year fixed
         // 2026-09-28 via Bill::periodDate): issued_at is a printing date,
         // so deriving the YEAR from it labelled a pre-printed January bill
@@ -435,13 +437,13 @@ class BillReminderSender
         $amount = number_format((float) $bill->remaining_amount, 0, ',', '.');
 
         return [
-            'values' => [$bill->student->nama_lengkap, $period, $amount, $muamalatVa, $bsiPaymentCode],
+            'values' => [$bill->student->nama_lengkap, $period, $amount, $vaNumber],
             'payload' => [
                 'student_name' => $bill->student->nama_lengkap,
                 'period' => $period,
                 'amount' => $amount,
-                'va_muamalat' => $muamalatVa,
-                'va_bsi_payment_code' => $bsiPaymentCode,
+                'va_number' => $vaNumber,
+                'bank_name' => $va['bank_name'] ?? '',
             ],
         ];
     }

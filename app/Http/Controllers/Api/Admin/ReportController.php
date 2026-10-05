@@ -80,11 +80,16 @@ class ReportController extends Controller
                 ])->values(),
             // Summed over allocations, not over payments: one payment can cover
             // several fee types and attributing it whole to one would overstate
-            // that type and hide the others.
-            'by_fee_type' => $payments->flatMap(fn (Payment $p) => $p->bills->map(fn ($bill) => [
-                'fee_type' => $bill->feeType->name,
-                'amount' => (float) $bill->pivot->amount,
-            ]))->groupBy('fee_type')->map(fn ($group, $name) => [
+            // that type and hide the others. Unapplied allocations (the
+            // double-booked half of two near-simultaneous VA payments, waiting
+            // on a TU refund) stay excluded from fee-type attribution - while
+            // 'total' and by_method above still count the cash that moved.
+            'by_fee_type' => $payments->flatMap(fn (Payment $p) => $p->bills
+                ->filter(fn ($bill) => (bool) $bill->pivot->applies_to_bill)
+                ->map(fn ($bill) => [
+                    'fee_type' => $bill->feeType->name,
+                    'amount' => (float) $bill->pivot->amount,
+                ]))->groupBy('fee_type')->map(fn ($group, $name) => [
                 'fee_type' => $name,
                 'total' => round((float) collect($group)->sum('amount'), 2),
             ])->values(),
