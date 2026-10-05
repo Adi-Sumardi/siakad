@@ -19,9 +19,11 @@ class UserResource extends JsonResource
             'role' => $this->role,
             'is_active' => $this->is_active,
             'activated_at' => $this->activated_at,
-            // Null until the wali welcome splash has been seen once.
+            // Null until the welcome splash has been seen once (per account,
+            // any role the splash greets).
             'welcomed_at' => $this->welcomed_at,
-            // Null until the wali "Panduan Fitur" tour has been seen once.
+            // Null until the "Panduan Fitur" tour has been seen once (per
+            // account, any role the tour runs for).
             'onboarded_at' => $this->onboarded_at,
             'school_unit' => $this->whenLoaded('schoolUnit', fn () => [
                 'ulid' => $this->schoolUnit->ulid,

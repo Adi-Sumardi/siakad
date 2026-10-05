@@ -23,8 +23,8 @@ class SessionController extends Controller
     }
 
     /**
-     * The wali welcome splash was seen - it shows once per account. Idempotent:
-     * the first time is kept.
+     * The welcome splash was seen - it shows once per account (wali, guru,
+     * admin unit today). Idempotent: the first time is kept.
      */
     public function welcomed(Request $request): JsonResponse
     {
@@ -40,9 +40,10 @@ class SessionController extends Controller
     }
 
     /**
-     * The wali "Panduan Fitur" tour was seen (finished or skipped) - it also
-     * runs once per account, and its automatic offering keys off this the same
-     * way the splash keys off welcomed_at. Idempotent: the first time is kept.
+     * The "Panduan Fitur" tour was seen (finished or skipped) - it also runs
+     * once per account (wali, guru, admin unit today), and its automatic
+     * offering keys off this the same way the splash keys off welcomed_at.
+     * Idempotent: the first time is kept.
      */
     public function onboarded(Request $request): JsonResponse
     {

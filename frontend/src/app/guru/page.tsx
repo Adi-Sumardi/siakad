@@ -2,12 +2,15 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Award, CalendarCheck, ChevronRight, Clock, GraduationCap, School, Star } from "lucide-react";
+import { Award, CalendarCheck, CalendarCheck2, ChevronRight, CircleHelp, ClipboardList, Clock, GraduationCap, School, Star } from "lucide-react";
 import { toast } from "sonner";
+import { GuruFeatureTour } from "@/components/guru/feature-tour";
+import { WelcomeSplash, tidy, type SplashFeature } from "@/components/welcome-splash";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/lib/auth/auth-context";
 import { api, ApiError } from "@/lib/api";
 
 type TodayInfo = {
@@ -34,6 +37,12 @@ function jam(t: string | null): string {
 }
 
 const emptySubscribe = () => () => {};
+
+const GURU_FEATURES: SplashFeature[] = [
+  { icon: CalendarCheck2, text: "Presensi harian & jadwal" },
+  { icon: ClipboardList, text: "Input nilai & rekap kelas" },
+  { icon: Award, text: "Poin & prestasi siswa" },
+];
 
 /**
  * Client-only weekday label for the "Jadwal Hari Ini" heading. The server
@@ -132,8 +141,18 @@ function ClassroomCard({ classroom, today = false }: { classroom: Classroom; tod
 }
 
 export default function GuruClassroomsPage() {
+  const { user, markWelcomed, markOnboarded } = useAuth();
   const [classrooms, setClassrooms] = useState<Classroom[] | null>(null);
+  const [replayOpen, setReplayOpen] = useState(false);
   const dayName = useDayNameToday();
+
+  // Same contract as the wali dashboard: the splash reveals the portal, the
+  // optimistic welcomed_at write flips, and the tour simply follows it. A
+  // guru account created before the tour shipped gets its one run on the
+  // next visit. Gated on user so the splash never flashes while /api/auth/me
+  // is still in flight.
+  const tourOpen = replayOpen || (!!user?.welcomed_at && !user?.onboarded_at);
+  const splashGreeting = user?.name ? `Bapak/Ibu ${tidy(user.name)}` : "Bapak/Ibu Guru";
 
   useEffect(() => {
     let cancelled = false;
@@ -173,6 +192,27 @@ export default function GuruClassroomsPage() {
 
   return (
     <div className="space-y-8">
+      {/* First login only, same as the wali dashboard - welcomed_at is kept
+          per account on the server. */}
+      {user && !user.welcomed_at && (
+        <WelcomeSplash
+          greeting={splashGreeting}
+          intro="satu portal untuk mencatat presensi, nilai, poin kedisiplinan, dan prestasi siswa Anda."
+          features={GURU_FEATURES}
+          onDone={markWelcomed}
+        />
+      )}
+
+      {/* The Panduan Fitur spotlight tour - inside the shell (via the layout)
+          so it can reach the drawer levers through ShellChromeContext. */}
+      <GuruFeatureTour
+        open={tourOpen}
+        onFinish={() => {
+          setReplayOpen(false);
+          void markOnboarded();
+        }}
+      />
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -182,12 +222,24 @@ export default function GuruClassroomsPage() {
           </p>
         </div>
 
-        <Link href="/guru/prestasi">
-          <Button className="gap-2 shadow-xs">
-            <Award className="size-4" />
-            <span>Catat Prestasi Siswa</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            data-tour="tour-replay"
+            onClick={() => setReplayOpen(true)}
+            className="gap-2"
+          >
+            <CircleHelp className="size-4" />
+            <span>Panduan Fitur</span>
           </Button>
-        </Link>
+          <Link href="/guru/prestasi">
+            <Button className="gap-2 shadow-xs">
+              <Award className="size-4" />
+              <span>Catat Prestasi Siswa</span>
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {classrooms === null && (
@@ -210,7 +262,7 @@ export default function GuruClassroomsPage() {
       {classrooms !== null && classrooms.length > 0 && (
         <>
           {/* Section 1: classes that have a schedule today */}
-          <section className="space-y-4">
+          <section data-tour="jadwal-hari-ini" className="space-y-4">
             <div>
               <h2 className="flex items-center gap-1.5 text-base font-bold text-foreground">
                 <CalendarCheck className="size-4.5 text-primary" />
@@ -235,7 +287,7 @@ export default function GuruClassroomsPage() {
           </section>
 
           {/* Section 2: every classroom in the unit */}
-          <section className="space-y-4">
+          <section data-tour="semua-kelas" className="space-y-4">
             <div>
               <h2 className="flex items-center gap-1.5 text-base font-bold text-foreground">
                 <School className="size-4.5 text-primary" />

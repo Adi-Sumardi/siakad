@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
+import { ShellChromeContext } from "@/components/layout/shell-chrome";
 import { UserMenu } from "@/components/layout/user-menu";
 import { WaliBillAlert } from "@/components/layout/wali-bill-alert";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -27,20 +28,6 @@ export const WALI_NAV = [
   { href: "/informasi", label: "Pengumuman", icon: Megaphone, tour: "informasi" },
   { href: "/profil", label: "Profil Akun", icon: User, tour: "profil" },
 ];
-
-/**
- * The feature tour (components/wali/feature-tour.tsx) highlights sidebar items
- * on a phone by opening the mobile drawer itself, so the shell hands it just
- * those two levers - it has no business reading drawer state back.
- */
-type WaliChrome = { openMobileNav: () => void; closeMobileNav: () => void };
-
-export const WaliChromeContext = createContext<WaliChrome | null>(null);
-
-/** For pages that mount the tour inside their own <WaliShell>. */
-export function useWaliChrome(): WaliChrome | null {
-  return useContext(WaliChromeContext);
-}
 
 export function WaliShell({
   children,
@@ -214,11 +201,11 @@ export function WaliShell({
           {/* The provider only needs to wrap children: the feature tour is
               mounted inside them (dashboard), and it is the sole consumer of
               the drawer levers. */}
-          <WaliChromeContext.Provider
+          <ShellChromeContext.Provider
             value={{ openMobileNav: () => setMobileOpen(true), closeMobileNav: () => setMobileOpen(false) }}
           >
             {children}
-          </WaliChromeContext.Provider>
+          </ShellChromeContext.Provider>
         </main>
       </div>
     </div>

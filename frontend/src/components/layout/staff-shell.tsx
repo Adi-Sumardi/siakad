@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, ShieldCheck, X } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
+import { ShellChromeContext } from "@/components/layout/shell-chrome";
 import { UserMenu } from "@/components/layout/user-menu";
 import { useAuth } from "@/lib/auth/auth-context";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,8 @@ export type StaffNavItem = {
   /** Sidebar section heading. Consecutive items sharing one are listed
       under it; an item with none sits at the top without a heading. */
   group?: string;
+  /** data-tour anchor ("nav-<tour>") for the feature tour's spotlight. */
+  tour?: string;
 };
 
 export function StaffShell({
@@ -133,7 +136,14 @@ export function StaffShell({
 
         {/* Fullspan Content Container */}
         <main className="w-full flex-1 max-w-7xl 2xl:max-w-full mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-6 md:py-8">
-          {children}
+          {/* The provider only needs to wrap children, mirroring WaliShell:
+              the feature tour is mounted inside them (a role's home page) and
+              is the sole consumer of the drawer levers. */}
+          <ShellChromeContext.Provider
+            value={{ openMobileNav: () => setMobileOpen(true), closeMobileNav: () => setMobileOpen(false) }}
+          >
+            {children}
+          </ShellChromeContext.Provider>
         </main>
       </div>
     </div>
@@ -181,6 +191,7 @@ function NavSections({
                   key={item.href}
                   href={item.href}
                   onClick={onNavigate}
+                  data-tour={item.tour ? `nav-${item.tour}` : undefined}
                   className={cn(
                     "flex items-center gap-3 rounded-xl px-3.5 py-2 text-sm font-medium transition-all",
                     active

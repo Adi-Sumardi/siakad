@@ -1,22 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Award, Megaphone, Receipt } from "lucide-react";
+import { ArrowRight, type LucideIcon } from "lucide-react";
 
 /** When the hairline under the button has filled (see .splash-fill in globals.css). */
 const AUTO_CONTINUE_MS = 6300;
 const EXIT_MS = 500;
 
-const FEATURES = [
-  { icon: Receipt, text: "Tagihan & pembayaran SPP", delay: "2.4s" },
-  { icon: Award, text: "Poin & prestasi ananda", delay: "2.6s" },
-  { icon: Megaphone, text: "Informasi sekolah & kelas", delay: "2.8s" },
-];
+export type SplashFeature = { icon: LucideIcon; text: string };
 
-type Child = { nama_lengkap: string; nama_panggilan: string | null };
+export type Child = { nama_lengkap: string; nama_panggilan: string | null };
 
 /** PMB hands names over in capitals; a greeting reads better in title case. */
-function tidy(name: string): string {
+export function tidy(name: string): string {
   const trimmed = name.trim();
   if (trimmed !== trimmed.toUpperCase()) return trimmed;
   return trimmed.toLowerCase().replace(/(^|[\s'-])\p{L}/gu, (m) => m.toUpperCase());
@@ -43,12 +39,25 @@ export function childrenLabel(children: Child[]): string {
 }
 
 /**
- * The wali welcome splash (2026-09-30): shown once per account, right after
- * the first login - the session already exists, so "Masuk ke Dashboard" (or
- * waiting for the hairline to fill) simply reveals the dashboard behind it.
- * Design: the "Splash Selamat Datang Siakad" canvas.
+ * The welcome splash (2026-09-30): shown once per account, right after the
+ * first login - the session already exists, so "Masuk ke Dashboard" (or
+ * waiting for the hairline to fill) simply reveals the portal behind it.
+ * Serves every role now (wali, guru, admin unit); each passes its own
+ * greeting, intro tail and feature list. Design: the "Splash Selamat Datang
+ * Siakad" canvas.
  */
-export function WelcomeSplash({ childList, onDone }: { childList: Child[]; onDone: () => void }) {
+export function WelcomeSplash({
+  greeting,
+  intro,
+  features,
+  onDone,
+}: {
+  greeting: string;
+  /** The sentence tail after "Selamat datang di SIAKAD YAPI Al Azhar - ". */
+  intro: React.ReactNode;
+  features: SplashFeature[];
+  onDone: () => void;
+}) {
   const [leaving, setLeaving] = useState(false);
   const finished = useRef(false);
 
@@ -75,7 +84,6 @@ export function WelcomeSplash({ childList, onDone }: { childList: Child[]; onDon
     };
   }, [finish]);
 
-  const greeting = childList.length > 0 ? `Orang Tua/Wali Ananda ${childrenLabel(childList)}` : "Orang Tua/Wali Murid";
   const delay = (value: string) => ({ "--splash-delay": value }) as React.CSSProperties;
 
   return (
@@ -158,17 +166,16 @@ export function WelcomeSplash({ childList, onDone }: { childList: Child[]; onDon
             {greeting}
           </h1>
           <p className="splash-in max-w-[560px] text-[15px] leading-relaxed text-white/80 sm:text-lg" style={delay("1.9s")}>
-            Selamat datang di <span className="font-semibold text-white">SIAKAD YAPI Al Azhar</span> - satu portal untuk
-            memantau perkembangan ananda bersama keluarga besar sekolah YAPI.
+            Selamat datang di <span className="font-semibold text-white">SIAKAD YAPI Al Azhar</span> - {intro}
           </p>
 
           {/* Dropped on a short phone (e.g. 375x667) so the button stays in view. */}
-        <ul className="mt-7 flex w-full flex-col gap-2.5 sm:mt-10 sm:w-auto sm:flex-row sm:gap-3 [@media(max-height:720px)]:hidden">
-            {FEATURES.map((feature) => (
+          <ul className="mt-7 flex w-full flex-col gap-2.5 sm:mt-10 sm:w-auto sm:flex-row sm:gap-3 [@media(max-height:720px)]:hidden">
+            {features.map((feature, i) => (
               <li
                 key={feature.text}
                 className="splash-in flex items-center gap-3 rounded-[14px] border border-white/15 bg-white/[0.08] py-2.5 pl-2.5 pr-3.5 text-sm text-white/90 sm:gap-2.5 sm:rounded-full sm:pr-4"
-                style={delay(feature.delay)}
+                style={delay(`${(2.4 + i * 0.2).toFixed(1)}s`)}
               >
                 <span className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-white/[0.12]">
                   <feature.icon className="size-[15px]" />
@@ -181,7 +188,7 @@ export function WelcomeSplash({ childList, onDone }: { childList: Child[]; onDon
           <div className="splash-in mt-8 flex w-full flex-col items-center gap-4 sm:mt-12 sm:w-auto sm:gap-[18px]" style={delay("3.3s")}>
             <button
               type="button"
-                onClick={finish}
+              onClick={finish}
               className="flex h-[50px] w-full items-center justify-center gap-2.5 rounded-xl bg-white px-[26px] text-[15px] font-semibold text-[#13286B] shadow-[0_10px_30px_rgba(6,14,44,0.35)] outline-none transition-transform hover:-translate-y-px focus-visible:ring-4 focus-visible:ring-[#D8B45A]/60 sm:h-12 sm:w-auto"
             >
               Masuk ke Dashboard

@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ChevronRight, Wallet, X } from "lucide-react";
+import { AlertTriangle, ChevronRight, CircleHelp, GraduationCap, Megaphone, Receipt, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
+import { AdminUnitFeatureTour } from "@/components/admin/feature-tour";
+import { WelcomeSplash, tidy, type SplashFeature } from "@/components/welcome-splash";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -109,6 +111,12 @@ type FailureSummary = { failed_24h: number; failed_7d: number; exhausted_7d: num
 const num = (n: number) => new Intl.NumberFormat("id-ID").format(n);
 const SEVERITY_ORDER = { bad: 0, warn: 1, good: 2 } as const;
 
+const ADMIN_FEATURES: SplashFeature[] = [
+  { icon: GraduationCap, text: "Data siswa & kelas" },
+  { icon: Receipt, text: "Tagihan & keuangan SPP" },
+  { icon: Megaphone, text: "Pengumuman & kesiswaan" },
+];
+
 /**
  * Ringkasan (redesigned 2026-09-24): one screen answering three questions -
  * how is the money coming in, what needs doing today, which unit is behind.
@@ -117,13 +125,23 @@ const SEVERITY_ORDER = { bad: 0, warn: 1, good: 2 } as const;
  * away in the unit panel and in each module's own menu.
  */
 export default function AdminHomePage() {
-  const { user } = useAuth();
+  const { user, markWelcomed, markOnboarded } = useAuth();
   const [data, setData] = useState<SummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [billingPeriod, setBillingPeriod] = useState<"year" | "all">("year");
   const [switching, setSwitching] = useState(false);
   const [failures, setFailures] = useState<FailureSummary | null>(null);
   const [openUnit, setOpenUnit] = useState<UnitSummary | null>(null);
+  const [replayOpen, setReplayOpen] = useState(false);
+
+  // The splash and the tour are a unit-admin affair for now: central admin
+  // knows the building. Same sequencing as the wali dashboard - the splash
+  // reveals the portal, the optimistic welcomed_at write flips, the tour
+  // follows. Gated on the role so nothing flashes while /api/auth/me is
+  // still in flight.
+  const isUnitAdmin = user?.role === "admin_unit";
+  const tourOpen = isUnitAdmin && (replayOpen || (!!user?.welcomed_at && !user?.onboarded_at));
+  const splashGreeting = user?.name ? `Bapak/Ibu ${tidy(user.name)}` : "Bapak/Ibu Admin Unit";
 
   useEffect(() => {
     let cancelled = false;
@@ -189,6 +207,27 @@ export default function AdminHomePage() {
 
   return (
     <div className="space-y-6">
+      {/* First login only, same as the wali dashboard - welcomed_at is kept
+          per account on the server. Unit admin only. */}
+      {isUnitAdmin && !user?.welcomed_at && (
+        <WelcomeSplash
+          greeting={splashGreeting}
+          intro="satu portal untuk mengelola siswa, tagihan SPP, dan kegiatan unit Anda."
+          features={ADMIN_FEATURES}
+          onDone={markWelcomed}
+        />
+      )}
+
+      {/* The Panduan Fitur spotlight tour - inside the shell (via the layout)
+          so it can reach the drawer levers through ShellChromeContext. */}
+      <AdminUnitFeatureTour
+        open={tourOpen}
+        onFinish={() => {
+          setReplayOpen(false);
+          void markOnboarded();
+        }}
+      />
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
@@ -198,11 +237,25 @@ export default function AdminHomePage() {
             {data?.period.term_label && ` · Semester ${data.period.term_label}`}
           </p>
         </div>
-        <Link href="/admin/generate">
-          <Button className="gap-2 font-bold text-xs">
-            <Wallet className="size-4" /> Terbitkan SPP
-          </Button>
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          {isUnitAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              data-tour="tour-replay"
+              onClick={() => setReplayOpen(true)}
+              className="gap-2"
+            >
+              <CircleHelp className="size-4" />
+              <span>Panduan Fitur</span>
+            </Button>
+          )}
+          <Link href="/admin/generate">
+            <Button className="gap-2 font-bold text-xs">
+              <Wallet className="size-4" /> Terbitkan SPP
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Four numbers */}
@@ -214,7 +267,7 @@ export default function AdminHomePage() {
         </div>
       ) : (
         <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div data-tour="kpi-grid" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Kpi
               label="Siswa aktif"
               value={num(kpi.students_active)}
@@ -254,7 +307,7 @@ export default function AdminHomePage() {
       )}
 
       {/* What needs doing */}
-      <Card className="p-5 border-border/80 shadow-xs">
+      <Card data-tour="tindak-lanjut" className="p-5 border-border/80 shadow-xs">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-base font-bold text-foreground">Perlu tindak lanjut</h2>
           {!loading && alerts.length > 0 && <Badge variant="warn">{alerts.length} hal</Badge>}

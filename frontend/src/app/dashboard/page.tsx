@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   ArrowRight,
+  Award,
   ChevronRight,
   CircleHelp,
   CreditCard,
@@ -14,8 +15,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { WaliShell } from "@/components/layout/wali-shell";
-import { FeatureTour } from "@/components/wali/feature-tour";
-import { WelcomeSplash } from "@/components/welcome-splash";
+import { WaliFeatureTour } from "@/components/wali/feature-tour";
+import { WelcomeSplash, childrenLabel, type SplashFeature } from "@/components/welcome-splash";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -39,6 +40,12 @@ type Student = {
   poin: { balance: number; threshold: PointThresholdInfo | null } | null;
   tunggakan: number;
 };
+
+const WALI_FEATURES: SplashFeature[] = [
+  { icon: Receipt, text: "Tagihan & pembayaran SPP" },
+  { icon: Award, text: "Poin & prestasi ananda" },
+  { icon: Megaphone, text: "Informasi sekolah & kelas" },
+];
 
 export default function DashboardPage() {
   const { user, loading } = useRequireRole("orangtua");
@@ -67,6 +74,11 @@ export default function DashboardPage() {
   }, [user]);
 
   const totalTunggakan = students?.reduce((sum, s) => sum + s.tunggakan, 0) ?? 0;
+  // The splash greeting: names of the children, as before the splash was
+  // generalized - the students may still be loading when it first paints,
+  // and the plain fallback covers that moment.
+  const splashGreeting =
+    students && students.length > 0 ? `Orang Tua/Wali Ananda ${childrenLabel(students)}` : "Orang Tua/Wali Murid";
   // "Perlu perhatian" means the band signals TROUBLE (audit T67-b): a
   // negative balance or a warn/bad band. The old any-threshold filter
   // counted children sitting in a positive appreciation band too.
@@ -90,13 +102,20 @@ export default function DashboardPage() {
       {/* First login only - welcomed_at is kept per account on the server.
           Shown straight away; the children's names fill in before the
           greeting line animates in (1.5 s). */}
-      {!user.welcomed_at && <WelcomeSplash childList={students ?? []} onDone={markWelcomed} />}
+      {!user.welcomed_at && (
+        <WelcomeSplash
+          greeting={splashGreeting}
+          intro="satu portal untuk memantau perkembangan ananda bersama keluarga besar sekolah YAPI."
+          features={WALI_FEATURES}
+          onDone={markWelcomed}
+        />
+      )}
 
       {/* The Panduan Fitur spotlight tour - inside the shell so it can reach
-          the drawer levers through WaliChromeContext. markOnboarded's
+          the drawer levers through ShellChromeContext. markOnboarded's
           optimistic write is what turns the automatic run off, on both the
           auto and the replay path. */}
-      <FeatureTour
+      <WaliFeatureTour
         open={tourOpen}
         onFinish={() => {
           setReplayOpen(false);

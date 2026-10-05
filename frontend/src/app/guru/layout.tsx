@@ -8,11 +8,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { homePathFor, useAuth } from "@/lib/auth/auth-context";
 
 const NAV: StaffNavItem[] = [
-  { href: "/guru", label: "Kelas saya", icon: School },
-  { href: "/guru/presensi-harian", label: "Presensi Harian", icon: CalendarCheck2 },
-  { href: "/guru/nilai", label: "Nilai", icon: ClipboardList },
-  { href: "/guru/prestasi", label: "Catat prestasi", icon: Award },
-  { href: "/guru/ekskul", label: "Ekskul Saya", icon: Trophy },
+  { href: "/guru", label: "Kelas saya", icon: School, tour: "kelas" },
+  { href: "/guru/presensi-harian", label: "Presensi Harian", icon: CalendarCheck2, tour: "presensi-harian" },
+  { href: "/guru/nilai", label: "Nilai", icon: ClipboardList, tour: "nilai" },
+  { href: "/guru/prestasi", label: "Catat prestasi", icon: Award, tour: "prestasi" },
+  { href: "/guru/ekskul", label: "Ekskul Saya", icon: Trophy, tour: "ekskul" },
 ];
 
 export default function GuruLayout({ children }: { children: React.ReactNode }) {

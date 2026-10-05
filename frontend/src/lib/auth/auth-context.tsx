@@ -10,9 +10,9 @@ export type User = {
   phone?: string | null;
   role: "admin" | "admin_unit" | "guru" | "orangtua";
   is_active: boolean;
-  /** Null until the wali welcome splash has been seen once (per account). */
+  /** Null until the welcome splash has been seen once (per account). */
   welcomed_at?: string | null;
-  /** Null until the wali "Panduan Fitur" tour has been seen once (per account). */
+  /** Null until the "Panduan Fitur" tour has been seen once (per account). */
   onboarded_at?: string | null;
   school_unit?: { ulid: string; code: string; label: string } | null;
 };
@@ -48,9 +48,11 @@ type AuthContextValue = {
   logout: () => Promise<void>;
   /** Adopts a session the server already started - used by the activation link. */
   adopt: (user: User) => void;
-  /** Records that the welcome splash was seen, so it never shows again for this account. */
+  /** Records that the welcome splash was seen, so it never shows again for
+   *  this account (wali, guru, and admin unit are greeted today). */
   markWelcomed: () => Promise<void>;
-  /** Records that the feature tour was seen (finished or skipped), once per account. */
+  /** Records that the feature tour was seen (finished or skipped), once per
+   *  account (wali, guru, and admin unit run it today). */
   markOnboarded: () => Promise<void>;
 };
 
@@ -97,7 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const markWelcomed = useCallback(async () => {
     // Hidden right away either way - a failed call only means it may show
-    // once more on the next login, never that the parent is stuck behind it.
+    // once more on the next login, never that the user is stuck behind it.
     setUser((current) => (current ? { ...current, welcomed_at: current.welcomed_at ?? new Date().toISOString() } : current));
     try {
       const { user } = await api.post<{ user: User }>("/api/auth/welcomed");
@@ -108,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const markOnboarded = useCallback(async () => {
-    // Same contract as markWelcomed: the tour never traps the parent behind
+    // Same contract as markWelcomed: the tour never traps the user behind
     // it, and a failed call just means it may be offered once more later.
     setUser((current) => (current ? { ...current, onboarded_at: current.onboarded_at ?? new Date().toISOString() } : current));
     try {
