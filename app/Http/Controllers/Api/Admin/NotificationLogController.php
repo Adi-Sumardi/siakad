@@ -40,7 +40,7 @@ class NotificationLogController extends Controller
             ->when(in_array($channel, ['email', 'whatsapp'], true), fn ($q) => $q->where('channel', $channel))
             ->orderByDesc('created_at')
             ->orderByDesc('id')
-            ->paginate($request->integer('per_page', 20));
+            ->paginate(\App\Support\PerPage::clamp($request, 20));
 
         return response()->json(['notifications' => [
             'data' => $logs->getCollection()->map(fn (NotificationLog $log) => $this->row($log)),

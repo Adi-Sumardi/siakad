@@ -60,7 +60,7 @@ class UserController extends Controller
             ->when($request->has('is_active') && $request->input('is_active') !== '', fn ($q) => $q->where('is_active', $request->boolean('is_active')))
             ->orderBy('role')
             ->orderBy('name')
-            ->paginate($request->integer('per_page', 20));
+            ->paginate(\App\Support\PerPage::clamp($request, 20));
 
         return response()->json([
             'users' => [

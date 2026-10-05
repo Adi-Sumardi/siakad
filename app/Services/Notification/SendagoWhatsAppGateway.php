@@ -2,6 +2,7 @@
 
 namespace App\Services\Notification;
 
+use App\Models\NotificationLog;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -30,8 +31,10 @@ class SendagoWhatsAppGateway implements WhatsAppGateway
 
         if (empty($baseUrl) || empty($apiKey)) {
             Log::info('[SendagoWhatsAppGateway] Credentials not configured, logging instead of sending.', [
-                'phone' => $phone,
-                'message' => $message,
+                // Masked, and no message body (audit 2026-10-05): free-text
+                // messages can carry names and amounts; the log row in
+                // notification_logs is the encrypted record that matters.
+                'phone' => NotificationLog::maskRecipient($phone),
             ]);
 
             return NotificationResult::ok(['mode' => 'log-only']);
@@ -46,14 +49,14 @@ class SendagoWhatsAppGateway implements WhatsAppGateway
                 ]);
 
             if ($response->failed()) {
-                Log::warning('[SendagoWhatsAppGateway] Send failed', ['phone' => $phone, 'error' => $response->body()]);
+                Log::warning('[SendagoWhatsAppGateway] Send failed', ['phone' => NotificationLog::maskRecipient($phone), 'error' => $response->body()]);
 
                 return NotificationResult::fail($response->body());
             }
 
             return NotificationResult::ok($response->json() ?: []);
         } catch (\Throwable $e) {
-            Log::warning('[SendagoWhatsAppGateway] Send failed', ['phone' => $phone, 'error' => $e->getMessage()]);
+            Log::warning('[SendagoWhatsAppGateway] Send failed', ['phone' => NotificationLog::maskRecipient($phone), 'error' => $e->getMessage()]);
 
             return NotificationResult::fail($e->getMessage());
         }

@@ -95,7 +95,7 @@ class StudentController extends Controller
                     ->when($selectedYear, fn ($eq) => $eq->where('academic_year_id', $selectedYear->id))
                     ->with('classroom.homeroomTeacher'),
             ])
-            ->paginate($request->integer('per_page', 20));
+            ->paginate(\App\Support\PerPage::clamp($request, 20));
 
         // Totals pass over the whole filtered set, but with only the columns
         // pricing reads (school_unit_id + the enrollment's tingkat) - no

@@ -437,7 +437,15 @@ class BillReminderSender
         $amount = number_format((float) $bill->remaining_amount, 0, ',', '.');
 
         return [
-            'values' => [$bill->student->nama_lengkap, $period, $amount, $vaNumber],
+            // Padding for the transitional 5-variable Qontak template (see
+            // services.qontak.spp_reminder_placeholder_vars): a count
+            // mismatch fails the whole broadcast and burns the beat, so the
+            // code pads until the school's template edit lands. Drop the
+            // config to 0 once Qontak matches the 4-variable copy.
+            'values' => array_merge(
+                [$bill->student->nama_lengkap, $period, $amount, $vaNumber],
+                array_fill(0, max(0, (int) config('services.qontak.spp_reminder_placeholder_vars', 1)), ''),
+            ),
             'payload' => [
                 'student_name' => $bill->student->nama_lengkap,
                 'period' => $period,

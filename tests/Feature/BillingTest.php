@@ -73,7 +73,7 @@ class BillingTest extends TestCase
         ]);
     }
 
-    private function rate(float $amount = 650000, ?int $tingkat = null, ?FeeType $type = null): FeeRate
+    private function rate(float $amount = 650000, ?int $tingkat = null, ?FeeType $type = null, float $lateFee = 0, int $graceDays = 0): FeeRate
     {
         return FeeRate::create([
             'fee_type_id' => ($type ?? $this->spp)->id,
@@ -82,6 +82,8 @@ class BillingTest extends TestCase
             'tingkat' => $tingkat,
             'amount' => $amount,
             'due_day' => 10,
+            'late_fee_amount' => $lateFee,
+            'late_fee_grace_days' => $graceDays,
         ]);
     }
 
@@ -444,6 +446,11 @@ class BillingTest extends TestCase
         // the suite runs - a past-due partly-paid bill is 'overdue' now.
         $bill->forceFill(['due_date' => now()->addDays(7)->startOfDay()])->save();
 
+        // Part payments are the installment lane (audit 2026-10-05): the
+        // server now refuses a custom amount on a bill whose fee type was
+        // not marked allow_installment, so the subject bill opts in.
+        $bill->forceFill(['allow_installment' => true])->save();
+
         // Payment is VA-only now, so a part payment is a custom-amount VA
         // checkout the bank then reports settled.
         $payment = app(CheckoutService::class)->start(
@@ -458,6 +465,79 @@ class BillingTest extends TestCase
         $this->assertSame('partial', $bill->status);
         $this->assertEquals(450000.0, (float) $bill->remaining_amount);
         $this->assertNull($bill->paid_at);
+    }
+
+    public function test_a_full_only_bill_refuses_a_custom_amount(): void
+    {
+        $this->rate();
+        $student = $this->student();
+        $user = $this->guardianFor($student);
+        $this->generator()->run($this->spp, $this->year, $this->unit, 8);
+
+        $bill = Bill::first();
+
+        // The browser's form gate was the only enforcement before audit
+        // 2026-10-05 - the API must refuse on its own for a fee type the
+        // school never marked payable in installments.
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('hanya dapat dibayar penuh');
+
+        app(CheckoutService::class)->start($user, [$bill->ulid], 'virtual_account', [$bill->ulid => 200000]);
+    }
+
+    public function test_the_late_fee_is_charged_once_after_the_grace_window(): void
+    {
+        // The school's denda config finally has a reader (audit 2026-10-05):
+        // flat 25k after a 3-day grace, once, however often the sweep fires.
+        $this->rate(650000, lateFee: 25000, graceDays: 3);
+        $student = $this->student();
+        $this->guardianFor($student);
+        $this->generator()->run($this->spp, $this->year, $this->unit, 8);
+
+        $bill = Bill::first();
+        // Due day 10 of August - pin it past grace so the test is
+        // date-independent.
+        $bill->forceFill([
+            'due_date' => now()->subDays(10)->toDateString(),
+            'grace_period_end' => now()->subDays(7)->toDateString(),
+        ])->save();
+
+        // Preview writes nothing.
+        $this->artisan('bills:apply-late-fees')->assertSuccessful();
+        $this->assertSame(0.0, (float) $bill->fresh()->late_fee);
+
+        $this->artisan('bills:apply-late-fees', ['--apply' => true])->assertSuccessful();
+        $bill = $bill->fresh();
+        $this->assertSame(25000.0, (float) $bill->late_fee);
+        $this->assertSame(675000.0, (float) $bill->total_amount);
+        $this->assertSame(675000.0, (float) $bill->remaining_amount);
+        $this->assertSame('overdue', $bill->status);
+
+        // Idempotent: a second sweep charges nothing further.
+        $this->artisan('bills:apply-late-fees', ['--apply' => true])->assertSuccessful();
+        $this->assertSame(25000.0, (float) $bill->fresh()->late_fee);
+        $this->assertSame(675000.0, (float) $bill->fresh()->total_amount);
+
+        // Inside the grace window, nothing is charged.
+        $fresh = Bill::create([
+            'bill_number' => 'SPP/2026/11/GRACE',
+            'dedup_key' => 'spp:2026:11:'.$student->id,
+            'description' => 'SPP Bulan November 2026',
+            'student_id' => $student->id,
+            'academic_year_id' => $this->year->id,
+            'fee_type_id' => $this->spp->id,
+            'fee_rate_id' => $bill->fee_rate_id,
+            'subtotal' => 650000,
+            'total_amount' => 650000,
+            'remaining_amount' => 650000,
+            'status' => 'unpaid',
+            'due_date' => now()->subDays(1)->toDateString(),
+            'grace_period_end' => now()->addDays(2)->toDateString(),
+            'issued_at' => now(),
+        ]);
+
+        $this->artisan('bills:apply-late-fees', ['--apply' => true])->assertSuccessful();
+        $this->assertSame(0.0, (float) $fresh->fresh()->late_fee);
     }
 
     public function test_settling_the_same_payment_twice_does_not_double_count(): void

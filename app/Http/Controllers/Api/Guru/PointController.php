@@ -77,14 +77,23 @@ class PointController extends Controller
 
         [$student, $rule, $term] = $this->resolve($request, $validated);
 
+        // Stored before the row (the ledger takes the path), deleted again if
+        // the row never lands - an insert failure used to leave the evidence
+        // file orphaned on the private disk (audit 2026-10-05).
+        $evidencePath = $this->storeEvidence($request);
+
         try {
             $record = $ledger->record(
                 $student, $term, $rule, $request->user(),
                 Carbon::parse($validated['occurred_on']), $validated['description'],
-                $this->storeEvidence($request),
+                $evidencePath,
                 $request->file('evidence')?->getClientOriginalName(),
             );
         } catch (RuntimeException $e) {
+            if ($evidencePath) {
+                Storage::disk('local')->delete($evidencePath);
+            }
+
             return response()->json(['message' => $e->getMessage()], 422);
         }
 

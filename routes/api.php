@@ -338,8 +338,12 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     // filterable payment history, the per-payment receipt PDF, and the
     // lazy-minted public receipt link.
     Route::get('/payments', [PaymentHistoryController::class, 'index']);
+    Route::get('/payments/overpayments', [PaymentHistoryController::class, 'overpayments']);
     Route::get('/payments/{ulid}/receipt', [PaymentHistoryController::class, 'receiptPdf']);
     Route::post('/payments/{ulid}/share-link', [PaymentHistoryController::class, 'shareLink']);
+    // The overpayment refund lane (audit 2026-10-05): worklist + one-shot
+    // decision on TU's side, once the bank transfer has actually gone out.
+    Route::post('/payments/{ulid}/refund', [PaymentHistoryController::class, 'refund']);
 
     Route::get('/achievements', [AdminAchievementController::class, 'index']);
     Route::post('/achievements/{ulid}/verify', [AdminAchievementController::class, 'verify']);

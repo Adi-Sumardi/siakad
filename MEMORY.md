@@ -48,8 +48,8 @@
 ---
 
 ## 💳 Fitur Keuangan & Pembayaran Lainnya
-- **Gateway**: Multi-Bank Virtual Account (e-SPP), SendagoPay Checkout & QRIS Invoices.
-- **Inbound Webhook Endpoint**: `https://siakad.yapinet.id/api/webhooks/sendagopay` & `https://siakad.yapinet.id/api/payment-webhook/{uuid}`
+- **Gateway**: Multi-Bank Virtual Account via e-SPP (Bank Muamalat & BSI) — satu-satunya jalur pembayaran online; SendagoPay/Xendit sudah tidak dipakai.
+- **Inbound Webhook Endpoint**: `https://siakad.yapinet.id/api/payment-webhook/{uuid}` (callback e-SPP; diverifikasi live karena tanpa signature)
 - **Multi-Payment**: Wali murid dapat memilih banyak tagihan (multi-bulan per anak) dan membayar sekaligus dalam 1x checkout.
 - **Custom / Partial Payment**: Mendukung pembayaran cicilan atau nominal custom per tagihan (`allow_installment = true`).
 - **Kelola SPP & Tarif**: `/admin/tarif` (Katalog jenis biaya, tarif per unit, per tingkat, per tahun ajaran, modal kelola tahun ajaran, dan import tarif CSV).

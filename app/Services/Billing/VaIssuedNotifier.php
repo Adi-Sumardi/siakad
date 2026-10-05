@@ -121,8 +121,16 @@ class VaIssuedNotifier
             return NotificationResult::fail('Pembayaran tanpa wali untuk diberitahu.');
         }
 
+        // Re-resolve the CURRENT phone (audit 2026-10-05): the frozen row
+        // recipient is null exactly in the case that produced the failed
+        // row (no number at the time), and retrying to '' just burns the
+        // attempt budget on "Nomor WhatsApp tidak valid".
+        if (! filled($payment->payer->no_hp)) {
+            return NotificationResult::fail('Wali masih belum punya nomor WhatsApp - perbaiki data kontak dulu.');
+        }
+
         return $this->whatsapp->sendMessage(
-            $log->recipient ?? '',
+            (string) $payment->payer->no_hp,
             $this->message($this->dataFor($payment, $payment->payer)),
         );
     }

@@ -73,6 +73,13 @@ class PollBillingVaPayments extends Command
 
                     $settledCount++;
 
+                    // A settle here often answers a webhook verification that
+                    // failed earlier (audit 2026-10-05): close those stale
+                    // failed rows so the failed set stays "needs a human".
+                    if ($result->claimed) {
+                        \App\Models\IntegrationEvent::resolveFailedCallbacksFor($payment->fresh());
+                    }
+
                     if ($result->overpaid) {
                         // The bill was already covered by another completed
                         // payment - settle() refused to double-book and the
@@ -104,9 +111,13 @@ class PollBillingVaPayments extends Command
         // expireVa() cannot actually close it there (see its docblock) - the
         // query above only ever looks at pending/processing rows, so without
         // this a late payment on an abandoned VA would go completely
-        // unnoticed. Bounded to the window the VA itself was still valid
-        // for; past that e-SPP's own date_end should have closed it
-        // regardless of our side.
+        // unnoticed. Bounded to services.billing_api.superseded_watch_days
+        // (audit 2026-10-05 P0): the old hardcoded 7 days was shorter than
+        // the real exposure - a family paying a months-old WhatsApp VA at
+        // month end landed outside the net entirely, and e-SPP's date_end
+        // has already proven it cannot be trusted to close a VA on its own.
+        $watchDays = max(7, (int) config('services.billing_api.superseded_watch_days', 60));
+
         $superseded = Payment::query()
             // 'expired' included (audit T67-e): the poller itself stamps it,
             // and e-SPP's date_end has already proven unreliable at closing
@@ -117,7 +128,7 @@ class PollBillingVaPayments extends Command
                 $q->whereIn('gateway_response->provider', ['bank_muamalat', 'bank_bsi'])
                     ->orWhereNotNull('gateway_response->va_number');
             })
-            ->where('expires_at', '>', now()->subDays(7))
+            ->where('expires_at', '>', now()->subDays($watchDays))
             // Same guard as the pending query above (audit T38-a): the
             // default --limit=0 means "unbounded", and a bare ->limit(0)
             // compiles to LIMIT 0 - which returned nothing and silently kept

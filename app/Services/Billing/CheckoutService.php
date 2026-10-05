@@ -105,6 +105,16 @@ class CheckoutService
             $charge = $remaining;
 
             if (isset($customAmounts[$bill->ulid])) {
+                // Server-side, not just the portal's form (audit 2026-10-05):
+                // a bill the school marked "pay in full" accepts no partial
+                // amount through the API either - the browser gate was the
+                // only thing enforcing it.
+                if (! $bill->allow_installment) {
+                    throw new RuntimeException(
+                        "Tagihan '{$bill->description}' hanya dapat dibayar penuh - pembayaran sebagian tidak diaktifkan untuk tagihan ini."
+                    );
+                }
+
                 $custom = round((float) $customAmounts[$bill->ulid]);
                 // The portal's own form floor, enforced server-side too
                 // (audit T67-d): the browser min is only a hint, and a
@@ -126,15 +136,20 @@ class CheckoutService
 
         $amount = round($amount, 2);
 
-        // One registration per (student, fee type, year, bank) at a time
+        // One registration per (student, fee type, year) at a time
         // (audit T39-d): the VA number is deterministic, so two parallel
         // checkouts minted two e-SPP bills carrying the SAME number before
-        // either superseded the other. A short cache mutex serialises the
-        // mint; best-effort by design - the partial uniques and the
-        // payment_number retry remain the backstop.
+        // either superseded the other. BANK-AGNOSTIC since 2026-10-05: the
+        // key used to end in the bank, so a Muamalat checkout and a BSI
+        // checkout for the same group took two different mutexes and both
+        // sailed past the supersede guards - two simultaneously live VAs
+        // for one bill, the exact state this lock exists to prevent. A
+        // short cache mutex serialises the mint; best-effort by design -
+        // the partial uniques and the payment_number retry remain the
+        // backstop.
         $primary = $bills->first();
         $mintLock = \Illuminate\Support\Facades\Cache::lock(
-            'va-mint:'.$primary->student_id.':'.$primary->fee_type_id.':'.$primary->academic_year_id.':'.$selectedBank,
+            'va-mint:'.$primary->student_id.':'.$primary->fee_type_id.':'.$primary->academic_year_id,
             30,
         );
 
@@ -173,6 +188,16 @@ class CheckoutService
 
                 return $payment;
             });
+
+            // Second supersede pass, AFTER our Payment row has committed
+            // (audit 2026-10-05): the pre-transaction pass above cannot see
+            // a sibling checkout whose Payment row had not committed yet -
+            // with the bank-scoped mint lock gone, that sibling could be on
+            // the other bank and both would leave live VAs. Failing every
+            // OTHER pending payment on these bills once ours exists (and
+            // before our VA is registered) closes the cross-bank window to
+            // the width of this one statement.
+            $this->supersedePendingPaymentsFor($bills, $payment->id);
 
             // Outside the transaction: the gateway is a network call
             try {
@@ -343,7 +368,16 @@ class CheckoutService
             // The money exists - book it under the payment that earned it.
             // settle() keeps the payment's own external id and gateway
             // response when handed empties.
-            $this->allocator->settle($stale);
+            $result = $this->allocator->settle($stale);
+
+            // Not the winner of the claim (audit 2026-10-05): another lane
+            // already booked or failed this row - the money is accounted
+            // for either way, so say nothing and let the supersede continue
+            // instead of aborting the checkout with a misleading "baru
+            // saja dibukukan" for a bill that may still be payable.
+            if (! $result->claimed) {
+                return;
+            }
 
             throw new RuntimeException(
                 'Pembayaran Virtual Account sebelumnya terdeteksi sudah dibayar dan baru saja dibukukan. Silakan muat ulang halaman tagihan.'
@@ -373,6 +407,8 @@ class CheckoutService
     /**
      * Fails every still-pending or still-processing payment that touches any
      * of these bills, so at most one live invoice ever exists per bill.
+     * $excludePaymentId keeps the just-committed checkout's OWN payment out
+     * of the sweep on the second (post-commit) pass.
      *
      * VA payments are asked about at the bank first - the same
      * settleStaleIfAlreadyPaid() guard voidPendingPaymentsFor() carries
@@ -382,11 +418,12 @@ class CheckoutService
      *
      * @param  Collection<int, Bill>  $bills
      */
-    private function supersedePendingPaymentsFor(Collection $bills): void
+    private function supersedePendingPaymentsFor(Collection $bills, ?int $excludePaymentId = null): void
     {
         $paymentIds = PaymentAllocation::whereIn('bill_id', $bills->pluck('id'))
             ->pluck('payment_id')
-            ->unique();
+            ->unique()
+            ->reject(fn ($id) => $id === $excludePaymentId);
 
         Payment::whereIn('id', $paymentIds)
             ->whereIn('status', ['pending', 'processing'])

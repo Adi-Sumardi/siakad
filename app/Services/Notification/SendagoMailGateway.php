@@ -2,6 +2,7 @@
 
 namespace App\Services\Notification;
 
+use App\Models\NotificationLog;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -30,10 +31,15 @@ class SendagoMailGateway implements MailGateway
         $secret = config('services.sendagomail.secret');
 
         if (empty($baseUrl) || empty($memberId) || empty($secret)) {
+            // Masked, and the OTP code redacted (audit 2026-10-05): this
+            // branch is exactly what a misconfigured production box hits,
+            // and it used to write every recipient address and - for the
+            // login templates - a WORKING OTP into laravel.log, where
+            // backups and log shippers read it.
             Log::info('[SendagoMailGateway] Credentials not configured, logging email instead of sending.', [
-                'to' => $to,
+                'to' => NotificationLog::maskRecipient($to),
                 'template' => $template,
-                'data' => $data,
+                'data' => array_diff_key($data, array_flip(['code', 'otp', 'token', 'password'])),
             ]);
 
             return NotificationResult::ok(['mode' => 'log-only']);

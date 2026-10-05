@@ -108,7 +108,7 @@ class BillController extends Controller
             ->visibleTo($request->user())
             ->with(['bills.feeType', 'bills.student.schoolUnit'])
             ->latest()
-            ->paginate($request->integer('per_page', 50));
+            ->paginate(\App\Support\PerPage::clamp($request, 50));
 
         return response()->json(['payments' => PaymentResource::collection($payments)->response()->getData(true)]);
     }

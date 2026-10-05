@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\EnsureUserHasRole;
 use App\Http\Middleware\EnsureUserIsActive;
+use App\Http\Middleware\RestrictToIpRanges;
 use App\Http\Middleware\VerifyPmbSignature;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -24,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => EnsureUserHasRole::class,
             'active' => EnsureUserIsActive::class,
             'pmb.signature' => VerifyPmbSignature::class,
+            'ip.allowlist' => RestrictToIpRanges::class,
         ]);
 
         // The signature is computed over the raw body, so nothing may rewrite

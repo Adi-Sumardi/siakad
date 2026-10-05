@@ -107,9 +107,24 @@ bukan 403).
 | GET | `/api/admin/bills/{ulid}/pdf` | |
 | POST | `/api/admin/bills/{ulid}/waive` | `{reason}` wajib |
 | POST | `/api/admin/bills/{ulid}/cancel` | `{reason}` wajib; ditolak bila sudah ada pembayaran masuk |
-| POST | `/api/admin/bills/{ulid}/payments` | catat tunai/transfer yang sudah dikonfirmasi — langsung lunas lewat `PaymentAllocator` |
 | GET | `/api/admin/reports/receivables` | tunggakan, dikelompokkan per kelas |
 | GET | `/api/admin/reports/collections` | penerimaan per metode & jenis biaya, rentang tanggal bebas |
+
+### Keuangan — VA, riwayat pembayaran & refund overpayment
+
+Pembayaran online hanya lewat Virtual Account e-SPP (Muamalat/BSI) — tidak
+ada jalur tunai/transfer manual; VA diterbitkan lewat checkout wali
+(`POST /api/wali/checkout`) atau admin
+(`POST /api/admin/bills/{ulid}/va`).
+
+| Method | Path | Keterangan |
+|---|---|---|
+| GET | `/api/admin/payments` | ledger pembayaran: filter status/tanggal/metode/channel/unit/jenis/`q`, terpaginasi |
+| GET | `/api/admin/payments/overpayments` | worklist refund TU: pembayaran ganda yang uangnya menunggu dikembalikan |
+| POST | `/api/admin/payments/{ulid}/refund` | tandai overpayment murni sudah direfund (setelah transfer benar-benar dikirim) |
+| GET | `/api/admin/payments/{ulid}/receipt` | PDF kuitansi per pembayaran |
+| POST | `/api/admin/payments/{ulid}/share-link` | minta tautan struk publik (sekali minta, stabil) |
+| GET | `/receipt/{token}` | struk publik token-gated (tanpa login, `throttle:60,1`) |
 
 ### Kesiswaan — poin & prestasi
 | Method | Path | Keterangan |
@@ -140,6 +155,26 @@ bukan 403).
 Siswa "perlu perhatian": `GET /api/admin/students/attention` (`?reason=`, `?unit=`) —
 drill-down di balik tile dashboard, satu `WatchlistService` dengan tile-nya.
 
+## Presensi harian, monitoring & lain-lain
+
+Ringkasan permukaan yang tidak lain di atas (detail di `routes/api.php`):
+
+- **Presensi harian** — pengaturan per unit `GET/PATCH
+  /api/admin/daily-attendance/settings`, sesi `GET
+  /api/admin/daily-attendance/sessions` (+ tandai manual), lane guru `GET/POST
+  /api/guru/daily-attendance/*` (kelas wali), gerbang publik token-gated
+  `GET /api/absen/{slug}` + check-in mandiri. Rekap: `GET
+  /api/admin/reports/attendance`.
+- **Ruang kontrol (monitoring)** — `GET /api/admin/integration-events`
+  (filter `source`,`status`; reprocess khusus PMB), `GET
+  /api/admin/notification-logs` (+ `POST .../{ulid}/resend`), `GET
+  /api/admin/notification-failures` (ringkasan + `log_only_7d`), `GET/DELETE
+  /api/admin/failed-jobs`, `GET /api/admin/activity-logs`.
+- **Lain** — `GET /api/wali/bell-summary` (badge lonceng wali), `GET/POST
+  /api/admin/holidays` (hari libur, dipakai sweep presensi), `GET
+  /api/admin/students/dapodik-export` (CSV Dapodik), `GET
+  /api/guru/my-subjects` (penugasan mengajar guru dari `class_schedules`).
+
 ## File privat
 
 Satu controller untuk keempatnya — gerbangnya sama: siapa pun yang meminta
@@ -158,10 +193,12 @@ menjaga data JSON-nya.
 | Method | Path | Keterangan |
 |---|---|---|
 | POST | `/api/webhooks/pmb/students` | handoff dari PMB, HMAC `X-PMB-Signature` |
-| POST | `/api/webhooks/xendit` | callback pembayaran, verifikasi `x-callback-token` |
+| POST | `/api/payment-webhook/{uuid}` | callback pelunasan VA dari e-SPP — **tanpa signature** (e-SPP tidak mengirim), dikompensasi verifikasi live `getByVaNumber` fail-closed + inbox idempoten + `throttle:30,1` |
 
 Keduanya menulis ke `integration_events` dulu (kunci pada `event_id`), lalu
-memproses — redelivery dari provider tidak pernah dobel-proses.
+memproses — redelivery dari provider tidak pernah dobel-proses. (Tidak ada
+dan tidak pernah ada webhook Xendit di produksi — Xendit hanya terpakai
+sesaat di awal Fase 2.)
 
 ## Scheduler
 
@@ -169,5 +206,13 @@ memproses — redelivery dari provider tidak pernah dobel-proses.
 |---|---|---|
 | Tanggal 1, 00:30 | `bills:generate --type=spp` | terbitkan SPP bulan berjalan untuk siswa `active` |
 | Harian 01:00 | `bills:mark-overdue` | tandai lewat jatuh tempo |
-| Harian 07:00 | `bills:send-reminders` | pengingat H-7, H-1, H+3 |
+| Harian 01:10 | `bills:apply-late-fees --apply` | kenakan denda sekali setelah masa tenggang (pratinjau tanpa `--apply`) |
+| Harian 07:00 | `bills:send-reminders` | pengingat H-7, H-1, H+3 (Qontak, single VA) |
+| 2 menit | `payments:poll-billing-va` | cek pelunasan VA ke e-SPP + jaring VA terlantar |
+| 5 menit | `attendance:daily-sweep` | buka/tutup jendela presensi harian per unit |
+| 30 menit | `notifications:retry-failed` | sweep ulang notifikasi gagal |
 | Harian 03:00 | `units:sync` | tarik ulang master unit dari PMB |
+| 1 menit | *(heartbeat)* | detak scheduler untuk `schedule:health` |
+
+Command pemulihan/manual: `payments:reconcile-overpayments` (pratinjau
+default), `schedule:health`, `otp:issue` — lihat `docs/07-OPERASIONAL.md`.

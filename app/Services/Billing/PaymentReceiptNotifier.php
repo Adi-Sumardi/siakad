@@ -49,11 +49,33 @@ class PaymentReceiptNotifier
 
         if (! filled($guardian->email)) {
             // A phone-only contact gets no receipt email. The in-app bell
-            // still shows the payment; this line exists so a "tidak ada
-            // email" complaint has an answer in the log.
+            // still shows the payment - but a skip must also be VISIBLE
+            // (audit 2026-10-05): without a row, "kenapa tidak ada email
+            // struk?" has no answer on any screen and nothing can retry
+            // once the contact gains an address.
             Log::info('[PaymentReceipt] Billing contact has no email address, skipping', [
                 'payment' => $payment->payment_number,
             ]);
+
+            $alreadyNoted = NotificationLog::query()
+                ->where('template', 'payment_receipt')
+                ->where('channel', 'email')
+                ->where('notifiable_type', Payment::class)
+                ->where('notifiable_id', $payment->id)
+                ->exists();
+
+            if (! $alreadyNoted) {
+                NotificationLog::create([
+                    'channel' => 'email',
+                    'template' => 'payment_receipt',
+                    'recipient' => null,
+                    'payload' => ['payment_number' => $payment->payment_number],
+                    'status' => 'failed',
+                    'error' => 'Kontak penagihan tidak punya alamat email - kuitansi email tidak terkirim.',
+                    'notifiable_type' => Payment::class,
+                    'notifiable_id' => $payment->id,
+                ]);
+            }
 
             return;
         }

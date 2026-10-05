@@ -30,7 +30,7 @@ class IntegrationEventController extends Controller
             ->when(in_array($status, ['received', 'processed', 'failed'], true), fn ($q) => $q->where('status', $status))
             ->orderByDesc('created_at')
             ->orderByDesc('id')
-            ->paginate($request->integer('per_page', 20));
+            ->paginate(\App\Support\PerPage::clamp($request, 20));
 
         $rows = $events->getCollection()->load('student:id,ulid');
 

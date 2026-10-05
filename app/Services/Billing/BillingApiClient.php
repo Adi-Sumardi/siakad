@@ -305,7 +305,16 @@ class BillingApiClient
     // against the real API documentation (section 5.1) and this mirrors that.
     private function requestNewAccessToken(): string
     {
-        $baseUrl = rtrim((string) config('services.billing_api.base_url', 'http://43.225.66.150:8061'), '/');
+        // Refuse loudly on an unset base URL (audit 2026-10-05 P0): the old
+        // config default silently pointed under-configured environments at
+        // the LIVE production bank. An unconfigured client must never
+        // produce an HTTP call, only this exception.
+        $baseUrl = rtrim((string) config('services.billing_api.base_url'), '/');
+
+        if ($baseUrl === '') {
+            throw new BillingApiException('BILLING_API_BASE_URL belum diatur - client menolak memanggil e-SPP tanpa alamat eksplisit.');
+        }
+
         $clientId = config('services.billing_api.client_id');
         $clientSecret = config('services.billing_api.client_secret');
         $username = config('services.billing_api.username');
@@ -350,7 +359,14 @@ class BillingApiClient
 
     private function client(): PendingRequest
     {
-        $baseUrl = rtrim((string) config('services.billing_api.base_url', 'http://43.225.66.150:8061'), '/');
+        // Same refusal as requestNewAccessToken(): no explicit base URL,
+        // no HTTP call (audit 2026-10-05 P0).
+        $baseUrl = rtrim((string) config('services.billing_api.base_url'), '/');
+
+        if ($baseUrl === '') {
+            throw new BillingApiException('BILLING_API_BASE_URL belum diatur - client menolak memanggil e-SPP tanpa alamat eksplisit.');
+        }
+
         $token = $this->getAccessToken();
 
         return Http::baseUrl($baseUrl)

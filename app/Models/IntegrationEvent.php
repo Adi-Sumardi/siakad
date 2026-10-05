@@ -59,4 +59,58 @@ class IntegrationEvent extends Model
             'error' => mb_substr($error, 0, 2000),
         ])->save();
     }
+
+    /**
+     * Closes the loop for a settled payment (audit 2026-10-05): a webhook
+     * verification that failed - network hiccup, malformed sisa, amount
+     * mismatch - leaves a 'failed' row behind forever, even when the
+     * poller settles the very same payment minutes later. Permanent noise
+     * buries the rows that genuinely need a human (overpayments, surprise
+     * late payments), so after any successful settle the lanes call this
+     * to mark that payment's stale failed callbacks processed.
+     *
+     * Matching is done in PHP on the decrypted payload: the column is
+     * encrypted, so there is no JSON grammar to fight with and the failed
+     * set is small by construction.
+     */
+    public static function resolveFailedCallbacksFor(Payment $payment): int
+    {
+        $carriedIds = array_values(array_unique(array_filter([
+            $payment->external_transaction_id,
+            $payment->invoice_id,
+            $payment->gateway_response['billing_uuid'] ?? null,
+            $payment->gateway_response['va_number'] ?? null,
+            $payment->payment_number,
+        ], fn ($v) => is_string($v) && $v !== '')));
+
+        $resolved = 0;
+
+        static::query()
+            ->where('source', 'billing_api')
+            ->where('event_type', 'payment.callback')
+            ->where('status', 'failed')
+            ->chunkById(100, function ($rows) use ($carriedIds, &$resolved) {
+                foreach ($rows as $row) {
+                    $payload = $row->payload ?? [];
+
+                    $billingUuid = $payload['billing_uuid'] ?? null;
+                    if (is_array($billingUuid)) {
+                        $billingUuid = $billingUuid['string'] ?? null;
+                    }
+
+                    $eventCarried = array_filter([
+                        $billingUuid,
+                        $payload['uuid'] ?? null,
+                        $payload['reference_no'] ?? null,
+                    ]);
+
+                    if (array_intersect($eventCarried, $carriedIds) !== []) {
+                        $row->markProcessed();
+                        $resolved++;
+                    }
+                }
+            });
+
+        return $resolved;
+    }
 }

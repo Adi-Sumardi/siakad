@@ -88,7 +88,8 @@ class SendQontakTemplateMessage implements ShouldQueue
 
         if (! $result->success) {
             Log::warning('[SendQontakTemplateMessage] Send failed', [
-                'phone' => $this->phone,
+                // Masked (audit 2026-10-05).
+                'phone' => NotificationLog::maskRecipient($this->phone),
                 'template_id' => $this->templateId,
                 'error' => $result->message,
             ]);

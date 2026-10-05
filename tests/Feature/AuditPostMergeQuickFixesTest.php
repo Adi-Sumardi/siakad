@@ -199,6 +199,10 @@ class AuditPostMergeQuickFixesTest extends TestCase
 
         [$user, $bill] = $this->waliWithOpenBill(250000.40);
 
+        // The subject is whole-rupiah rounding, not the installment gate
+        // (audit 2026-10-05) - the bill must permit custom amounts.
+        $bill->forceFill(['allow_installment' => true])->save();
+
         $payment = app(CheckoutService::class)->start($user, [$bill->ulid], 'virtual_account', [
             $bill->ulid => '150000.40',
         ]);

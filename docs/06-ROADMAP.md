@@ -45,16 +45,15 @@ Terbukti dengan 68 tes lulus dan alur end-to-end diverifikasi langsung
   (`PointLedger` — satu-satunya penulis, revoke bukan delete, lihat D6)
 - Layar guru: catat poin satuan & massal (`/api/guru/points`, `points/bulk`),
   batalkan dengan alasan wajib (`points/{ulid}/revoke`)
-- Portal wali: meteran poin (`<PointMeter />`), riwayat lengkap per semester,
-  notifikasi otomatis saat saldo melewati ambang — sekali per ambang per
-  semester (`point_threshold_notifications`, pola sama dengan `bill_reminders`)
+- Portal wali: meteran poin (`<PointMeter />`), riwayat lengkap per semester.
+  *(Notifikasi ambang pernah direncanakan lalu dihapus 2026-09-18 — tabel
+  `point_threshold_notifications` di-drop, tidak ada penggantinya.)*
 - Prestasi: input guru (langsung terverifikasi, boleh sekalian beri poin),
   pengajuan wali (menunggu verifikasi, tidak pernah bawa poin sendiri),
   verifikasi/tolak admin, sertifikat & foto tersimpan privat di balik
   pemeriksaan kepemilikan (`FileController`)
 - Pengumuman sekolah/unit/kelas (`Announcement`, pola `scopeLive()` dari PMB,
   ditambah satu level cakupan kelas)
-- Scheduler: `points:evaluate-thresholds`
 
 **Selesai berarti:** guru mencatat poin dalam hitungan detik, wali murid tahu di
 hari yang sama lewat notifikasi otomatis — bukan setiap hari saldo tetap di
@@ -109,9 +108,17 @@ sadar, dikonfirmasi user. Nilai akhir pakai bobot standar Tugas 20%/UTS
 30%/UAS 50% (asumsi, belum dikonfirmasi kebijakan sekolah, mudah diubah).
 Guru isi lewat `guru/nilai`, wali lihat + unduh rapor di `anak/[ulid]`,
 admin oversight + unduh rapor arsip di `admin/nilai`.
-- Ekstrakurikuler
-- Kenaikan kelas massal antar tahun ajaran
-- Ekspor Dapodik
+
+**Selesai juga (dulu tercatat terbuka di sini):** Ekstrakurikuler
+(`ExtracurricularService` + layar admin/wali), Kenaikan kelas massal
+(`PromotionService`, lihat `docs/04-API.md`), dan Ekspor Dapodik
+(`DapodikExportService`). **Presensi harian** menjadi sumber presensi
+resmi sejak 2026-09-12: pengaturan per unit, sesi masuk/pulang, check-in
+mandiri token-gated, rekap otomatis ke `enrollments` — sumber kebenarannya
+`DailyAttendanceService` + laporan `reports/attendance`.
+
+Masih terbuka:
+
 - SSO PMB ↔ Sekolah (bila aplikasi ketiga muncul)
 - Aplikasi mobile / PWA notifikasi
 

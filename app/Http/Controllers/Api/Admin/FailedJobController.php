@@ -26,7 +26,7 @@ class FailedJobController extends Controller
         $jobs = DB::table('failed_jobs')
             ->orderByDesc('failed_at')
             ->orderByDesc('id')
-            ->paginate($request->integer('per_page', 20));
+            ->paginate(\App\Support\PerPage::clamp($request, 20));
 
         return response()->json(['jobs' => [
             'data' => collect($jobs->items())->map(fn ($job) => [

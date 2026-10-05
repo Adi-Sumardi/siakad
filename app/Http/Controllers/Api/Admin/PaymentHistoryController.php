@@ -53,7 +53,7 @@ class PaymentHistoryController extends Controller
             })
             ->with(['bills.feeType', 'bills.student.schoolUnit', 'payer'])
             ->latest('paid_at')
-            ->paginate($request->integer('per_page', 25));
+            ->paginate(\App\Support\PerPage::clamp($request, 25));
 
         return response()->json(['payments' => PaymentResource::collection($payments)->response()->getData(true)]);
     }
@@ -108,5 +108,88 @@ class PaymentHistoryController extends Controller
         }
 
         return response()->json(['url' => "/receipt/{$payment->receipt_public_token}"]);
+    }
+
+    /**
+     * The refund worklist (audit 2026-10-05 P0): payments whose money
+     * arrived for bills another completed payment had already covered.
+     * settle() books them completed but flags their allocations
+     * applies_to_bill=false, so "what TU still owes back" is exactly this
+     * set - completed, carrying the overpayment annotation, with at least
+     * one unapplied allocation. Scoping stays visibleTo: a unit admin sees
+     * their own unit's refunds only.
+     */
+    public function overpayments(Request $request): JsonResponse
+    {
+        $payments = Payment::query()
+            ->visibleTo($request->user())
+            ->where('status', 'completed')
+            ->whereHas('allocations', fn ($q) => $q->where('applies_to_bill', false))
+            ->with(['bills.feeType', 'bills.student.schoolUnit', 'payer'])
+            ->latest('paid_at')
+            ->paginate(\App\Support\PerPage::clamp($request, 25));
+
+        return response()->json(['payments' => PaymentResource::collection($payments)->response()->getData(true)]);
+    }
+
+    /**
+     * Marks a pure overpayment refunded (audit 2026-10-05 P0): the money
+     * settled nothing (every allocation unapplied), so flipping the status
+     * changes no bill's arithmetic - recompute() only ever counted
+     * completed payments' applied allocations. Restricted to pure
+     * overpayments on purpose: refunding part of a payment that DID settle
+     * a bill is a different bookkeeping operation (it would reopen the
+     * bill) and is not this button.
+     */
+    public function refund(Request $request, string $ulid): JsonResponse
+    {
+        $payment = Payment::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+
+        if ($payment->status !== 'completed' || ! isset($payment->metadata['overpayment'])) {
+            return response()->json(['message' => 'Pembayaran ini bukan overpayment yang menunggu refund.'], 422);
+        }
+
+        $hasAppliedAllocation = $payment->allocations()->where('applies_to_bill', true)->exists();
+
+        if ($hasAppliedAllocation) {
+            return response()->json(['message' => 'Pembayaran ini sebagian melunasi tagihan - refund parsial harus diproses manual oleh pusat.'], 422);
+        }
+
+        DB::transaction(function () use ($payment, $request) {
+            // Claim under a row lock, same discipline as settle()/fail():
+            // two admins clicking refund concurrently, or a refund racing
+            // some future lane, must write this decision exactly once.
+            $fresh = Payment::query()
+                ->whereKey($payment->id)
+                ->where('status', 'completed')
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $overpayment = $fresh->metadata['overpayment'] ?? null;
+
+            if (! $overpayment) {
+                return;
+            }
+
+            // The annotation moves aside rather than vanishing: the worklist
+            // keys off the unapplied allocations, and the audit trail of
+            // what was owed and when stays readable on the row itself.
+            $metadata = $fresh->metadata ?? [];
+            unset($metadata['overpayment']);
+            $metadata['refunded'] = [
+                'overpayment' => $overpayment,
+                'refunded_at' => now()->toIso8601String(),
+                'refunded_by' => $request->user()->name,
+            ];
+
+            $fresh->forceFill([
+                'status' => 'refunded',
+                'failed_at' => now(),
+                'rejection_reason' => 'Overpayment direfund oleh TU.',
+                'metadata' => $metadata,
+            ])->save();
+        });
+
+        return response()->json(['message' => 'Pembayaran ditandai refunded. Pastikan transfer pengembalian dana sudah dikirim.']);
     }
 }

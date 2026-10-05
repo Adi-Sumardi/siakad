@@ -2,6 +2,7 @@
 
 namespace App\Services\Notification;
 
+use App\Models\NotificationLog;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Support\Facades\Log;
@@ -80,7 +81,9 @@ class QontakWhatsAppGateway
 
         if (empty($baseUrl) || empty($channelIntegrationId) || empty($clientId) || empty($clientSecret)) {
             Log::info('[QontakWhatsAppGateway] Credentials not configured, logging template send instead of sending.', [
-                'phone' => $phone,
+                // Masked (audit 2026-10-05) - same reason as every other
+                // gateway log line.
+                'phone' => NotificationLog::maskRecipient($phone),
                 'template_id' => $templateId,
             ]);
 
@@ -150,7 +153,8 @@ class QontakWhatsAppGateway
         } catch (RequestException $e) {
             $responseBody = $e->hasResponse() ? (string) $e->getResponse()->getBody() : $e->getMessage();
             Log::warning('[QontakWhatsAppGateway] Send failed', [
-                'phone' => $phone,
+                // Masked (audit 2026-10-05).
+                'phone' => NotificationLog::maskRecipient($phone),
                 'template_id' => $templateId,
                 'error' => $responseBody,
             ]);

@@ -36,7 +36,7 @@ class ActivityLogController extends Controller
                 ->where('created_at', '<=', $to.' 23:59:59'))
             ->orderByDesc('created_at')
             ->orderByDesc('id')
-            ->paginate($request->integer('per_page', 20));
+            ->paginate(\App\Support\PerPage::clamp($request, 20));
 
         $rows = $logs->getCollection()->load('user:id,ulid,name,role');
         $subjectUlids = $this->subjectUlids($rows);

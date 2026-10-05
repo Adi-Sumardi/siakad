@@ -82,7 +82,9 @@ class DailyAttendanceController extends Controller
                 $request->validated('description'),
             );
         } catch (RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 503);
+            // 422, not 503 (audit 2026-10-05) - same reason as the admin
+            // session lane: these are caller-fixable messages, not outages.
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response()->json([

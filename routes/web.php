@@ -15,8 +15,10 @@ Route::get('/', function () {
 // anything, failing closed rather than trusting the payload). Throttled
 // here too: payment_number is deterministic from a student's NIS + fee
 // type + year, which makes it guessable, not just unguessable-until-leaked.
+// ip.allowlist is a no-op until BILLING_API_WEBHOOK_ALLOWED_IPS is filled
+// (audit 2026-10-05): an extra fence once e-SPP names their callback IPs.
 Route::post('/api/payment-webhook/{uuid}', [BillingApiWebhookController::class, 'handle'])
     ->name('billing-api.webhook')
-    ->middleware('throttle:30,1')
+    ->middleware('throttle:30,1', 'ip.allowlist')
     ->withoutMiddleware([VerifyCsrfToken::class]);
 

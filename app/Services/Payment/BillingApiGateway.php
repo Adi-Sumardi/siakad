@@ -4,6 +4,7 @@ namespace App\Services\Payment;
 
 use App\Models\Bill;
 use App\Models\Guardian;
+use App\Models\IntegrationEvent;
 use App\Models\Payment;
 use App\Models\PaymentAllocation;
 use App\Services\Billing\BillingApiClient;
@@ -38,6 +39,16 @@ class BillingApiGateway implements PaymentGateway
 
         if (! $student) {
             throw new RuntimeException('Data siswa tidak ditemukan pada tagihan yang dipilih.');
+        }
+
+        // Cheap guard before anything leaves the building (audit 2026-10-05):
+        // a checkout's supersede pass can fail this row between its Payment
+        // insert and this call - registering a VA for a payment this system
+        // has already closed would resurrect it, so refuse up front.
+        if (! in_array($payment->fresh()->status, ['pending', 'processing'], true)) {
+            throw new RuntimeException(
+                'Pembayaran sudah ditutup (status: '.$payment->fresh()->status.') sebelum Virtual Account terbit - registrasi dibatalkan.'
+            );
         }
 
         $feeTypeCode = $primaryBill->feeType?->code ?? 'spp';
@@ -139,16 +150,14 @@ class BillingApiGateway implements PaymentGateway
                 'raw' => $response,
             ];
 
-            $payment->forceFill([
+            return $this->claimVaRegistration($payment, [
                 'status' => 'processing',
                 'external_transaction_id' => $billingUuid ?: $primaryVa,
                 'invoice_id' => $billingUuid ?: $primaryVa,
                 'invoice_url' => null,
                 'expires_at' => $dueDate,
                 'gateway_response' => $gatewayResponse,
-            ])->save();
-
-            return $payment;
+            ], $gatewayResponse['billing_uuid'] ?? null);
         } catch (BillingApiException $e) {
             Log::error('[BillingApiGateway] Create billing failed', [
                 'payment' => $payment->payment_number,
@@ -176,16 +185,14 @@ class BillingApiGateway implements PaymentGateway
                     'simulated' => true,
                 ];
 
-                $payment->forceFill([
+                return $this->claimVaRegistration($payment, [
                     'status' => 'processing',
                     'external_transaction_id' => $primaryVa,
                     'invoice_id' => $primaryVa,
                     'invoice_url' => null,
                     'expires_at' => $dueDate,
                     'gateway_response' => $gatewayResponse,
-                ])->save();
-
-                return $payment;
+                ]);
             }
 
             throw new RuntimeException('Gagal membuat tagihan Virtual Account: '.$e->getMessage());
@@ -216,6 +223,31 @@ class BillingApiGateway implements PaymentGateway
     public function ensureReminderVa(Bill $bill, Guardian $payer): array
     {
         $payment = $this->liveVaPaymentFor($bill);
+
+        if ($payment) {
+            // The message quotes the bill's CURRENT remaining; the bank
+            // charges whatever the live VA was REGISTERED for (audit
+            // 2026-10-05). Reusing a stale-amount VA - a partial checkout
+            // remainder, a basket whose other bills were since paid - hands
+            // the family a number that disagrees with the message and
+            // quietly settles sibling bills the message never named. Void
+            // every pending payment on the bill (money-safe: the void asks
+            // the bank first and settles anything already paid) and mint a
+            // fresh, honest VA instead.
+            $registeredForThisBill = (float) (PaymentAllocation::query()
+                ->where('payment_id', $payment->id)
+                ->where('bill_id', $bill->id)
+                ->value('amount') ?? 0.0);
+
+            if (abs($registeredForThisBill - round((float) $bill->remaining_amount)) > 0.01) {
+                app(\App\Services\Billing\CheckoutService::class)->voidPendingPaymentsFor(
+                    $bill,
+                    'Nominal Virtual Account tidak sesuai sisa tagihan saat pengingat terkirim - diterbitkan VA baru.',
+                );
+
+                $payment = null;
+            }
+        }
 
         if (! $payment) {
             $bank = strtolower((string) config('services.billing_api.reminder_bank', 'muamalat'));
@@ -392,6 +424,92 @@ class BillingApiGateway implements PaymentGateway
             'amount' => (float) $payment->amount,
             'failed_at' => $payment->failed_at,
         ]);
+
+        // And a row a human can actually find (audit 2026-10-05 P0): the
+        // critical log line rotates away with laravel.log, and finance has
+        // no screen that reads it. A failed billing_api integration event
+        // shows on the ruang kontrol next to the other "needs a human"
+        // rows - stable event id per payment+VA so repeated poller beats
+        // update one row instead of piling up one per day.
+        $event = IntegrationEvent::firstOrCreate(
+            ['event_id' => 'billing_api:surprise:'.$payment->ulid.':'.$vaNumber],
+            [
+                'source' => 'billing_api',
+                'event_type' => 'payment.surprise_late',
+                'payload' => [
+                    'payment_ulid' => $payment->ulid,
+                    'payment_number' => $payment->payment_number,
+                    'va_number' => $vaNumber,
+                    'amount' => (float) $payment->amount,
+                    'status' => $payment->status,
+                    'failed_at' => $payment->failed_at?->toIso8601String(),
+                ],
+                'status' => 'received',
+            ],
+        );
+
+        if ($event->wasRecentlyCreated || $event->status !== 'failed') {
+            $event->markFailed(
+                "Uang mendarat di VA {$vaNumber} ({$payment->payment_number}, status {$payment->status}) yang sudah tidak diawasi - perlu rekonsiliasi manual oleh TU."
+            );
+        }
+    }
+
+    /**
+     * Flips a freshly-registered payment to 'processing' only if it is
+     * still pending/processing, under a row lock (audit 2026-10-05).
+     *
+     * createInvoice() used to forceFill unconditionally: a supersede
+     * landing between the Payment insert and this save turned a 'failed'
+     * row back into a live VA registration - resurrecting exactly the
+     * second-live-VA this app's whole billing model refuses. When the
+     * claim is lost, the e-SPP registration that just succeeded is closed
+     * best-effort (expireVa semantics: harmless if their endpoint is
+     * still broken) and the exception lets the caller surface the abort.
+     *
+     * @param  array<string, mixed>  $forceFill
+     */
+    private function claimVaRegistration(Payment $payment, array $forceFill, ?string $billingUuid = null): Payment
+    {
+        $claimed = \Illuminate\Support\Facades\DB::transaction(function () use ($payment, $forceFill) {
+            $fresh = Payment::query()
+                ->whereKey($payment->id)
+                ->whereIn('status', ['pending', 'processing'])
+                ->lockForUpdate()
+                ->first();
+
+            if (! $fresh) {
+                return false;
+            }
+
+            $fresh->forceFill($forceFill)->save();
+            $payment->setRawAttributes($fresh->getAttributes(), true);
+
+            return true;
+        });
+
+        if ($claimed) {
+            return $payment;
+        }
+
+        // The row was closed while we were registering - close what we just
+        // created at e-SPP too, so the bank cannot take money against a
+        // payment this system has already abandoned.
+        if ($billingUuid && is_string($billingUuid) && ! str_starts_with($billingUuid, 'sim_')) {
+            try {
+                $this->client->updateBilling($billingUuid, ['date_end' => now()->toDateString()]);
+            } catch (\Throwable $e) {
+                Log::warning('[BillingApiGateway] Could not close an orphaned registration at e-SPP', [
+                    'payment' => $payment->payment_number,
+                    'billing_uuid' => $billingUuid,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        throw new RuntimeException(
+            'Pembayaran sudah ditutup sebelum Virtual Account terbit - registrasi dibatalkan.'
+        );
     }
 
     private function describe(Collection $bills, ?\App\Models\Student $student): string

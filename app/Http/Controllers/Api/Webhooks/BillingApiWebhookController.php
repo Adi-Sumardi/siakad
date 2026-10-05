@@ -227,6 +227,15 @@ class BillingApiWebhookController extends Controller
             'settled_at' => now()->toIso8601String(),
         ]));
 
+        // This settle may answer an EARLIER callback's failed verification
+        // (audit 2026-10-05) - close those rows so the failed set stays the
+        // true "needs a human" set. Runs BEFORE this callback's own verdict
+        // is written: the resolver only touches 'failed' rows, and the
+        // overpayment flag below must survive it.
+        if ($result->claimed) {
+            IntegrationEvent::resolveFailedCallbacksFor($payment->fresh());
+        }
+
         if ($result->claimed && $result->overpaid) {
             // Money arrived for a bill another completed payment had already
             // covered: the allocator refused to double-book it - the excess

@@ -198,13 +198,32 @@ class PmbHandoffProcessor
 
             $guardian->save();
 
+            $isBilling = $isPrimary && ! $billingAssigned;
+
+            if ($isBilling) {
+                // Demote first (audit 2026-10-05): $billingAssigned only
+                // tracks THIS event, so a redelivered or re-enrolled handoff
+                // whose primary differs from the first event's used to leave
+                // TWO is_billing_contact=true pivots - and every reader
+                // (billingContact(), reminders, receipts, refunds, Dapodik)
+                // picks firstWhere(is_billing_contact), which can be the
+                // wrong parent. Same demote-before-sync ImportController
+                // has always done.
+                $student->guardians()
+                    ->wherePivot('is_billing_contact', true)
+                    ->whereKeyNot($guardian->id)
+                    ->get()
+                    ->each(fn (Guardian $existing) => $student->guardians()
+                        ->updateExistingPivot($existing->id, ['is_billing_contact' => false]));
+            }
+
             $student->guardians()->syncWithoutDetaching([
                 $guardian->id => [
                     'relationship' => $data['hubungan'],
                     'is_primary' => $isPrimary,
                     // Exactly one billing contact per student: the first primary
                     // guardian wins, the rest are contacts only.
-                    'is_billing_contact' => $isPrimary && ! $billingAssigned,
+                    'is_billing_contact' => $isBilling,
                 ],
             ]);
 

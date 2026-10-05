@@ -134,8 +134,16 @@ class OverpaymentNotifier
             return NotificationResult::fail('Pembayaran tanpa wali untuk diberitahu.');
         }
 
+        // Re-resolve the CURRENT phone (audit 2026-10-05), same reason as
+        // VaIssuedNotifier::resend(): a null frozen recipient must not turn
+        // every retry into "Nomor WhatsApp tidak valid" until the attempt
+        // budget runs out.
+        if (! filled($guardian->no_hp)) {
+            return NotificationResult::fail('Wali masih belum punya nomor WhatsApp - perbaiki data kontak dulu.');
+        }
+
         return $this->whatsapp->sendMessage(
-            $log->recipient ?? '',
+            (string) $guardian->no_hp,
             $this->message($this->dataFor($payment, $guardian, $overpayment)),
         );
     }

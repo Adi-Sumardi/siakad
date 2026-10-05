@@ -107,7 +107,12 @@ class DailyAttendanceSessionController extends Controller
                 $request->validated('description'),
             );
         } catch (RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 503);
+            // 422, not 503 (audit 2026-10-05): every RuntimeException the
+            // mark lane throws is input or state the CALLER must fix
+            // ("status tidak dikenal", "sesi pulang hanya hadir/terlambat",
+            // "belum ada semester aktif") - "service unavailable" sent
+            // clients retrying a request that could never succeed.
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response()->json([

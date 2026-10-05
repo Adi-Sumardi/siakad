@@ -129,6 +129,11 @@ class AchievementController extends Controller
             'penyelenggara' => 'nullable|string|max:200',
             'tanggal_event' => 'nullable|date|before_or_equal:'.now('Asia/Jakarta')->toDateString(),
             'tempat_event' => 'nullable|string|max:200',
+            // Every other upload lane validates this shape (audit
+            // 2026-10-05): this inline validate() was the only one storing a
+            // file it never checked - the private disk and random name kept
+            // it from being served, but any type/size rode in.
+            'sertifikat' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
         ]);
 
         $user = $request->user();

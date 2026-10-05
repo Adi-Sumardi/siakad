@@ -161,12 +161,16 @@ Yang berbeda dari PMB:
 
 - **Ada queue worker terpisah.** PMB belum punya; di sini generator SPP massal
   (ribuan tagihan + ribuan email) tidak boleh jalan di request HTTP.
-- **Scheduler dipakai serius**: generate SPP bulanan, tandai tagihan `overdue`,
-  kirim pengingat H-7/H-1/H+1, kedaluwarsakan pembayaran menggantung.
+- **Scheduler dipakai serius**: generate SPP bulanan, tandai tagihan `overdue`
+  + denda, kirim pengingat H-7/H-1/H+3, poll pelunasan VA tiap 2 menit, buka/
+  tutup jendela presensi harian, retry notifikasi gagal — daftar lengkap di
+  `docs/04-API.md` (bagian Scheduler) dan runbook di `docs/07-OPERASIONAL.md`.
 
 Catatan operasional yang berlaku sama seperti PMB: `public/` adalah Docker volume,
-jadi rebuild image tidak memperbarui asetnya — harus `docker cp`. Dan Xendit
-sekarang masih memakai key sandbox; harus diganti sebelum tagihan asli jalan.
+jadi rebuild image tidak memperbarui asetnya — harus `docker cp`. Pembayaran
+produksi sejak awal memakai **Virtual Account e-SPP** (Muamalat/BSI), bukan
+Xendit — catatan lama soal key sandbox Xendit sudah tidak relevan (lihat
+"Status produksi" di `docs/06-ROADMAP.md`).
 
 ## Struktur repo (rencana)
 
@@ -181,11 +185,11 @@ sekolah/
 │   │   └── WebhookController.php   # Xendit + PMB
 │   ├── Models/
 │   ├── Services/
-│   │   ├── Billing/    # BillGenerator, PaymentAllocator, LateFeeCalculator
+│   │   ├── Billing/    # BillGenerator, PaymentAllocator, kuitansi & reminder
 │   │   ├── Handoff/    # PmbHandoffProcessor, InvitationSender
-│   │   ├── Points/     # PointLedger, ThresholdEvaluator
-│   │   └── Notification/  # gateway Sendago (disalin dari PMB)
-│   └── Traits/HasEncryptedAttributes.php   # disalin dari PMB
+│   │   ├── Points/     # PointLedger
+│   │   └── Notification/  # gateway Sendago + Qontak (OTP/reminder/receipt)
+│   └── Concerns/HasEncryptedAttributes.php
 ├── database/migrations/
 ├── frontend/           # Next.js 16 + shadcn
 └── docker/             # nginx, php, nextjs — pola PMB

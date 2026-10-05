@@ -81,6 +81,14 @@ return [
         // since 2026-10-05 (was 5 with a BSI payment code); the template
         // copy points families that prefer BSI to the app's checkout.
         'spp_reminder_template_id' => env('QONTAK_SPP_REMINDER_TEMPLATE_ID'),
+        // TRANSITIONAL GUARD (audit 2026-10-05 P0): the Qontak-side template
+        // still declares 5 body variables while the code sends 4 - a
+        // parameter-count mismatch makes the whole broadcast fail, and the
+        // reminder beat is claimed before sending, so that day's reminder
+        // is lost for good. Until the school replaces the template with the
+        // 4-variable copy, each send pads this many empty trailing values.
+        // Set to 0 the moment Qontak's template matches the code.
+        'spp_reminder_placeholder_vars' => (int) env('QONTAK_SPP_REMINDER_PLACEHOLDER_VARS', 1),
         // UUID of the approved 'receipt_spp_school' Utility template
         // (confirms money arrived) - see PaymentReceiptSender. 6 positional
         // variables: nama anak, bulan tagihan, jumlah dibayar, tanggal+jam
@@ -106,11 +114,17 @@ return [
     // Endpoint paths and payload shape verified against docs/Dokumentasi_Billing_API
     // (sections 5.1-5.3) - see BillingApiClient for what that verification changed.
     'billing_api' => [
-        'base_url' => env('BILLING_API_BASE_URL', 'http://43.225.66.150:8061'),
-        'client_id' => env('BILLING_API_CLIENT_ID', ''),
-        'client_secret' => env('BILLING_API_CLIENT_SECRET', ''),
-        'username' => env('BILLING_API_USERNAME', 'admin'),
-        'password' => env('BILLING_API_PASSWORD', 'admin123'),
+        // No defaults on purpose (audit 2026-10-05 P0): the old fallbacks
+        // silently pointed any under-configured environment at the REAL
+        // production e-SPP endpoint over plain HTTP with admin/admin123
+        // credentials. The client now refuses to run until every value is
+        // set explicitly - a missing key must be a loud error, never a
+        // quiet call to the live bank.
+        'base_url' => env('BILLING_API_BASE_URL'),
+        'client_id' => env('BILLING_API_CLIENT_ID'),
+        'client_secret' => env('BILLING_API_CLIENT_SECRET'),
+        'username' => env('BILLING_API_USERNAME'),
+        'password' => env('BILLING_API_PASSWORD'),
         // Fallback only - createBilling() callers always pass an explicit
         // per-bank bank_id (see banks.*.bank_id below); this is what a caller
         // that forgets to set one falls back to.
@@ -121,6 +135,16 @@ return [
         // checkout VA exists to reuse (BillingApiGateway::ensureReminderVa).
         // Muamalat by default; BSI stays selectable in the app's checkout.
         'reminder_bank' => env('BILLING_API_REMINDER_BANK', 'muamalat'),
+        // How long the poller keeps watching superseded/expired VAs for a
+        // surprise late payment (audit 2026-10-05 P0): e-SPP's own date_end
+        // has proven unreliable at closing a VA, and 7 days was too short
+        // for a family paying a months-old WhatsApp number at month end.
+        'superseded_watch_days' => (int) env('BILLING_API_SUPERSEDED_WATCH_DAYS', 60),
+        // Opt-in allowlist for the e-SPP payment webhook route (IP/CIDR,
+        // comma separated). Empty = allow all: e-SPP sends no signature, so
+        // the live-lookup guard stays the real verification - fill this in
+        // only once e-SPP names their callback IPs.
+        'webhook_allowed_ips' => env('BILLING_API_WEBHOOK_ALLOWED_IPS'),
 
         // One bill belongs to exactly one bank_id at e-SPP (main_form.bank_id
         // is singular) - each channel's own id, name, code, institution code,

@@ -31,7 +31,11 @@ class PaymentResource extends JsonResource
             'status' => $this->status,
             'invoice_url' => $this->invoice_url,
             'virtual_account' => $vaData,
-            'gateway_response' => $this->gateway_response,
+            // No raw gateway_response on purpose (audit 2026-10-05): the
+            // e-SPP registration payload (billing uuids, provider refs,
+            // raw responses) is third-party API internals no screen needs -
+            // the curated virtual_account block above carries every field
+            // the app actually reads.
             'expires_at' => $this->expires_at,
             'paid_at' => $this->paid_at,
             'created_at' => $this->created_at,

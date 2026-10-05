@@ -10,6 +10,7 @@ use App\Models\Term;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
@@ -65,6 +66,10 @@ class PointLedger
      * morning assembly is one action, not thirty identical ones clicked by
      * hand.
      *
+     * One transaction for the whole batch (audit 2026-10-05): a failure at
+     * student N used to leave N-1 signed rows committed while the teacher
+     * saw an error and retried - doubling the early students' points.
+     *
      * @param  Collection<int, Student>  $students
      * @return Collection<int, PointRecord>
      */
@@ -76,9 +81,11 @@ class PointLedger
         Carbon $occurredOn,
         string $description,
     ): Collection {
-        return $students->map(
-            fn (Student $student) => $this->record($student, $term, $rule, $recordedBy, $occurredOn, $description)
-        );
+        return DB::transaction(function () use ($students, $term, $rule, $recordedBy, $occurredOn, $description) {
+            return $students->map(
+                fn (Student $student) => $this->record($student, $term, $rule, $recordedBy, $occurredOn, $description)
+            );
+        });
     }
 
     /**

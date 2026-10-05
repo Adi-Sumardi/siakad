@@ -950,6 +950,11 @@ class AuditSep25FixesTest extends TestCase
         ]);
         $guardian->forceFill(['user_id' => $wali->id])->save();
 
+        // The subject is the Rp 10.000 floor, not the installment gate
+        // (audit 2026-10-05) - the bill must permit custom amounts so the
+        // floor check is the one that refuses.
+        $bill->forceFill(['allow_installment' => true])->save();
+
         try {
             app(CheckoutService::class)->start($wali, [$bill->ulid], 'virtual_account', [$bill->ulid => 5000]);
             $this->fail('nominal kustom di bawah Rp 10.000 harus ditolak');

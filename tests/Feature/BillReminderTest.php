@@ -258,10 +258,13 @@ class BillReminderTest extends TestCase
         $sent0 = $this->sentQontakTemplates[0];
         $this->assertSame('081234567890', $sent0['phone']);
         $this->assertSame('Aisyah Nur Ramadhani', $sent0['bodyValues'][0]);
-        // Single VA since 2026-10-05: 4 positional values, the VA itself
-        // last - never a second bank's number beside it.
-        $this->assertCount(4, $sent0['bodyValues']);
+        // Single VA since 2026-10-05, PADDED to 5 values while Qontak's
+        // template still declares 5 positional variables (see
+        // services.qontak.spp_reminder_placeholder_vars): a count mismatch
+        // fails the whole broadcast and burns the claimed beat.
+        $this->assertCount(5, $sent0['bodyValues']);
         $this->assertSame('8020012627000001', $sent0['bodyValues'][3]);
+        $this->assertSame('', $sent0['bodyValues'][4]);
 
         $log = \App\Models\NotificationLog::where('channel', 'whatsapp')->where('template', 'reminder_spp')->first();
         $this->assertNotNull($log);

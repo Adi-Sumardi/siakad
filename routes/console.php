@@ -29,6 +29,15 @@ Schedule::command('bills:mark-overdue')
     ->name('mark-overdue-bills')
     ->description('Tandai tagihan yang lewat jatuh tempo');
 
+// The denda the school configures on /admin/tarif, charged once after each
+// bill's grace window (audit 2026-10-05 - the fields existed since Fase 2
+// with no reader). After mark-overdue, bounded like it.
+Schedule::command('bills:apply-late-fees --apply')
+    ->dailyAt('01:10')
+    ->name('apply-late-fees')
+    ->withoutOverlapping(10)
+    ->description('Kenakan denda keterlambatan setelah masa tenggang lewat');
+
 // Morning, so a nudge lands when someone can act on it rather than at 1am. The
 // unique index on (bill_id, kind) is what keeps a second firing silent, not the
 // schedule itself.
@@ -67,6 +76,16 @@ Schedule::command('payments:poll-billing-va')
     ->name('poll-billing-va-payments')
     ->withoutOverlapping(5)
     ->description('Periksa status pelunasan Virtual Account Bank Muamalat (e-SPP)');
+
+// The scheduler's own heartbeat (audit 2026-10-05): one cache write per
+// minute that `schedule:health` (or any external monitor) reads. Without
+// it, a dead scheduler container meant SPP not issuing on the 1st and the
+// day's reminder beats lost forever - silently, because every command is
+// idempotent and nothing else ever noticed they stopped firing.
+Schedule::call(fn () => \Illuminate\Support\Facades\Cache::put('scheduler:heartbeat', now()))
+    ->everyMinute()
+    ->name('scheduler-heartbeat')
+    ->description('Tulisan detak scheduler untuk schedule:health');
 
 // The daily attendance heartbeat (T14): opens each unit's masuk/pulang
 // sessions from its own settings and closes windows that have ended -

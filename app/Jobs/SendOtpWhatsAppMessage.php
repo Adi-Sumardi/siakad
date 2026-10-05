@@ -104,7 +104,9 @@ class SendOtpWhatsAppMessage implements ShouldQueue
 
         if (! $result->success) {
             Log::warning('[SendOtpWhatsAppMessage] Send failed', [
-                'phone' => $this->phone,
+                // Masked (audit 2026-10-05): the OTP lane's failures are the
+                // most sensitive logs in the app.
+                'phone' => NotificationLog::maskRecipient($this->phone),
                 'error' => $result->message,
             ]);
 

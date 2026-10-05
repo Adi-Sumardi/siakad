@@ -77,6 +77,36 @@ class PaymentReceiptSender
                 'bill_ids' => $bills->pluck('id')->all(),
             ]);
 
+            // Paper trail, same discipline as VaIssuedNotifier (audit
+            // 2026-10-05): without a row, an unreacheable family is
+            // invisible on the monitoring screen and unretryable - the
+            // receipt just never happened as far as any dashboard knows.
+            // Idempotent on (payment, student): the dedup query below uses
+            // the same key, so repeated settles add nothing.
+            $alreadyNoted = NotificationLog::query()
+                ->where('channel', 'whatsapp')
+                ->where('template', 'receipt_spp_school')
+                ->where('payload->payment_ulid', $payment->ulid)
+                ->where('payload->student_name', $bill->student->nama_lengkap)
+                ->exists();
+
+            if (! $alreadyNoted) {
+                NotificationLog::create([
+                    'channel' => 'whatsapp',
+                    'template' => 'receipt_spp_school',
+                    'recipient' => null,
+                    'payload' => [
+                        'student_name' => $bill->student->nama_lengkap,
+                        'payment_ulid' => $payment->ulid,
+                        'reference' => $payment->referenceNumber(),
+                    ],
+                    'status' => 'failed',
+                    'error' => 'Kontak penagihan tidak punya nomor WhatsApp - kuitansi tidak terkirim.',
+                    'notifiable_type' => Payment::class,
+                    'notifiable_id' => $payment->id,
+                ]);
+            }
+
             return;
         }
 

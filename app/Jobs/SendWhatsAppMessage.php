@@ -117,7 +117,10 @@ class SendWhatsAppMessage implements ShouldQueue
 
         if (! $result->success) {
             Log::warning('[SendWhatsAppMessage] Send failed', [
-                'phone' => $this->phone,
+                // Masked (audit 2026-10-05): failures log to a file other
+                // tooling reads - full numbers belong in notification_logs
+                // (encrypted), not laravel.log.
+                'phone' => NotificationLog::maskRecipient($this->phone),
                 'error' => $result->message,
             ]);
 

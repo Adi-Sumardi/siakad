@@ -117,6 +117,40 @@ class PmbHandoffTest extends TestCase
         $this->assertDatabaseCount('students', 0);
     }
 
+    public function test_a_second_handoff_never_leaves_two_billing_contacts(): void
+    {
+        $this->postHandoff($this->payload())->assertStatus(202);
+        $student = Student::first();
+
+        // A redelivered/re-enrolled event for the same child whose PRIMARY
+        // guardian differs (audit 2026-10-05): the old flow set a second
+        // is_billing_contact=true and left every reader guessing which
+        // parent to bill - the handoff lane now demotes first, and the
+        // partial unique index makes the ambiguous state unrepresentable.
+        $this->postHandoff($this->payload([
+            'event_id' => '01JCEVENT0000000000000002',
+            'guardians' => [
+                [
+                    'nama' => 'Budi Ramadhani',
+                    'hubungan' => 'ayah',
+                    'email' => 'budi@example.com',
+                    'no_hp' => '081234567890',
+                    'is_primary' => false,
+                ],
+                [
+                    'nama' => 'Siti Aminah',
+                    'hubungan' => 'ibu',
+                    'no_hp' => '081298765432',
+                    'is_primary' => true,
+                ],
+            ],
+        ]))->assertStatus(202);
+
+        $billingContacts = $student->guardians()->wherePivot('is_billing_contact', true)->get();
+        $this->assertCount(1, $billingContacts);
+        $this->assertSame('Siti Aminah', $billingContacts->first()->nama);
+    }
+
     public function test_it_rejects_a_handoff_signed_with_the_wrong_secret(): void
     {
         $body = json_encode($this->payload());

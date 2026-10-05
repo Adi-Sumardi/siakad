@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\StoreClassroomRequest;
 use App\Http\Requests\Admin\UpdateClassroomRequest;
 use App\Models\AcademicYear;
 use App\Models\ActivityLog;
+use App\Models\AttendanceRecord;
 use App\Models\Classroom;
 use App\Models\SchoolUnit;
 use App\Models\User;
@@ -85,9 +86,10 @@ class ClassroomController extends Controller
      * nothing here is protected by the database's own foreign keys, so a
      * classroom still holding real enrollment, attendance, or grade history
      * would be silently wiped along with it. Refused at the application
-     * layer instead: a classroom with zero enrollments ever (past or
-     * present) is safe to remove outright, anything else needs to be
-     * deactivated (is_active) rather than deleted.
+     * layer instead: a classroom with zero enrollments, schedules, or
+     * attendance history ever (past or present) is safe to remove outright,
+     * anything else needs to be deactivated (is_active) rather than
+     * deleted.
      */
     public function destroy(Request $request, string $ulid): JsonResponse
     {
@@ -97,6 +99,23 @@ class ClassroomController extends Controller
         if ($classroom->enrollments()->exists()) {
             return response()->json([
                 'message' => "Kelas \"{$classroom->name}\" masih punya riwayat siswa (aktif atau lulus) - nonaktifkan saja kelas ini, jangan dihapus.",
+            ], 422);
+        }
+
+        // The enrollment guard alone was not enough (audit 2026-10-05): a
+        // classroom can hold teaching schedules and attendance history with
+        // zero enrollment rows - class_schedules and attendance_records
+        // cascade off the delete too, so that history must block it as
+        // well.
+        if ($classroom->classSchedules()->exists()) {
+            return response()->json([
+                'message' => "Kelas \"{$classroom->name}\" masih punya jadwal pelajaran - nonaktifkan saja kelas ini, jangan dihapus.",
+            ], 422);
+        }
+
+        if (AttendanceRecord::where('classroom_id', $classroom->id)->exists()) {
+            return response()->json([
+                'message' => "Kelas \"{$classroom->name}\" masih punya riwayat presensi - nonaktifkan saja kelas ini, jangan dihapus.",
             ], 422);
         }
 

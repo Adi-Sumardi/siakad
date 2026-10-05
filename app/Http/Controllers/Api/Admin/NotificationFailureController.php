@@ -32,6 +32,19 @@ class NotificationFailureController extends Controller
                 ->where('attempts', '>=', NotificationRetryService::MAX_ATTEMPTS)
                 ->count(),
 
+            // NOT-REALLY-SENT sends (audit 2026-10-05): the jobs stamp
+            // log-only rows 'sent' with an error note, so a prod box with
+            // blank gateway credentials looked fully green for weeks while
+            // nothing physically left the building - and phone-identifier
+            // users never received a login OTP at all. Counted separately
+            // from real failures so the number is actionable: nonzero here
+            // means check the gateway env, not the recipients.
+            'log_only_7d' => NotificationLog::query()
+                ->where('status', 'sent')
+                ->where('error', 'like', 'Mode log-only%')
+                ->where('updated_at', '>=', now()->subHours(24 * 7))
+                ->count(),
+
             // updated_at on a failed row is its most recent attempt.
             'last_failed_at' => $this->failedSince(24 * 7)
                 ->latest('updated_at')

@@ -144,9 +144,25 @@ class Student extends Model
         return $this->hasMany(Bill::class);
     }
 
-    /** The room this student sits in for the active academic year, if placed. */
+    /**
+     * The room this student sits in for the active academic year, if placed.
+     *
+     * Relation-aware (audit 2026-10-05): when 'enrollments' is already
+     * eager-loaded (with('enrollments.classroom.homeroomTeacher')), the
+     * match runs in memory instead of firing a fresh query per student -
+     * this method sat underneath three N+1 hot paths (the receivables
+     * screen, the daily-attendance sweep holding a session lock, and the
+     * monthly SPP generator walking the whole school).
+     */
     public function currentEnrollment(): ?Enrollment
     {
+        if ($this->relationLoaded('enrollments')) {
+            return $this->enrollments
+                ->filter(fn (Enrollment $enrollment) => $enrollment->status === 'active')
+                ->sortByDesc('joined_on')
+                ->first();
+        }
+
         return $this->enrollments()
             ->where('status', 'active')
             ->with('classroom.homeroomTeacher')
