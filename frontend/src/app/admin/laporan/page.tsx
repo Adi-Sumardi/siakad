@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Calendar,
+  Download,
   CreditCard,
   FileDown,
   Layers,
@@ -231,6 +232,31 @@ export default function ReportsPage() {
                 className="h-7 border-0 p-0 text-xs focus-visible:ring-0 shadow-none font-semibold"
               />
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() =>
+                downloadApiFile(`/api/admin/reports/collections/export?from=${from}&to=${to}`, `penerimaan_${from}_sd_${to}.csv`).catch(
+                  (err) => toast.error(err instanceof Error ? err.message : "Gagal mengunduh."),
+                )
+              }
+            >
+              <Download className="size-3.5" /> CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              title="Semua tagihan yang belum lunas, per siswa"
+              onClick={() =>
+                downloadApiFile("/api/admin/reports/receivables/export", `piutang_${to}.csv`).catch((err) =>
+                  toast.error(err instanceof Error ? err.message : "Gagal mengunduh."),
+                )
+              }
+            >
+              <Download className="size-3.5" /> Piutang CSV
+            </Button>
           </div>
         </div>
 

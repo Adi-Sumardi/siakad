@@ -8,6 +8,8 @@ use App\Models\AcademicYear;
 use App\Models\ActivityLog;
 use App\Models\Extracurricular;
 use App\Models\Student;
+use App\Models\Term;
+use App\Services\Academic\ExtracurricularReport;
 use App\Services\Academic\ExtracurricularService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,6 +33,10 @@ class ExtracurricularController extends Controller
                 'pembina' => $e->pembina?->name,
                 'school_unit' => $e->schoolUnit?->label,
             ]),
+
+            // This term's predikat and practice attendance per activity
+            // (audit 6 Okt 2026 #8) - the same block the rapor prints.
+            'report' => ($term = Term::current()) ? app(ExtracurricularReport::class)->forStudent($student, $term) : [],
 
             // What the parent may still pick from: this academic year's
             // active activities, in the child's unit (or school-wide), with

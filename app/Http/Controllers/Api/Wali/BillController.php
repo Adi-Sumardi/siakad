@@ -25,7 +25,7 @@ class BillController extends Controller
     {
         $bills = Bill::query()
             ->visibleTo($request->user())
-            ->with(['student', 'feeType'])
+            ->with(['student', 'feeType', 'installments'])
             ->when($request->string('status')->value() === 'open', fn ($q) => $q->open())
             ->when($request->string('status')->value() === 'paid', fn ($q) => $q->where('status', 'paid'))
             ->when($request->string('student')->value(), fn ($q, $ulid) => $q->whereHas('student', fn ($s) => $s->where('ulid', $ulid)))
@@ -50,7 +50,7 @@ class BillController extends Controller
             // student.schoolUnit + academicYear feed the detail screen's
             // header (audit T40-b) - without them the resource omits the
             // fields and the UI used to print hardcoded fallbacks.
-            ->with(['student.schoolUnit', 'feeType', 'lines', 'academicYear'])
+            ->with(['student.schoolUnit', 'feeType', 'lines', 'academicYear', 'installments'])
             ->where('ulid', $ulid)
             ->firstOrFail();
 

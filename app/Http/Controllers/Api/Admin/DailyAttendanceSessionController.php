@@ -30,13 +30,24 @@ class DailyAttendanceSessionController extends Controller
         $unit = $this->resolveUnit($request);
         $setting = $service->ensureSettings($unit);
 
-        // Lazy ensure: the scheduler is the normal opener, but the board must
-        // not show a blank morning just because it is down - opening here is
-        // the same idempotent firstOrCreate either way.
-        $sessions = $service->ensureSessionsForDate($setting);
+        try {
+            $date = $service->resolveBoardDate($request->query('date'));
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $isToday = $date->isSameDay(Carbon::now('Asia/Jakarta'));
+
+        // Lazy ensure for today: the scheduler is the normal opener, but the
+        // board must not show a blank morning just because it is down. A past
+        // date is correction mode (audit 6 Okt 2026 #1) and only reads the
+        // sessions history holds.
+        $sessions = $service->sessionsForDate($setting, $date);
 
         return response()->json([
-            'date' => Carbon::now('Asia/Jakarta')->toDateString(),
+            'date' => $date->toDateString(),
+            'is_today' => $isToday,
+            'correction_window_days' => DailyAttendanceService::CORRECTION_WINDOW_DAYS,
             'enabled' => $setting->enabled,
             'intake_mode' => $setting->intake_mode,
             'sessions' => $sessions->values()->map(fn (DailySession $session) => [
@@ -50,12 +61,12 @@ class DailyAttendanceSessionController extends Controller
                 'roster' => $service->roster($session),
                 // Only meaningful in gate mode; computed cheap and skipped
                 // otherwise so a wali_kelas unit's board never carries it.
-                'suspected' => $setting->intake_mode === 'gerbang' && $session->type === 'masuk'
+                'suspected' => $isToday && $setting->intake_mode === 'gerbang' && $session->type === 'masuk'
                     ? $service->suspectedShares($session)
                     : [],
                 // The TU's eyes: newest self check-ins going by (gate mode)
                 // and the gate-vs-lesson cross-check, both masuk-only.
-                'recent' => $setting->intake_mode === 'gerbang' && $session->type === 'masuk'
+                'recent' => $isToday && $setting->intake_mode === 'gerbang' && $session->type === 'masuk'
                     ? $service->recentCheckIns($session)
                     : [],
                 'discrepancy' => $session->type === 'masuk'
@@ -98,6 +109,8 @@ class DailyAttendanceSessionController extends Controller
         }
 
         try {
+            $service->assertMarkable($session, $request->validated('description'));
+
             $record = $service->mark(
                 $session,
                 $student,

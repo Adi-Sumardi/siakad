@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Calendar, CalendarCheck2, Copy, Link2, RefreshCw, ShieldAlert, Split, Users } from "lucide-react";
+import { Calendar, CalendarCheck2, Copy, Download, Link2, RefreshCw, ShieldAlert, Split, Users } from "lucide-react";
 import { toast } from "sonner";
+import { CorrectionCell } from "@/components/attendance-correction";
+import { LeaveReviewPanel } from "@/components/leave-review-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -11,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
+import { downloadApiFile } from "@/lib/download";
 import { useAuth } from "@/lib/auth/auth-context";
 import { todayJakarta } from "@/lib/format";
 
@@ -37,6 +40,7 @@ type RosterRow = {
   is_late: boolean;
   source: string | null;
   marked_at: string | null;
+  leave: "sakit" | "izin" | null;
 };
 
 type TodaySession = {
@@ -82,8 +86,13 @@ export default function AdminDailyAttendancePage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [sessions, setSessions] = useState<TodaySession[] | null>(null);
   const [saving, setSaving] = useState(false);
+  // The board's day (audit 6 Okt 2026 #1): today by default; a past day is
+  // correction mode - read-only history plus re-marking with a reason.
+  const [boardDate, setBoardDate] = useState(todayJakarta());
+  const isToday = boardDate === todayJakarta();
 
   const query = isCentral && unitUlid ? `?unit=${unitUlid}` : "";
+  const boardQuery = `${query ? `${query}&` : "?"}date=${boardDate}`;
 
   const load = useCallback(() => {
     if (isCentral && !unitUlid) return;
@@ -92,10 +101,13 @@ export default function AdminDailyAttendancePage() {
       .then(setSettings)
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat pengaturan."));
     api
-      .get<{ sessions: TodaySession[] }>(`/api/admin/daily-attendance/today${query}`)
+      .get<{ sessions: TodaySession[] }>(`/api/admin/daily-attendance/today${boardQuery}`)
       .then((res) => setSessions(res.sessions))
-      .catch(() => setSessions([]));
-  }, [isCentral, unitUlid, query]);
+      .catch((err) => {
+        toast.error(err instanceof ApiError ? err.message : "Gagal memuat papan presensi.");
+        setSessions([]);
+      });
+  }, [isCentral, unitUlid, query, boardQuery]);
 
   useEffect(() => {
     if (!isCentral) return;
@@ -134,9 +146,6 @@ export default function AdminDailyAttendancePage() {
         gate_lng: settings.geo.gate_lng,
         geo_radius_m: settings.geo.radius_m,
         qr_required: settings.qr_required,
-        notify_masuk: settings.notifications.masuk,
-        notify_pulang: settings.notifications.pulang,
-        notify_absent: settings.notifications.absent,
       };
       const updated = await api.patch<Settings>(`/api/admin/daily-attendance/settings${query}`, body);
       setSettings(updated);
@@ -378,30 +387,10 @@ export default function AdminDailyAttendancePage() {
                   </div>
                 )}
 
-                <div>
-                  <Label className="text-xs">Notifikasi WhatsApp ke wali murid</Label>
-                  <div className="mt-1.5 flex flex-col gap-1.5 text-sm">
-                    {(
-                      [
-                        ["masuk", "Saat anak tercatat masuk"],
-                        ["pulang", "Saat anak tercatat pulang"],
-                        ["absent", "Anak tidak tercatat hadir saat absen masuk ditutup"],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <label key={key} className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={settings.notifications[key]}
-                          onChange={(e) =>
-                            patchSettings({ notifications: { ...settings.notifications, [key]: e.target.checked } })
-                          }
-                          className="size-4 accent-primary"
-                        />
-                        {label}
-                      </label>
-                    ))}
-                  </div>
-                </div>
+                {/* The WhatsApp attendance toggles were removed here (audit 6 Okt
+                    2026 #4): the notifier behind them was deleted 18 Sep 2026 by
+                    school decision, so ticking them did nothing. Parents see
+                    attendance in the portal instead. */}
               </div>
             </div>
 
@@ -416,12 +405,38 @@ export default function AdminDailyAttendancePage() {
             <PublicLinkCard slug={settings.public_slug} query={query} onChanged={load} />
           )}
 
+          <LeaveReviewPanel endpoint="/api/admin/leave-requests" onChanged={load} />
+
           <Card className="p-5">
-            <h2 className="text-sm font-semibold">Papan hari ini</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold">{isToday ? "Papan hari ini" : `Koreksi presensi ${boardDate}`}</h2>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="date"
+                  value={boardDate}
+                  max={todayJakarta()}
+                  onChange={(e) => e.target.value && setBoardDate(e.target.value)}
+                  className="h-8 w-40"
+                />
+                {!isToday && (
+                  <Button size="sm" variant="outline" onClick={() => setBoardDate(todayJakarta())}>
+                    Hari ini
+                  </Button>
+                )}
+              </div>
+            </div>
+            {!isToday && (
+              <p className="mt-2 rounded-lg bg-info/10 p-2.5 text-xs text-info">
+                Mode koreksi: ubah status siswa lewat kolom &quot;Koreksi&quot;. Alasan wajib diisi dan catatan lama
+                tetap tersimpan sebagai jejak (tidak dihapus).
+              </p>
+            )}
             {sessions === null && <Skeleton className="mt-3 h-40 w-full" />}
             {sessions?.length === 0 && (
               <p className="mt-2 text-sm text-muted-foreground">
-                Belum ada sesi hari ini — belum aktif, bukan hari presensi, atau belum ada semester aktif.
+                {isToday
+                  ? "Belum ada sesi hari ini — belum aktif, bukan hari presensi, atau belum ada semester aktif."
+                  : "Tidak ada sesi presensi pada tanggal ini (libur, bukan hari presensi, atau presensi belum aktif)."}
               </p>
             )}
             {sessions?.map((session) => (
@@ -442,7 +457,7 @@ export default function AdminDailyAttendancePage() {
                   </span>
                 </div>
 
-                {settings.intake_mode === "gerbang" && session.type === "masuk" && session.status === "open" && (
+                {isToday && settings.intake_mode === "gerbang" && session.type === "masuk" && session.status === "open" && (
                   <div className="mt-3 grid gap-4 lg:grid-cols-2">
                     <GateQrPanel sessionUlid={session.ulid} query={query} />
                     <ManualMark session={session} query={query} onDone={load} />
@@ -515,7 +530,8 @@ export default function AdminDailyAttendancePage() {
                         <th className="py-1.5 pr-3 font-medium">NIS</th>
                         <th className="py-1.5 pr-3 font-medium">Kelas</th>
                         <th className="py-1.5 pr-3 font-medium">Status</th>
-                        <th className="py-1.5 font-medium">Dicatat</th>
+                        <th className="py-1.5 pr-3 font-medium">Dicatat</th>
+                        <th className="py-1.5 font-medium">Koreksi</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -542,11 +558,13 @@ export default function AdminDailyAttendancePage() {
                                         ? "Izin"
                                         : "Alpa"}
                               </Badge>
+                            ) : row.leave ? (
+                              <Badge className="bg-info/10 text-info">{row.leave === "sakit" ? "Sakit" : "Izin"} (pengajuan wali)</Badge>
                             ) : (
                               <span className="text-muted-foreground">belum</span>
                             )}
                           </td>
-                          <td className="py-1.5 text-xs text-muted-foreground">
+                          <td className="py-1.5 pr-3 text-xs text-muted-foreground">
                             {row.source === "self"
                               ? `check-in sendiri${row.marked_at ? ` ${row.marked_at.slice(11, 16)}` : ""}`
                               : row.source === "wali_kelas"
@@ -554,6 +572,15 @@ export default function AdminDailyAttendancePage() {
                                 : row.source === "tu"
                                   ? "otomatis/TU"
                                   : "—"}
+                          </td>
+                          <td className="py-1.5">
+                            <CorrectionCell
+                              session={session}
+                              row={row}
+                              requireReason={!isToday}
+                              endpoint={`/api/admin/daily-attendance/sessions/${session.ulid}/records${query}`}
+                              onDone={load}
+                            />
                           </td>
                         </tr>
                       ))}
@@ -644,6 +671,22 @@ function AttendanceRecapCard({ unitUlid, waitForUnit = false }: { unitUlid: stri
               className="h-7 border-0 p-0 text-xs font-semibold shadow-none focus-visible:ring-0"
             />
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={!ready}
+            title="Rekap per siswa: hadir, terlambat, sakit, izin, alpa, % hadir"
+            onClick={() => {
+              const params = new URLSearchParams({ from, to });
+              if (unitUlid) params.set("unit", unitUlid);
+              downloadApiFile(`/api/admin/reports/attendance/export?${params.toString()}`, `rekap_presensi_${from}_sd_${to}.csv`).catch(
+                (err) => toast.error(err instanceof Error ? err.message : "Gagal mengunduh rekap."),
+              );
+            }}
+          >
+            <Download className="size-3.5" /> CSV
+          </Button>
         </div>
       </div>
 

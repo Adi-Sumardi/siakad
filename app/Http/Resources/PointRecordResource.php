@@ -28,6 +28,8 @@ class PointRecordResource extends JsonResource
             ] : null),
             'recorded_by' => $this->whenLoaded('recordedBy', fn () => $this->recordedBy?->name),
             'status' => $this->status,
+            // Shared by every row of one bulk entry (audit 6 Okt 2026 #10).
+            'batch_id' => $this->batch_id,
             'revoked_at' => $this->revoked_at,
             'revoke_reason' => $this->revoke_reason,
             'acknowledged_at' => $this->acknowledged_at,

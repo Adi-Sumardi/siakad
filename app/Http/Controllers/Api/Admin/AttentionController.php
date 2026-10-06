@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\AttentionFilterRequest;
+use App\Models\AcademicPolicy;
 use App\Models\AcademicYear;
 use App\Models\Enrollment;
 use App\Models\Grade;
@@ -115,11 +116,9 @@ class AttentionController extends Controller
                 'term' => $term?->name,
                 'term_label' => $term ? ucfirst($term->name).' '.$year?->year : null,
             ],
-            'thresholds' => [
-                'kkm' => WatchlistService::KKM,
-                'min_alpa' => WatchlistService::HIGH_ABSENTEEISM_ALPA,
-                'grade_drop' => WatchlistService::GRADE_DROP_POINTS,
-            ],
+            // Per-unit policy (audit 6 Okt 2026 #12): a unit admin's own,
+            // else the school-wide default.
+            'thresholds' => AcademicPolicy::forUnit($user->isUnitScoped() ? $user->school_unit_id : null)->thresholds(),
             'total' => $watch->count(),
             'counts' => $counts,
             'students' => $rows,

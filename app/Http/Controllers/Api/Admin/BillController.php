@@ -19,10 +19,12 @@ use App\Models\Term;
 use App\Services\Billing\BillPdfService;
 use App\Services\Billing\BillingApiClient;
 use App\Services\Billing\CheckoutService;
+use App\Services\Billing\InstallmentPlanService;
 use App\Services\Billing\VaIssuedNotifier;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
@@ -33,7 +35,7 @@ class BillController extends Controller
     {
         $bills = Bill::query()
             ->visibleTo($request->user())
-            ->with(['student.schoolUnit', 'feeType'])
+            ->with(['student.schoolUnit', 'feeType', 'installments'])
             ->when($request->string('status')->value(), fn ($q, $status) => $status === 'open'
                 ? $q->open()
                 : $q->where('status', $status))
@@ -405,6 +407,47 @@ class BillController extends Controller
         ]);
 
         return response()->json(['bill' => new BillResource($bill->fresh())]);
+    }
+
+    /**
+     * Sets (or replaces) the bill's installment plan (audit 6 Okt 2026 #6).
+     * Only for fee types that allow installments; the bill's due date moves
+     * to the final installment.
+     */
+    public function setInstallments(Request $request, string $ulid, InstallmentPlanService $plans): JsonResponse
+    {
+        $validated = $request->validate([
+            'count' => 'required|integer|min:'.InstallmentPlanService::MIN_COUNT.'|max:'.InstallmentPlanService::MAX_COUNT,
+            'first_due_date' => 'required|date_format:Y-m-d',
+        ]);
+
+        $bill = Bill::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+
+        try {
+            $bill = $plans->createPlan(
+                $bill,
+                (int) $validated['count'],
+                Carbon::createFromFormat('Y-m-d', $validated['first_due_date'], 'Asia/Jakarta')->startOfDay(),
+                $request->user(),
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['bill' => new BillResource($bill->load(['student.schoolUnit', 'feeType', 'installments']))]);
+    }
+
+    public function removeInstallments(Request $request, string $ulid, InstallmentPlanService $plans): JsonResponse
+    {
+        $bill = Bill::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+
+        try {
+            $bill = $plans->removePlan($bill, $request->user());
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['bill' => new BillResource($bill->load(['student.schoolUnit', 'feeType', 'installments']))]);
     }
 
     public function cancel(BillReasonRequest $request, string $ulid, CheckoutService $checkout): JsonResponse

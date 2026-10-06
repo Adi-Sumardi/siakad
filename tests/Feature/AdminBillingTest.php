@@ -315,6 +315,67 @@ class AdminBillingTest extends TestCase
             ->assertJsonPath('summary.families', 1);
     }
 
+    public function test_an_installment_plan_splits_the_balance_moves_the_due_date_and_tracks_payments(): void
+    {
+        $this->studentIn($this->sd, 'Anak SD');
+        $this->generateAll();
+        $admin = $this->staff('admin_unit', $this->sd);
+        $bill = Bill::firstOrFail();
+
+        // Fee type does not allow installments: refused.
+        $first = now('Asia/Jakarta')->addDays(5)->toDateString();
+        $this->actingAs($admin)->putJson("/api/admin/bills/{$bill->ulid}/installments", ['count' => 3, 'first_due_date' => $first])
+            ->assertStatus(422);
+
+        $bill->forceFill([
+            'allow_installment' => true, 'paid_amount' => 100000, 'remaining_amount' => 550000, 'status' => 'overdue',
+        ])->save();
+
+        $response = $this->actingAs($admin)->putJson("/api/admin/bills/{$bill->ulid}/installments", ['count' => 3, 'first_due_date' => $first])
+            ->assertOk()
+            ->assertJsonPath('bill.status', 'partial')
+            ->assertJsonPath('bill.installments.0.amount', 183000)
+            ->assertJsonPath('bill.installments.2.amount', 184000)
+            ->assertJsonPath('bill.installments.0.status', 'unpaid');
+
+        $this->assertSame(
+            now('Asia/Jakarta')->addDays(5)->addMonthsNoOverflow(2)->toDateString(),
+            $response->json('bill.due_date'),
+        );
+
+        // A payment lands through the normal path (paid_amount moves); the
+        // plan reads it without anyone touching the rows.
+        $bill->refresh()->forceFill(['paid_amount' => 300000, 'remaining_amount' => 350000])->save();
+        $rows = \App\Services\Billing\InstallmentPlanService::progress($bill->fresh());
+
+        $this->assertSame('paid', $rows[0]['status']);
+        $this->assertSame('partial', $rows[1]['status']);
+        $this->assertEquals(17000, $rows[1]['paid']);
+        $this->assertEquals(166000, \App\Services\Billing\InstallmentPlanService::dueNow($bill->fresh()));
+
+        $this->actingAs($admin)->deleteJson("/api/admin/bills/{$bill->ulid}/installments")->assertOk();
+        $this->assertSame(0, $bill->installments()->count());
+    }
+
+    public function test_the_receivables_export_is_a_scoped_excel_friendly_csv(): void
+    {
+        $this->studentIn($this->sd, 'Anak SD');
+        $this->studentIn($this->smp, 'Anak SMP');
+        $this->generateAll();
+
+        $response = $this->actingAs($this->staff('admin_unit', $this->sd))
+            ->get('/api/admin/reports/receivables/export')
+            ->assertOk()
+            ->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
+
+        $csv = $response->streamedContent();
+
+        $this->assertStringStartsWith("\xEF\xBB\xBF", $csv);
+        $this->assertStringContainsString('Anak SD', $csv);
+        $this->assertStringNotContainsString('Anak SMP', $csv);
+        $this->assertStringContainsString(';', strtok($csv, "\n"));
+    }
+
     public function test_a_fee_types_code_cannot_be_renamed(): void
     {
         $this->actingAs($this->staff('admin'))

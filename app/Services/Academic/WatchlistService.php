@@ -2,6 +2,7 @@
 
 namespace App\Services\Academic;
 
+use App\Models\AcademicPolicy;
 use App\Models\Term;
 use Illuminate\Support\Collection;
 
@@ -17,7 +18,7 @@ use Illuminate\Support\Collection;
  */
 class WatchlistService
 {
-    /** Assumed school KKM - a dashboard threshold, not a stored policy (yet, see T24). */
+    /** Out-of-the-box KKM; the effective one is AcademicPolicy::forUnit() (audit 6 Okt 2026 #12, T24). */
     public const KKM = 70;
 
     /** An enrollment's rollup alpa count from which a child is worth flagging. */
@@ -48,28 +49,31 @@ class WatchlistService
         // excluded them - the dashboard arguing with itself.
         $students = $students->where('status', 'active');
 
-        $current = $this->perStudentAverages($grades, $term?->id);
-        $previous = $this->perStudentAverages($grades, $prevTerm?->id);
+        $unitByStudent = $students->pluck('school_unit_id', 'id');
+        $current = $this->perStudentAverages($grades, $term?->id, $unitByStudent);
+        $previous = $this->perStudentAverages($grades, $prevTerm?->id, $unitByStudent);
         $enrollmentByStudent = $enrollments->groupBy('student_id');
         $violationsByStudent = $points->filter(fn ($p) => (int) $p->points < 0)->groupBy('student_id');
 
         return $students
             ->map(function ($student) use ($enrollmentByStudent, $violationsByStudent, $current, $previous) {
                 $reasons = [];
+                // The child's own unit policy (audit 6 Okt 2026 #12).
+                $policy = AcademicPolicy::forUnit($student->school_unit_id);
 
                 $alpa = (int) ($enrollmentByStudent->get($student->id)?->first()->absent_count ?? 0);
-                if ($alpa >= self::HIGH_ABSENTEEISM_ALPA) {
+                if ($alpa >= $policy->alpa_threshold) {
                     $reasons[] = 'absenteeism';
                 }
 
                 $cur = $current->get($student->id);
-                if ($cur !== null && $cur < self::KKM) {
+                if ($cur !== null && $cur < $policy->kkm) {
                     $reasons[] = 'below_kkm';
                 }
 
                 $prev = $previous->get($student->id);
                 $drop = ($cur !== null && $prev !== null) ? round($prev - $cur, 2) : null;
-                if ($drop !== null && $drop >= self::GRADE_DROP_POINTS) {
+                if ($drop !== null && $drop >= $policy->grade_drop) {
                     $reasons[] = 'grade_decline';
                 }
 
@@ -107,7 +111,7 @@ class WatchlistService
      *
      * @return Collection<int, float> keyed by student id, only students with at least one complete subject
      */
-    public function perStudentAverages(Collection $termGrades, ?int $termId): Collection
+    public function perStudentAverages(Collection $termGrades, ?int $termId, ?Collection $unitByStudent = null): Collection
     {
         if (! $termId) {
             return collect();
@@ -116,19 +120,11 @@ class WatchlistService
         return $termGrades
             ->where('term_id', $termId)
             ->groupBy(fn ($g) => $g->student_id.'|'.$g->subject_id)
-            ->map(function (Collection $rows) {
+            ->map(function (Collection $rows) use ($unitByStudent) {
                 $scores = $rows->pluck('score', 'category')->map(fn ($s) => (float) $s);
+                $unitId = $unitByStudent?->get($rows->first()->student_id);
 
-                if (array_diff(array_keys(GradeService::WEIGHTS), $scores->keys()->all())) {
-                    return null;
-                }
-
-                $total = 0.0;
-                foreach (GradeService::WEIGHTS as $category => $weight) {
-                    $total += (float) $scores[$category] * $weight;
-                }
-
-                return round($total, 2);
+                return GradeService::weighted($scores, AcademicPolicy::forUnit($unitId)->weights());
             })
             ->filter(fn ($final) => $final !== null)
             ->groupBy(fn ($final, string $key) => explode('|', $key)[0])

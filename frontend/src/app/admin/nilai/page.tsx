@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Download, Search } from "lucide-react";
+import { AcademicPolicyCard } from "@/components/admin/academic-policy-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -108,8 +109,10 @@ export default function AdminNilaiPage() {
         </p>
       </div>
 
+      <AcademicPolicyCard />
+
       <Card className="p-5">
-        <h2 className="mb-3 text-sm font-semibold">Unduh rapor siswa</h2>
+        <h2 className="mb-3 text-sm font-semibold">Unduh rekap hasil belajar (internal, bukan rapor resmi)</h2>
         <div className="flex flex-wrap items-end gap-2">
           <form onSubmit={searchStudents} className="flex gap-2">
             <Input
@@ -138,7 +141,7 @@ export default function AdminNilaiPage() {
                 <span className="text-sm">{s.nama_lengkap} <span className="text-xs text-muted-foreground">{s.nis}</span></span>
                 <Button size="sm" variant="ghost" disabled={downloading === s.ulid} onClick={() => downloadRapor(s)} className="gap-1.5 text-xs">
                   <Download className="size-3.5" />
-                  {downloading === s.ulid ? "Mengunduh…" : "Unduh Rapor"}
+                  {downloading === s.ulid ? "Mengunduh…" : "Unduh Rekap"}
                 </Button>
               </div>
             ))}

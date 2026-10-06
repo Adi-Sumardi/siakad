@@ -139,6 +139,28 @@ class PointLedgerTest extends TestCase
         $students->each(fn ($s) => $this->assertSame(-5, $this->ledger()->balance($s, $this->term)));
     }
 
+    public function test_a_whole_bulk_entry_is_revoked_in_one_call(): void
+    {
+        $guru = $this->staff('guru', $this->sd);
+        $rule = $this->rule(['points' => 5, 'type' => 'violation']);
+        $students = collect([$this->studentIn($this->sd, 'A'), $this->studentIn($this->sd, 'B')]);
+
+        $records = $this->ledger()->recordBulk($students, $this->term, $rule, $guru, now(), 'Salah aturan');
+        $batch = $records->first()->batch_id;
+        $this->assertNotNull($batch);
+        // Unrelated single entry stays untouched.
+        $this->ledger()->record($students[0], $this->term, $rule, $guru, now(), 'Entri tunggal');
+
+        $this->actingAs($this->staff('guru', $this->smp))->postJson("/api/guru/points/batches/{$batch}/revoke", ['reason' => 'Bukan unit saya'])
+            ->assertStatus(422);
+
+        $this->actingAs($guru)->postJson("/api/guru/points/batches/{$batch}/revoke", ['reason' => 'Aturan yang dipilih keliru'])
+            ->assertOk()->assertJsonPath('revoked', 2);
+
+        $this->assertSame(-5, $this->ledger()->balance($students[0], $this->term));
+        $this->assertSame(0, $this->ledger()->balance($students[1], $this->term));
+    }
+
     public function test_revoking_removes_a_row_from_the_balance_but_keeps_it_on_file(): void
     {
         $student = $this->studentIn($this->sd);

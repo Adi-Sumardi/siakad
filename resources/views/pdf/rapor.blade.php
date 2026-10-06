@@ -70,8 +70,11 @@
 <table class="doc-badge-table">
     <tr>
         <td>
-            <div class="doc-type">LAPORAN HASIL BELAJAR (RAPOR)</div>
-            <div class="muted" style="font-size: 8.5pt; margin-top: 2px;">Semester {{ $term->label() }}</div>
+            {{-- Audit 6 Okt 2026 #13 (T15): the official rapor is issued by Al
+                 Azhar pusat - until the mentor decides this document's fate it
+                 says plainly that it is an internal progress recap. --}}
+            <div class="doc-type">REKAP HASIL BELAJAR (INTERNAL)</div>
+            <div class="muted" style="font-size: 8.5pt; margin-top: 2px;">Semester {{ $term->label() }} · bukan rapor resmi</div>
         </td>
         <td class="right">
             <div class="muted" style="font-size: 8pt;">Diterbitkan: {{ now()->translatedFormat('d F Y') }}</div>
@@ -131,6 +134,37 @@
     </tbody>
 </table>
 
+@if (! empty($extracurriculars))
+<table class="items" style="margin-top: 12px;">
+    <thead>
+        <tr>
+            <th style="width: 5%">No</th>
+            <th>Ekstrakurikuler</th>
+            <th class="center" style="width: 15%">Predikat</th>
+            <th class="right" style="width: 15%">Kehadiran</th>
+            <th>Keterangan</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach ($extracurriculars as $index => $row)
+            <tr>
+                <td class="center">{{ $index + 1 }}</td>
+                <td><strong>{{ $row['name'] }}</strong></td>
+                <td class="center">
+                    @if ($row['predikat'])
+                        <strong>{{ $row['predikat'] }}</strong> ({{ $row['predikat_label'] }})
+                    @else
+                        <span class="incomplete">Belum dinilai</span>
+                    @endif
+                </td>
+                <td class="right">{{ $row['pertemuan'] > 0 ? $row['hadir'].' / '.$row['pertemuan'] : '—' }}</td>
+                <td>{{ $row['keterangan'] ?? '' }}</td>
+            </tr>
+        @endforeach
+    </tbody>
+</table>
+@endif
+
 <table class="summary-row">
     <tr>
         <td style="width: 3%"></td>
@@ -161,6 +195,7 @@
 </table>
 
 <div class="foot">
+    Rekap ini untuk pemantauan perkembangan siswa dan bukan pengganti rapor resmi yang diterbitkan Al Azhar.<br>
     Dokumen ini sah diterbitkan otomatis oleh Sistem Informasi Akademik & Keuangan Terpadu (SIAKAD) YAPI Jakarta.<br>
     © {{ date('Y') }} Yayasan Asrama Pelajar Islam (YAPI) Rawamangun Jakarta. All rights reserved.
 </div>

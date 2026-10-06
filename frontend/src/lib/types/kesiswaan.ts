@@ -8,6 +8,8 @@ export type PointRecord = {
   rule: { code: string; name: string; category: string } | null;
   recorded_by: string | null;
   status: "recorded" | "revoked";
+  /** Shared by every row of one bulk entry; null for single entries. */
+  batch_id?: string | null;
   revoked_at: string | null;
   revoke_reason: string | null;
   created_at: string;

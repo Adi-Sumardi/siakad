@@ -567,6 +567,30 @@ class AttendanceSessionTest extends TestCase
         $this->assertSame('SD Sakinah', $response->json('by_unit.0.unit'));
     }
 
+    public function test_the_attendance_export_has_one_row_per_student_with_day_counts(): void
+    {
+        $classroom = $this->classroomIn($this->sd);
+        $student = $this->studentIn($classroom, nis: '20099');
+        $admin = $this->staff('admin_unit', $this->sd);
+
+        $this->dailyMark($student, $classroom, 'hadir', Carbon::today()->toDateString());
+        $this->dailyMark($student, $classroom, 'alpa', Carbon::today()->subDay()->toDateString());
+
+        $from = Carbon::today()->subDays(5)->toDateString();
+        $to = Carbon::today()->toDateString();
+
+        $csv = $this->actingAs($admin)
+            ->get("/api/admin/reports/attendance/export?from={$from}&to={$to}")
+            ->assertOk()
+            ->streamedContent();
+
+        $lines = array_values(array_filter(explode("\n", trim($csv))));
+        $this->assertCount(2, $lines); // header + one student
+        // Unit;Kelas;NIS;Nama;Hadir;Terlambat;Sakit;Izin;Alpa;Hari;%
+        $this->assertStringContainsString('20099;"Aisyah Nur Ramadhani"', $lines[1]);
+        $this->assertStringEndsWith(';1;0;0;0;1;2;50,0', $lines[1]);
+    }
+
     public function test_a_record_that_occurred_today_is_included_when_the_report_range_ends_today(): void
     {
         $classroom = $this->classroomIn($this->sd);

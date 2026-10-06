@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\AcademicPolicyController;
 use App\Http\Controllers\Api\Admin\AchievementController as AdminAchievementController;
 use App\Http\Controllers\Api\Admin\ActivityLogController;
 use App\Http\Controllers\Api\Admin\AnnouncementController as AdminAnnouncementController;
@@ -15,6 +16,7 @@ use App\Http\Controllers\Api\Admin\DiscountController;
 use App\Http\Controllers\Api\Admin\FailedJobController;
 use App\Http\Controllers\Api\Admin\FeeSettingController;
 use App\Http\Controllers\Api\Admin\GradeController;
+use App\Http\Controllers\Api\Admin\GuardianLinkController;
 use App\Http\Controllers\Api\Admin\HolidayController;
 use App\Http\Controllers\Api\Admin\ImportController;
 use App\Http\Controllers\Api\Admin\IntegrationEventController;
@@ -37,6 +39,8 @@ use App\Http\Controllers\Api\Auth\InvitationController;
 use App\Http\Controllers\Api\Auth\OtpController;
 use App\Http\Controllers\Api\Auth\SessionController;
 use App\Http\Controllers\Api\FileController;
+use App\Http\Controllers\Api\LeaveRequestReviewController;
+use App\Http\Controllers\Api\StudentDocumentController;
 use App\Http\Controllers\Api\Guru\AchievementController as GuruAchievementController;
 use App\Http\Controllers\Api\Guru\AttendanceSessionController as GuruAttendanceSessionController;
 use App\Http\Controllers\Api\Guru\ClassroomController as GuruClassroomController;
@@ -54,6 +58,7 @@ use App\Http\Controllers\Api\Wali\DashboardController as WaliDashboardController
 use App\Http\Controllers\Api\Wali\ExtracurricularController;
 use App\Http\Controllers\Api\Wali\FeeSelectionController as WaliFeeSelectionController;
 use App\Http\Controllers\Api\Wali\GradeController as WaliGradeController;
+use App\Http\Controllers\Api\Wali\LeaveRequestController as WaliLeaveRequestController;
 use App\Http\Controllers\Api\Wali\PointController as WaliPointController;
 use App\Http\Controllers\Api\Webhooks\PmbHandoffController;
 use Illuminate\Support\Facades\Route;
@@ -144,6 +149,16 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
 
     Route::get('/students/{ulid}/points', [WaliPointController::class, 'index']);
     Route::get('/students/{ulid}/attendance', [WaliAttendanceController::class, 'index']);
+    // Izin/sakit notice (audit 6 Okt 2026 #3) - the lane that used to be a
+    // phone call to TU. Filing changes nothing; staff approval does.
+    Route::get('/students/{ulid}/leave-requests', [WaliLeaveRequestController::class, 'index']);
+    Route::post('/students/{ulid}/leave-requests', [WaliLeaveRequestController::class, 'store'])->middleware('throttle:20,1');
+    Route::post('/leave-requests/{ulid}/cancel', [WaliLeaveRequestController::class, 'cancel']);
+    // The child's documents (audit 6 Okt 2026 #7): a guardian's upload waits
+    // for TU verification; only their own unverified upload can be removed.
+    Route::get('/students/{ulid}/documents', [StudentDocumentController::class, 'index']);
+    Route::post('/students/{ulid}/documents', [StudentDocumentController::class, 'store'])->middleware('throttle:20,1');
+    Route::delete('/student-documents/{ulid}', [StudentDocumentController::class, 'destroy']);
     Route::get('/students/{ulid}/achievements', [WaliAchievementController::class, 'index']);
     // A guardian's own account of a win - it waits for staff to confirm it,
     // and never carries points on its own.
@@ -181,6 +196,10 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     // re-marking supersedes so a correction is one tap.
     Route::get('/daily-attendance/today', [GuruDailyAttendanceController::class, 'today']);
     Route::post('/daily-attendance/sessions/{ulid}/records', [GuruDailyAttendanceController::class, 'mark']);
+    // Guardians' izin/sakit notices for the teacher's own homeroom students.
+    Route::get('/leave-requests', [LeaveRequestReviewController::class, 'index']);
+    Route::post('/leave-requests/{ulid}/approve', [LeaveRequestReviewController::class, 'approve']);
+    Route::post('/leave-requests/{ulid}/reject', [LeaveRequestReviewController::class, 'reject']);
 
     Route::get('/point-rules', [GuruPointController::class, 'rules']);
     Route::get('/students/{ulid}/points', [GuruPointController::class, 'studentLedger']);
@@ -190,6 +209,8 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     // Excludes a record from the balance; the row and its reasoning stay on
     // file - never a DELETE. See docs/01-ARSITEKTUR.md D6.
     Route::patch('/points/{ulid}/revoke', [GuruPointController::class, 'revoke']);
+    // A whole bulk entry at once (audit 6 Okt 2026 #10), same revoke rules.
+    Route::post('/points/batches/{batchId}/revoke', [GuruPointController::class, 'revokeBatch']);
 
     // Trusted immediately, unlike a guardian's own submission of the same thing.
     Route::post('/achievements', [GuruAchievementController::class, 'store']);
@@ -227,6 +248,12 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     Route::get('/extracurriculars/{ulid}/members', [App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'roster']);
     Route::post('/extracurriculars/{ulid}/members', [App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'assignStudent']);
     Route::delete('/extracurriculars/{ulid}/members/{memberUlid}', [App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'removeMember']);
+    // Practice-day attendance and the per-term predikat the rapor prints
+    // (audit 6 Okt 2026 #8) - same pembina-only scope as the roster.
+    Route::get('/extracurriculars/{ulid}/meetings', [App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'meetings']);
+    Route::post('/extracurriculars/{ulid}/meetings', [App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'storeMeeting']);
+    Route::get('/extracurriculars/{ulid}/assessments', [App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'assessments']);
+    Route::put('/extracurriculars/{ulid}/assessments', [App\Http\Controllers\Api\Guru\ExtracurricularController::class, 'storeAssessments']);
 });
 
 /*
@@ -241,6 +268,8 @@ Route::middleware(['auth:sanctum', 'active'])->prefix('files')->group(function (
     Route::get('/achievements/{ulid}/foto', [FileController::class, 'achievementFoto']);
     Route::get('/points/{ulid}/evidence', [FileController::class, 'pointEvidence']);
     Route::get('/announcements/{ulid}/file', [FileController::class, 'announcementFile']);
+    Route::get('/leave-requests/{ulid}/attachment', [LeaveRequestReviewController::class, 'attachment']);
+    Route::get('/student-documents/{ulid}', [StudentDocumentController::class, 'file']);
 });
 
 /*
@@ -257,6 +286,18 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     // registered before any /students/{ulid} capture so the literal path wins.
     Route::get('/students/attention', [AttentionController::class, 'index']);
     Route::get('/students/dapodik-export', [StudentController::class, 'exportDapodik']);
+    // Student documents (audit 6 Okt 2026 #7): staff uploads arrive verified.
+    Route::get('/students/{ulid}/documents', [StudentDocumentController::class, 'index']);
+    Route::post('/students/{ulid}/documents', [StudentDocumentController::class, 'store']);
+    Route::post('/student-documents/{ulid}/verify', [StudentDocumentController::class, 'verify']);
+    // Guardian <-> student links (audit 6 Okt 2026 #9): link, switch the
+    // primary / billing contact, unlink - previously DB-only after import.
+    Route::get('/guardians/search', [GuardianLinkController::class, 'search']);
+    Route::get('/students/{ulid}/guardians', [GuardianLinkController::class, 'index']);
+    Route::post('/students/{ulid}/guardians', [GuardianLinkController::class, 'store']);
+    Route::patch('/students/{ulid}/guardians/{guardianUlid}', [GuardianLinkController::class, 'update']);
+    Route::delete('/students/{ulid}/guardians/{guardianUlid}', [GuardianLinkController::class, 'destroy']);
+    Route::delete('/student-documents/{ulid}', [StudentDocumentController::class, 'destroy']);
     Route::get('/bills', [AdminBillController::class, 'index']);
     // One-off bills for unexpected cases - same fee catalogue, statuses and
     // payment lanes as generated bills; VA follows the fee type's prefix
@@ -271,6 +312,9 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
         ->middleware('throttle:20,1');
     Route::get('/bills/{ulid}/pdf', [AdminBillController::class, 'pdf']);
     Route::post('/bills/{ulid}/waive', [AdminBillController::class, 'waive']);
+    // Installment plan for a bill whose fee type allows it (audit 6 Okt 2026 #6).
+    Route::put('/bills/{ulid}/installments', [AdminBillController::class, 'setInstallments']);
+    Route::delete('/bills/{ulid}/installments', [AdminBillController::class, 'removeInstallments']);
     Route::post('/bills/{ulid}/cancel', [AdminBillController::class, 'cancel']);
 
     // No manual verification endpoints: the bank's callback settles online
@@ -286,6 +330,11 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/reports/receivables', [ReportController::class, 'receivables']);
     Route::get('/reports/collections', [ReportController::class, 'collections']);
     Route::get('/reports/attendance', [AttendanceReportController::class, 'summary']);
+    // CSV downloads of the same three reports (audit 6 Okt 2026 #5) - the
+    // monthly class recap and the bendahara's lists, openable in Excel.
+    Route::get('/reports/receivables/export', [ReportController::class, 'receivablesExport']);
+    Route::get('/reports/collections/export', [ReportController::class, 'collectionsExport']);
+    Route::get('/reports/attendance/export', [AttendanceReportController::class, 'export']);
 
     Route::get('/subjects', [SubjectController::class, 'index']);
     Route::post('/subjects', [SubjectController::class, 'store']);
@@ -413,6 +462,9 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
     Route::get('/unit-jenjang', [ReferenceController::class, 'unitJenjang']);
 
     Route::get('/grades', [GradeController::class, 'index']);
+    // Grade weights + watchlist thresholds (audit 6 Okt 2026 #11-12) - read
+    // here; written only in the central-admin group below.
+    Route::get('/academic-policy', [AcademicPolicyController::class, 'index']);
     Route::get('/students/{ulid}/rapor', [GradeController::class, 'rapor']);
 
     // Daily attendance (T14, DESAIN-PRESENSI-HARIAN.md): a unit's own bells
@@ -432,6 +484,10 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
         ->middleware('throttle:20,1');
     Route::get('/daily-attendance/sessions/{ulid}/gate-qr', [DailyAttendanceSessionController::class, 'gateQr']);
     Route::post('/daily-attendance/sessions/{ulid}/records', [DailyAttendanceSessionController::class, 'mark']);
+    // TU review of guardians' izin/sakit notices (unit-scoped for admin_unit).
+    Route::get('/leave-requests', [LeaveRequestReviewController::class, 'index']);
+    Route::post('/leave-requests/{ulid}/approve', [LeaveRequestReviewController::class, 'approve']);
+    Route::post('/leave-requests/{ulid}/reject', [LeaveRequestReviewController::class, 'reject']);
 });
 
 /*
@@ -440,6 +496,8 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
  * group above; deleting any rate, Cambridge included, stays here.
  */
 Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
+    Route::put('/academic-policy', [AcademicPolicyController::class, 'update']);
+    Route::delete('/academic-policy/{unitUlid}', [AcademicPolicyController::class, 'destroy']);
     Route::post('/fee-types', [FeeSettingController::class, 'storeType']);
     Route::patch('/fee-types/{feeType}', [FeeSettingController::class, 'updateType']);
     Route::delete('/fee-types/{feeType}', [FeeSettingController::class, 'destroyType']);

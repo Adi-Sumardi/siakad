@@ -36,6 +36,8 @@ class RaporPdfService
             'subjects' => $grades->summaryForRapor($student, $term),
             'attendance' => app(DailyAttendanceService::class)->summary($student, $term),
             'pointBalance' => app(PointLedger::class)->balance($student, $term),
+            // Ekskul predikat + practice attendance (audit 6 Okt 2026 #8).
+            'extracurriculars' => app(ExtracurricularReport::class)->forStudent($student, $term),
             'schoolName' => config('app.name'),
             'logoBase64' => $logoBase64,
         ])->setPaper('a4');

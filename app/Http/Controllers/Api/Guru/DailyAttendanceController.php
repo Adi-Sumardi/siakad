@@ -31,12 +31,23 @@ class DailyAttendanceController extends Controller
     {
         $unit = $request->user()->schoolUnit ?: abort(404);
         $setting = $this->service->ensureSettings($unit);
-        $sessions = $this->service->ensureSessionsForDate($setting);
+
+        try {
+            $date = $this->service->resolveBoardDate($request->query('date'));
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        // Today lazily opens its windows; a past date is correction mode and
+        // only reads what history holds (audit 6 Okt 2026 #1).
+        $sessions = $this->service->sessionsForDate($setting, $date);
 
         $homeroomIds = $this->homeroomClassroomIds($request);
 
         return response()->json([
-            'date' => Carbon::now('Asia/Jakarta')->toDateString(),
+            'date' => $date->toDateString(),
+            'is_today' => $date->isSameDay(Carbon::now('Asia/Jakarta')),
+            'correction_window_days' => DailyAttendanceService::CORRECTION_WINDOW_DAYS,
             'enabled' => $setting->enabled,
             'intake_mode' => $setting->intake_mode,
             'homeroom_classrooms' => Classroom::whereIn('id', $homeroomIds)->orderBy('name')->get()
@@ -73,6 +84,8 @@ class DailyAttendanceController extends Controller
         }
 
         try {
+            $this->service->assertMarkable($session, $request->validated('description'));
+
             $record = $this->service->mark(
                 $session,
                 $student,

@@ -241,4 +241,50 @@ class ExtracurricularTest extends TestCase
 
         $this->assertSame('active', $member->status);
     }
+
+    public function test_pembina_records_practice_and_predikat_that_reach_the_report(): void
+    {
+        $term = \App\Models\Term::create([
+            'academic_year_id' => $this->year->id, 'name' => 'ganjil',
+            'starts_on' => '2026-07-01', 'ends_on' => '2026-12-31', 'is_active' => true,
+        ]);
+        \Illuminate\Support\Carbon::setTestNow(\Illuminate\Support\Carbon::create(2026, 9, 20, 10, 0, 0, 'Asia/Jakarta'));
+
+        $pembina = $this->staff('guru', $this->sd);
+        $ekskul = $this->ekskul($this->sd, ['pembina_id' => $pembina->id]);
+        $student = $this->studentIn($this->sd);
+        $member = $this->service()->assignStudent($ekskul, $student, $this->staff('admin'));
+
+        foreach (['2026-09-05' => 'hadir', '2026-09-12' => 'alpa', '2026-09-19' => 'hadir'] as $date => $status) {
+            $this->actingAs($pembina)->postJson("/api/guru/extracurriculars/{$ekskul->ulid}/meetings", [
+                'date' => $date, 'records' => [['member_ulid' => $member->ulid, 'status' => $status]],
+            ])->assertCreated();
+        }
+
+        // Future dates and non-members are refused.
+        $this->actingAs($pembina)->postJson("/api/guru/extracurriculars/{$ekskul->ulid}/meetings", [
+            'date' => '2026-09-30', 'records' => [['member_ulid' => $member->ulid, 'status' => 'hadir']],
+        ])->assertStatus(422);
+
+        $this->actingAs($pembina)->getJson("/api/guru/extracurriculars/{$ekskul->ulid}/meetings")
+            ->assertOk()
+            ->assertJsonPath("term_summary.{$member->ulid}.hadir", 2)
+            ->assertJsonPath("term_summary.{$member->ulid}.alpa", 1);
+
+        $this->actingAs($pembina)->putJson("/api/guru/extracurriculars/{$ekskul->ulid}/assessments", [
+            'items' => [['member_ulid' => $member->ulid, 'predikat' => 'A', 'keterangan' => 'Aktif dan disiplin']],
+        ])->assertOk();
+
+        // Another teacher is not this activity's pembina: 404.
+        $this->actingAs($this->staff('guru', $this->sd))->getJson("/api/guru/extracurriculars/{$ekskul->ulid}/assessments")
+            ->assertNotFound();
+
+        $report = app(\App\Services\Academic\ExtracurricularReport::class)->forStudent($student, $term);
+
+        $this->assertSame('A', $report[0]['predikat']);
+        $this->assertSame(2, $report[0]['hadir']);
+        $this->assertSame(3, $report[0]['pertemuan']);
+
+        \Illuminate\Support\Carbon::setTestNow();
+    }
 }

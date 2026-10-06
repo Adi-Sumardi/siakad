@@ -31,6 +31,7 @@ class Bill extends Model
         'due_date' => 'date',
         'grace_period_end' => 'date',
         'allow_installment' => 'boolean',
+        'installment_baseline' => 'decimal:2',
         'period_month' => 'integer',
         'issued_at' => 'datetime',
         'paid_at' => 'datetime',

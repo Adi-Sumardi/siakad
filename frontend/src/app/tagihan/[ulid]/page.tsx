@@ -21,6 +21,7 @@ import { API_BASE, api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
 import { YAYASAN_NAME } from "@/lib/brand";
 import { rupiah, tanggal } from "@/lib/format";
+import { InstallmentTable } from "@/components/installment-schedule";
 import type { Bill, Payment } from "@/lib/types/billing";
 
 export default function BillDetailPage({ params }: { params: Promise<{ ulid: string }> }) {
@@ -290,6 +291,20 @@ export default function BillDetailPage({ params }: { params: Promise<{ ulid: str
             )}
           </div>
         </Card>
+
+        {/* Installment plan set by the school (audit 6 Okt 2026 #6) */}
+        {bill.installments && bill.installments.length > 0 && (
+          <Card className="p-6 border-border shadow-xs space-y-3">
+            <h3 className="text-sm font-bold text-foreground">Jadwal Cicilan</h3>
+            {!isPaid && bill.installment_due_now != null && bill.installment_due_now > 0 && (
+              <p className="rounded-lg bg-primary/5 p-3 text-sm">
+                Agar sesuai jadwal, bayar <strong className="tabular">{rupiah(bill.installment_due_now)}</strong> — pilih
+                nominal kustom saat membayar di halaman Tagihan.
+              </p>
+            )}
+            <InstallmentTable rows={bill.installments} />
+          </Card>
+        )}
 
         {/* Payment History for this Bill */}
         {payments.length > 0 && (

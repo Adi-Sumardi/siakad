@@ -380,7 +380,8 @@ export default function BillsPage() {
                               variant="outline"
                               onClick={() => {
                                 setCustomBill(bill);
-                                setCustomAmount(String(bill.remaining_amount));
+                                // With a plan, prefill the on-schedule installment (audit 6 Okt 2026 #6).
+                                setCustomAmount(String(bill.installment_due_now && bill.installment_due_now > 0 ? bill.installment_due_now : bill.remaining_amount));
                               }}
                               className="text-xs font-semibold gap-1.5 h-8 text-primary border-primary/30 hover:bg-primary/5"
                             >

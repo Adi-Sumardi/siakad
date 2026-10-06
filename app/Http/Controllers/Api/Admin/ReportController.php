@@ -6,9 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\DateRangeRequest;
 use App\Models\Bill;
 use App\Models\Payment;
+use App\Support\CsvDownload;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
 {
@@ -51,6 +53,81 @@ class ReportController extends Controller
                     'outstanding' => round((float) $group->sum('remaining_amount'), 2),
                 ])->values(),
         ]);
+    }
+
+    /**
+     * Every open bill as one CSV row (audit 6 Okt 2026 #5) - the list a
+     * bendahara actually works through, sorted by class then name so it
+     * prints straight into a call sheet per wali kelas.
+     */
+    public function receivablesExport(Request $request): StreamedResponse
+    {
+        $bills = Bill::query()
+            ->visibleTo($request->user())
+            ->open()
+            ->with(['student.enrollments.classroom', 'student.schoolUnit', 'feeType'])
+            ->get()
+            ->sortBy(fn (Bill $bill) => [
+                $bill->student->schoolUnit?->label ?? '',
+                $bill->student->currentEnrollment()?->classroom?->name ?? '',
+                $bill->student->nama_lengkap,
+                $bill->due_date?->toDateString() ?? '',
+            ]);
+
+        return CsvDownload::make(
+            'piutang_'.Carbon::now('Asia/Jakarta')->format('Y-m-d').'.csv',
+            ['Unit', 'Kelas', 'NIS', 'Nama Siswa', 'No. Tagihan', 'Jenis Biaya', 'Keterangan', 'Jatuh Tempo', 'Status', 'Total', 'Terbayar', 'Sisa'],
+            $bills->map(fn (Bill $bill) => [
+                $bill->student->schoolUnit?->label,
+                $bill->student->currentEnrollment()?->classroom?->name ?? 'Belum ada kelas',
+                $bill->student->nis,
+                $bill->student->nama_lengkap,
+                $bill->bill_number,
+                $bill->feeType?->name,
+                $bill->description,
+                $bill->due_date?->toDateString(),
+                $bill->status === 'overdue' ? 'Lewat jatuh tempo' : 'Belum lunas',
+                (int) round((float) $bill->total_amount),
+                (int) round((float) $bill->paid_amount),
+                (int) round((float) $bill->remaining_amount),
+            ]),
+        );
+    }
+
+    /** One row per completed payment in the window, with the bills it settled. */
+    public function collectionsExport(DateRangeRequest $request): StreamedResponse
+    {
+        $validated = $request->validated();
+
+        $from = isset($validated['from']) ? Carbon::parse($validated['from'])->startOfDay() : now()->startOfMonth();
+        $to = isset($validated['to']) ? Carbon::parse($validated['to'])->endOfDay() : now()->endOfDay();
+
+        $payments = Payment::query()
+            ->visibleTo($request->user())
+            ->where('status', 'completed')
+            ->whereBetween('paid_at', [$from, $to])
+            ->with(['bills.feeType', 'bills.student.schoolUnit'])
+            ->orderBy('paid_at')
+            ->get();
+
+        return CsvDownload::make(
+            'penerimaan_'.$from->toDateString().'_sd_'.$to->toDateString().'.csv',
+            ['Tanggal Bayar', 'No. Pembayaran', 'Metode', 'Unit', 'NIS', 'Nama Siswa', 'Tagihan Dilunasi', 'Jumlah'],
+            $payments->map(function (Payment $payment) {
+                $students = $payment->bills->pluck('student')->filter()->unique('id');
+
+                return [
+                    $payment->paid_at?->timezone('Asia/Jakarta')->format('Y-m-d H:i'),
+                    $payment->payment_number,
+                    $payment->method ?? 'lainnya',
+                    $students->map(fn ($s) => $s->schoolUnit?->label)->filter()->unique()->implode(', '),
+                    $students->pluck('nis')->implode(', '),
+                    $students->pluck('nama_lengkap')->implode(', '),
+                    $payment->bills->map(fn ($bill) => $bill->bill_number.' ('.$bill->feeType?->name.')')->implode(', '),
+                    (int) round((float) $payment->amount),
+                ];
+            }),
+        );
     }
 
     /** What actually came in, over a window an admin picks. */

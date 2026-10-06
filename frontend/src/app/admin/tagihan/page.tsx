@@ -16,6 +16,7 @@ import { downloadApiFile as downloadApiFileShared } from "@/lib/download";
 import { useAuth } from "@/lib/auth/auth-context";
 import { dueLabel, rupiah, tanggal, todayJakarta } from "@/lib/format";
 import { isOpen, OPEN_STATUSES, type Bill, type Payment } from "@/lib/types/billing";
+import { InstallmentEditor } from "@/components/installment-schedule";
 import { Pagination } from "@/components/ui/pagination";
 
 type Paginated<T> = {
@@ -267,6 +268,8 @@ function AdminBillsContent() {
   // after a newer one used to overwrite the fresh list with the old
   // filter's rows.
   const loadRequestId = useRef(0);
+  // Which bill's installment editor is open (audit 6 Okt 2026 #6).
+  const [planFor, setPlanFor] = useState<string | null>(null);
 
   // .then() chains (not async/await) so setState only ever runs in an async
   // callback - the effect below calls this synchronously, and awaiting first
@@ -591,6 +594,18 @@ function AdminBillsContent() {
                       <span>Buat VA</span>
                     </Button>
                   )}
+                  {bill.allow_installment && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setPlanFor(planFor === bill.ulid ? null : bill.ulid)}
+                      className="text-xs"
+                    >
+                      {bill.installments && bill.installments.length > 0
+                        ? `Cicilan ${bill.installments.filter((r) => r.status === "paid").length}/${bill.installments.length}`
+                        : "Atur cicilan"}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -626,6 +641,7 @@ function AdminBillsContent() {
                 </button>
               </div>
             )}
+            {isOpen(bill) && planFor === bill.ulid && <InstallmentEditor bill={bill} onChanged={load} />}
           </Card>
         ))}
 

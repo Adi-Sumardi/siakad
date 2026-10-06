@@ -5,7 +5,10 @@ namespace App\Services\Attendance;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\ClassSchedule;
+use App\Models\DailyRecord;
+use App\Models\Enrollment;
 use App\Models\Holiday;
+use App\Models\Term;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -89,6 +92,99 @@ class AttendanceSessionService
             'status' => 'closed',
             'closed_at' => now(),
         ])->save();
+    }
+
+    /** Minutes after the lesson's end before the system closes a session the teacher left open. */
+    public const AUTO_CLOSE_GRACE_MINUTES = 30;
+
+    public const AUTO_CLOSE_DESCRIPTION = 'Tidak tercatat hingga sesi mapel ditutup otomatis.';
+
+    /**
+     * Closes every lesson session its teacher never finished (audit 6 Okt
+     * 2026 #2) - before this, a forgotten "Selesaikan Presensi" left the
+     * session open forever and its unscanned students with no record at all.
+     *
+     * Each still-blank student gets a record so the lesson layer has no
+     * holes, mirroring the daily layer's close-time sweep: a sakit/izin/alpa
+     * from that day's daily record is copied (the child was not at school),
+     * anyone else becomes alpa with a description the teacher can see and
+     * correct by re-marking.
+     *
+     * @return array{closed:int, marked:int}
+     */
+    public function closeExpired(?Carbon $now = null): array
+    {
+        $now ??= Carbon::now('Asia/Jakarta');
+        $closed = 0;
+        $marked = 0;
+
+        $due = AttendanceSession::query()
+            ->where('status', 'open')
+            ->where('expires_at', '<=', $now->copy()->subMinutes(self::AUTO_CLOSE_GRACE_MINUTES))
+            ->with('classSchedule')
+            ->get();
+
+        foreach ($due as $session) {
+            $marked += DB::transaction(function () use ($session) {
+                // Same lock the teacher's complete() and a student's scan
+                // take: a late scan and this close cannot interleave.
+                $fresh = AttendanceSession::whereKey($session->id)->lockForUpdate()->first();
+
+                if (! $fresh || $fresh->status !== 'open') {
+                    return 0;
+                }
+
+                $this->close($fresh);
+
+                $term = Term::current();
+                $schedule = $session->classSchedule;
+
+                if (! $term || ! $schedule || Holiday::query()->whereDate('date', $fresh->occurred_on)->exists()) {
+                    return 0;
+                }
+
+                $recorded = AttendanceRecord::where('attendance_session_id', $fresh->id)
+                    ->active()
+                    ->pluck('student_id');
+
+                $blank = Enrollment::query()
+                    ->where('classroom_id', $schedule->classroom_id)
+                    ->where('status', 'active')
+                    ->whereNotIn('student_id', $recorded)
+                    ->pluck('student_id')
+                    ->unique();
+
+                $daily = DailyRecord::query()
+                    ->whereIn('student_id', $blank)
+                    ->whereDate('date', $fresh->occurred_on)
+                    ->whereHas('dailySession', fn ($q) => $q->where('type', 'masuk'))
+                    ->active()
+                    ->pluck('attendance_status', 'student_id');
+
+                foreach ($blank as $studentId) {
+                    $dailyStatus = $daily->get($studentId);
+
+                    AttendanceRecord::create([
+                        'student_id' => $studentId,
+                        'attendance_session_id' => $fresh->id,
+                        'classroom_id' => $schedule->classroom_id,
+                        'term_id' => $term->id,
+                        'attendance_status' => in_array($dailyStatus, ['sakit', 'izin', 'alpa'], true) ? $dailyStatus : 'alpa',
+                        'occurred_on' => $fresh->occurred_on,
+                        'source' => 'guru',
+                        'description' => self::AUTO_CLOSE_DESCRIPTION,
+                        'recorded_by' => null,
+                        'record_status' => 'recorded',
+                    ]);
+                }
+
+                return $blank->count();
+            });
+
+            $closed++;
+        }
+
+        return ['closed' => $closed, 'marked' => $marked];
     }
 
     /** Roster for the guru panel: every active student in the schedule's classroom, plus who has checked in. */

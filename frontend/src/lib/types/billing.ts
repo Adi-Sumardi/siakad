@@ -25,8 +25,21 @@ export type Bill = {
   due_date: string | null;
   days_to_due: number | null;
   allow_installment?: boolean;
+  /** Installment plan rows, progress derived from paid_amount (audit 6 Okt 2026 #6). Empty = no plan. */
+  installments?: InstallmentRow[];
+  /** What to pay now to be on schedule; null when there is no plan. */
+  installment_due_now?: number | null;
   issued_at?: string | null;
   lines?: { name: string; qty: number; unit_price: number; amount: number; size_option: string | null }[];
+};
+
+export type InstallmentRow = {
+  ulid: string;
+  sequence: number;
+  amount: number;
+  due_date: string;
+  paid: number;
+  status: "paid" | "partial" | "unpaid" | "overdue";
 };
 
 export type BillSummary = {

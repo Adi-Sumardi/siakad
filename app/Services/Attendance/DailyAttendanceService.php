@@ -11,6 +11,7 @@ use App\Models\DailyRecord;
 use App\Models\DailySession;
 use App\Models\Enrollment;
 use App\Models\Holiday;
+use App\Models\LeaveRequest;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\Term;
@@ -46,6 +47,14 @@ class DailyAttendanceService
 {
     /** The description closeAndSweep stamps on its auto-alpa rows - resyncTodayWindows() finds them back by it. */
     public const AUTO_SWEEP_DESCRIPTION = 'Tidak tercatat hingga sesi ditutup otomatis.';
+
+    /**
+     * How far back a staff board may reach to correct a day (audit 6 Okt
+     * 2026 #1): long enough for a late surat sakit or a parent's leave that
+     * crosses a weekend, short enough that last semester's record does not
+     * quietly change under a printed report.
+     */
+    public const CORRECTION_WINDOW_DAYS = 60;
 
     public function __construct(private RotatingQrService $qr) {}
 
@@ -92,6 +101,72 @@ class DailyAttendanceService
         $types = $setting->pulang_enabled ? ['masuk', 'pulang'] : ['masuk'];
 
         return collect($types)->map(fn (string $type) => $this->firstOrCreateSession($setting, $date, $type));
+    }
+
+    /**
+     * The sessions a staff board shows for one date. Today goes through the
+     * lazy ensure exactly as before; a past date only READS what history
+     * holds - opening a window for a day already gone would invent a session
+     * nobody could have checked into (and the sweep would alpa the unit).
+     *
+     * @return Collection<int, DailySession>
+     */
+    public function sessionsForDate(DailyAttendanceSetting $setting, Carbon $date): Collection
+    {
+        if ($date->isSameDay(Carbon::now('Asia/Jakarta'))) {
+            return $this->ensureSessionsForDate($setting, $date);
+        }
+
+        return DailySession::query()
+            ->where('school_unit_id', $setting->school_unit_id)
+            ->whereDate('date', $date->toDateString())
+            ->orderBy('type')
+            ->get();
+    }
+
+    /**
+     * Parses a board's ?date= and holds it inside the correction window.
+     * Null/empty means today.
+     */
+    public function resolveBoardDate(?string $date): Carbon
+    {
+        $today = Carbon::now('Asia/Jakarta')->startOfDay();
+
+        if ($date === null || $date === '') {
+            return $today;
+        }
+
+        try {
+            $parsed = Carbon::createFromFormat('Y-m-d', $date, 'Asia/Jakarta')->startOfDay();
+        } catch (\Throwable) {
+            throw new RuntimeException('Format tanggal tidak dikenal (YYYY-MM-DD).');
+        }
+
+        if ($parsed->gt($today)) {
+            throw new RuntimeException('Presensi untuk tanggal yang akan datang belum bisa dibuka.');
+        }
+
+        if ($parsed->lt($today->copy()->subDays(self::CORRECTION_WINDOW_DAYS))) {
+            throw new RuntimeException('Koreksi presensi hanya bisa sampai '.self::CORRECTION_WINDOW_DAYS.' hari ke belakang.');
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * The staff-lane guard for marking on a session's date: today is the
+     * normal board; a past day inside the window is a CORRECTION, and a
+     * correction must say why (prinsip "coret ber-alasan") - the reason
+     * lands on the new record's description.
+     */
+    public function assertMarkable(DailySession $session, ?string $description): void
+    {
+        $date = $session->date->toDateString();
+        $this->resolveBoardDate($date);
+
+        if ($date !== Carbon::now('Asia/Jakarta')->toDateString() && trim((string) $description) === '') {
+            throw new RuntimeException('Alasan koreksi wajib diisi untuk presensi hari yang sudah lewat.');
+        }
     }
 
     /**
@@ -305,7 +380,16 @@ class DailyAttendanceService
             ->get()
             ->keyBy('student_id');
 
+        // Approved guardian notices for this day: the board shows them before
+        // the window closes, so nobody re-marks a sick child alpa by hand.
+        $leaves = LeaveRequest::query()
+            ->approved()
+            ->covering($session->date->toDateString())
+            ->whereIn('student_id', $students->pluck('id'))
+            ->pluck('type', 'student_id');
+
         return $students->map(fn (Student $s) => [
+            'leave' => $leaves->get($s->id),
             'ulid' => $s->ulid,
             'nama_lengkap' => $s->nama_lengkap,
             'nis' => $s->nis,
@@ -894,15 +978,26 @@ class DailyAttendanceService
                 ->whereNotIn('id', $marked)
                 ->get();
 
+            // An approved guardian notice covering this day (audit 6 Okt
+            // 2026 #3) turns the would-be alpa into the notice's sakit/izin.
+            $leaves = LeaveRequest::query()
+                ->approved()
+                ->covering($fresh->date->toDateString())
+                ->whereIn('student_id', $missed->pluck('id'))
+                ->get()
+                ->keyBy('student_id');
+
             $records = $missed->map(fn (Student $student) => DailyRecord::create([
                 'daily_session_id' => $fresh->id,
                 'student_id' => $student->id,
                 'classroom_id' => $student->currentEnrollment()?->classroom_id,
                 'term_id' => $term->id,
                 'date' => $fresh->date,
-                'attendance_status' => 'alpa',
+                'attendance_status' => $leaves->get($student->id)?->type ?? 'alpa',
                 'source' => 'tu',
-                'description' => self::AUTO_SWEEP_DESCRIPTION,
+                'description' => $leaves->has($student->id)
+                    ? mb_substr(ucfirst($leaves[$student->id]->type).' (pengajuan wali disetujui): '.$leaves[$student->id]->reason, 0, 500)
+                    : self::AUTO_SWEEP_DESCRIPTION,
                 'recorded_by' => $by?->id,
                 'record_status' => 'recorded',
             ]));
@@ -923,7 +1018,8 @@ class DailyAttendanceService
                 'unit' => $session->schoolUnit?->label,
                 'date' => $session->date?->toDateString(),
                 'window' => $session->type,
-                'alpa_count' => $missed->count(),
+                'alpa_count' => $records->where('attendance_status', 'alpa')->count(),
+                'leave_count' => $records->where('attendance_status', '!=', 'alpa')->count(),
             ]);
         }
 

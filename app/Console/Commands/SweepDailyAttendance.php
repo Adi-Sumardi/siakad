@@ -6,6 +6,7 @@ use App\Models\DailyAttendanceSetting;
 use App\Models\DailySession;
 use App\Models\Holiday;
 use App\Models\Term;
+use App\Services\Attendance\AttendanceSessionService;
 use App\Services\Attendance\DailyAttendanceService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -33,7 +34,7 @@ class SweepDailyAttendance extends Command
 
     protected $description = 'Buka sesi presensi harian sesuai setting unit & tutup yang lewat jendela waktunya';
 
-    public function handle(DailyAttendanceService $service): int
+    public function handle(DailyAttendanceService $service, AttendanceSessionService $lessonSessions): int
     {
         $now = Carbon::now('Asia/Jakarta');
 
@@ -97,6 +98,14 @@ class SweepDailyAttendance extends Command
         }
 
         $this->info("{$opened} sesi dibuka, ".count($due)." ditutup, {$swept} siswa disapu ke alpa.");
+
+        // Lesson sessions a teacher never finished (audit 6 Okt 2026 #2) -
+        // same heartbeat, so no second schedule entry to forget.
+        $lessons = $lessonSessions->closeExpired($now);
+
+        if ($lessons['closed'] > 0) {
+            $this->info("{$lessons['closed']} sesi mapel ditutup otomatis, {$lessons['marked']} siswa diberi catatan.");
+        }
 
         return self::SUCCESS;
     }

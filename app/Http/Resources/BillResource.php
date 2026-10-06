@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Services\Billing\InstallmentPlanService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -36,6 +37,12 @@ class BillResource extends JsonResource
             // keys on this, and it was never emitted - a fully-built backend
             // lane sat dead in the UI (audit T40-a).
             'allow_installment' => (bool) $this->allow_installment,
+            // The plan (audit 6 Okt 2026 #6), per-row progress derived from
+            // paid_amount - present only when the caller loaded the rows.
+            'installments' => $this->whenLoaded('installments', fn () => InstallmentPlanService::progress($this->resource)),
+            'installment_due_now' => $this->whenLoaded('installments', fn () => $this->installments->isEmpty()
+                ? null
+                : InstallmentPlanService::dueNow($this->resource)),
             'academic_year' => $this->whenLoaded('academicYear', fn () => [
                 'ulid' => $this->academicYear->ulid,
                 'year' => $this->academicYear->year,

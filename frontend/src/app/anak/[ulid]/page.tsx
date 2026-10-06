@@ -13,6 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PointMeter } from "@/components/point-meter";
 import { AttendanceMeter } from "@/components/attendance-meter";
+import { LeaveRequestCard } from "@/components/wali/leave-request-card";
+import { StudentDocuments } from "@/components/student-documents";
 import { API_BASE, api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
 import { downloadApiFile } from "@/lib/download";
@@ -280,6 +282,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
   const [selectedTermUlid, setSelectedTermUlid] = useState<string>("");
   const [extracurriculars, setExtracurriculars] = useState<{ ulid: string; name: string; pembina: string | null; school_unit: string | null }[] | null>(null);
   const [availableEkskul, setAvailableEkskul] = useState<{ ulid: string; name: string; pembina: string | null; member_count: number; capacity: number | null }[] | null>(null);
+  const [ekskulReport, setEkskulReport] = useState<{ name: string; predikat: string | null; predikat_label: string | null; keterangan: string | null; hadir: number; pertemuan: number }[]>([]);
   const [enrollPick, setEnrollPick] = useState("");
   const [enrolling, setEnrolling] = useState(false);
   const [downloadingRapor, setDownloadingRapor] = useState(false);
@@ -296,10 +299,11 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
 
   const loadEkskul = useCallback(() => {
     api
-      .get<{ extracurriculars: { ulid: string; name: string; pembina: string | null; school_unit: string | null }[]; available: { ulid: string; name: string; pembina: string | null; member_count: number; capacity: number | null }[] }>(`/api/wali/students/${ulid}/extracurriculars`)
+      .get<{ report?: { name: string; predikat: string | null; predikat_label: string | null; keterangan: string | null; hadir: number; pertemuan: number }[]; extracurriculars: { ulid: string; name: string; pembina: string | null; school_unit: string | null }[]; available: { ulid: string; name: string; pembina: string | null; member_count: number; capacity: number | null }[] }>(`/api/wali/students/${ulid}/extracurriculars`)
       .then((d) => {
         setExtracurriculars(d.extracurriculars);
         setAvailableEkskul(d.available ?? []);
+        setEkskulReport(d.report ?? []);
         setEnrollPick("");
       })
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Bagian halaman ini gagal dimuat - data lain tetap tampil."));
@@ -461,6 +465,16 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
           </Card>
         </div>
 
+        <LeaveRequestCard studentUlid={ulid} />
+
+        <Card className="p-6 border-border/80">
+          <h2 className="mb-4 flex items-center gap-2 text-base font-bold text-foreground">
+            <FileDown className="size-5 text-primary" />
+            <span>Dokumen Siswa</span>
+          </h2>
+          <StudentDocuments base="/api/wali" studentUlid={ulid} />
+        </Card>
+
         {/* SECTION 1C: NILAI AKADEMIK */}
         <section className="space-y-3 pt-4 border-t border-border">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -490,7 +504,7 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
               )}
               <Button size="sm" variant="outline" disabled={downloadingRapor} onClick={downloadRapor} className="gap-2 text-xs font-semibold">
                 <Download className="size-4" />
-                <span>{downloadingRapor ? "Mengunduh…" : "Unduh Rapor (PDF)"}</span>
+                <span>{downloadingRapor ? "Mengunduh…" : "Unduh Rekap Nilai (PDF)"}</span>
               </Button>
             </div>
           </div>
@@ -554,6 +568,20 @@ export default function StudentDetailPage({ params }: { params: Promise<{ ulid: 
                 <Badge key={e.ulid} variant="primary" className="px-3 py-1.5 text-xs">
                   {e.name}{e.pembina ? ` · ${e.pembina}` : ""}
                 </Badge>
+              ))}
+            </div>
+          )}
+
+          {/* Predikat + practice attendance this term (audit 6 Okt 2026 #8). */}
+          {ekskulReport.some((r) => r.predikat || r.pertemuan > 0) && (
+            <div className="flex flex-col gap-1 text-sm">
+              {ekskulReport.map((r) => (
+                <p key={r.name} className="text-muted-foreground">
+                  <span className="font-medium text-foreground">{r.name}</span>
+                  {r.predikat && ` · Predikat ${r.predikat} (${r.predikat_label})`}
+                  {r.pertemuan > 0 && ` · hadir ${r.hadir}/${r.pertemuan} latihan`}
+                  {r.keterangan && ` · ${r.keterangan}`}
+                </p>
               ))}
             </div>
           )}

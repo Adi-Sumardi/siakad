@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, UserMinus } from "lucide-react";
 import { toast } from "sonner";
+import { EkskulAssessmentPanel, EkskulPracticePanel } from "@/components/guru/ekskul-activity";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -113,7 +114,7 @@ export default function EkskulSayaPage() {
     <div className="flex flex-col gap-5">
       <div>
         <h1 className="text-xl font-bold tracking-tight">Ekskul Saya</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Kegiatan yang Anda bina, dan siswa yang terdaftar di dalamnya.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Kegiatan yang Anda bina: anggota, presensi latihan, dan penilaian rapor.</p>
       </div>
 
       {activities === null && <Skeleton className="h-32 w-full" />}
@@ -133,10 +134,16 @@ export default function EkskulSayaPage() {
               </div>
               <Button size="sm" variant="outline" onClick={() => setExpanded(expanded === e.ulid ? null : e.ulid)}>
                 {expanded === e.ulid ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-                <span className="ml-1">Kelola Anggota</span>
+                <span className="ml-1">Kelola</span>
               </Button>
             </div>
-            {expanded === e.ulid && <RosterPanel ekskul={e} onChanged={load} />}
+            {expanded === e.ulid && (
+              <>
+                <RosterPanel ekskul={e} onChanged={load} />
+                <EkskulPracticePanel ekskulUlid={e.ulid} />
+                <EkskulAssessmentPanel ekskulUlid={e.ulid} />
+              </>
+            )}
           </Card>
         ))}
       </div>

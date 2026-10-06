@@ -11,6 +11,7 @@ use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
@@ -41,6 +42,7 @@ class PointLedger
         string $description,
         ?string $evidencePath = null,
         ?string $evidenceName = null,
+        ?string $batchId = null,
     ): PointRecord {
         if ($rule->requires_evidence && ! $evidencePath) {
             throw new RuntimeException("Aturan '{$rule->name}' mewajibkan bukti.");
@@ -50,6 +52,7 @@ class PointLedger
             'student_id' => $student->id,
             'term_id' => $term->id,
             'point_rule_id' => $rule->id,
+            'batch_id' => $batchId,
             'type' => $rule->type,
             'points' => $rule->signedPoints(),
             'occurred_on' => $occurredOn,
@@ -81,10 +84,37 @@ class PointLedger
         Carbon $occurredOn,
         string $description,
     ): Collection {
-        return DB::transaction(function () use ($students, $term, $rule, $recordedBy, $occurredOn, $description) {
+        // One shared batch id so the whole entry can be undone at once
+        // (audit 6 Okt 2026 #10).
+        $batchId = (string) Str::ulid();
+
+        return DB::transaction(function () use ($students, $term, $rule, $recordedBy, $occurredOn, $description, $batchId) {
             return $students->map(
-                fn (Student $student) => $this->record($student, $term, $rule, $recordedBy, $occurredOn, $description)
+                fn (Student $student) => $this->record($student, $term, $rule, $recordedBy, $occurredOn, $description, batchId: $batchId)
             );
+        });
+    }
+
+    /**
+     * Revokes every still-active row of one bulk entry, all or nothing.
+     * $scope narrows which rows the caller may touch (their visibleTo()).
+     *
+     * @return int rows revoked
+     */
+    public function revokeBatch(string $batchId, User $revokedBy, string $reason, ?\Closure $scope = null): int
+    {
+        return DB::transaction(function () use ($batchId, $revokedBy, $reason, $scope) {
+            $rows = PointRecord::where('batch_id', $batchId)
+                ->when($scope, $scope)
+                ->active()
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($rows as $row) {
+                $this->revoke($row, $revokedBy, $reason);
+            }
+
+            return $rows->count();
         });
     }
 

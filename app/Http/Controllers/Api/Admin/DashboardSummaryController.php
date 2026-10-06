@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\DashboardSummaryRequest;
+use App\Models\AcademicPolicy;
 use App\Models\AcademicYear;
 use App\Models\SchoolUnit;
 use App\Models\Term;
@@ -235,7 +236,7 @@ class DashboardSummaryController extends Controller
         // ---- Watchlist (shared with the /admin/perhatian drill-down) ---------
         $watch = $watchlist->identify($students, $enrollments, $grades, $points, $term, $prevTerm);
         $watchByUnit = $watch->groupBy(fn (array $row) => $studentById->get($row['student_id'])?->school_unit_id);
-        $currentAverages = $watchlist->perStudentAverages($grades, $term?->id);
+        $currentAverages = $watchlist->perStudentAverages($grades, $term?->id, $students->pluck('school_unit_id', 'id'));
 
         // ---- Per-unit + grand aggregates -------------------------------------
         $unitsData = [];
@@ -262,7 +263,7 @@ class DashboardSummaryController extends Controller
             $withReason = fn (string $reason) => $unitWatch->filter(fn (array $row) => in_array($reason, $row['reasons'], true));
 
             $unitCurScores = $currentAverages->only($unitStudents->pluck('id')->all());
-            $belowKkm = $unitCurScores->filter(fn (float $s) => $s < WatchlistService::KKM)->count();
+            $belowKkm = $unitCurScores->filter(fn (float $s) => $s < AcademicPolicy::forUnit($unit->id)->kkm)->count();
 
             $violationStudents = $withReason('point_violation');
             $highAlpaIds = $withReason('absenteeism');
@@ -348,7 +349,7 @@ class DashboardSummaryController extends Controller
                 ? 0
                 : round($currentAverages->avg(), 1);
             $grand['grades']['below_kkm'] = $currentAverages
-                ->filter(fn (float $s) => $s < WatchlistService::KKM)->count();
+                ->filter(fn (float $s, int $studentId) => $s < AcademicPolicy::forUnit($studentById->get($studentId)?->school_unit_id)->kkm)->count();
             $grand['grades']['declined'] = $watch
                 ->filter(fn (array $row) => in_array('grade_decline', $row['reasons'], true))->count();
         }
@@ -391,11 +392,9 @@ class DashboardSummaryController extends Controller
             ],
             // What the watchlist conditions above were measured against - the
             // tiles quote these, and T24 may turn them into per-unit config.
-            'thresholds' => [
-                'kkm' => WatchlistService::KKM,
-                'min_alpa' => WatchlistService::HIGH_ABSENTEEISM_ALPA,
-                'grade_drop' => WatchlistService::GRADE_DROP_POINTS,
-            ],
+            // Per-unit policy since audit 6 Okt 2026 #12: a unit admin sees
+            // their own; a central view quotes the school-wide default.
+            'thresholds' => AcademicPolicy::forUnit($isUnitScoped ? $ownUnitId : null)->thresholds(),
             'scope' => [
                 'is_central' => ! $user?->isUnitScoped(),
                 'unit_count' => $units->count(),
@@ -534,7 +533,7 @@ class DashboardSummaryController extends Controller
         $alerts[] = $this->alert(
             id: 'absenteeism',
             label: 'Siswa absensi tinggi',
-            detail: sprintf('Alpa %d kali atau lebih di tahun ajaran berjalan', WatchlistService::HIGH_ABSENTEEISM_ALPA),
+            detail: sprintf('Alpa %d kali atau lebih di tahun ajaran berjalan', AcademicPolicy::forUnit($units->count() === 1 ? $units->first()->id : null)->alpa_threshold),
             count: $highAlpa->count(),
             severity: 'bad',
             href: '/admin/perhatian?reason=absenteeism',
@@ -549,7 +548,7 @@ class DashboardSummaryController extends Controller
             $alerts[] = $this->alert(
                 id: 'grades',
                 label: 'Nilai akhir di bawah KKM',
-                detail: sprintf('Rata-rata nilai akhir semester berjalan di bawah %d', WatchlistService::KKM),
+                detail: sprintf('Rata-rata nilai akhir semester berjalan di bawah %d', AcademicPolicy::forUnit($units->count() === 1 ? $units->first()->id : null)->kkm),
                 count: $belowKkm->count(),
                 severity: 'warn',
                 href: '/admin/perhatian?reason=below_kkm',

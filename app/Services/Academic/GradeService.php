@@ -2,6 +2,7 @@
 
 namespace App\Services\Academic;
 
+use App\Models\AcademicPolicy;
 use App\Models\Classroom;
 use App\Models\ClassSchedule;
 use App\Models\Enrollment;
@@ -25,10 +26,9 @@ use RuntimeException;
 class GradeService
 {
     /**
-     * Standard Indonesian weighting (Tugas 20% / UTS 30% / UAS 50%) - an
-     * assumption, not a confirmed school policy. Easy to change here later;
-     * not worth a configuration screen until a school actually asks for a
-     * different split.
+     * The default weighting (Tugas 20% / UTS 30% / UAS 50%). The effective
+     * split is now AcademicPolicy::forUnit() (audit 6 Okt 2026 #11) - this
+     * constant only names the categories and the out-of-the-box values.
      */
     public const WEIGHTS = ['tugas' => 0.2, 'uts' => 0.3, 'uas' => 0.5];
 
@@ -90,18 +90,30 @@ class GradeService
             ->where('term_id', $term->id)
             ->pluck('score', 'category');
 
-        return $this->weightedFinal($scores);
+        return $this->weightedFinal($scores, $student->school_unit_id);
     }
 
     /** Shared by finalScore() and summaryForRapor() so a rapor with N subjects doesn't run the same grade query twice per subject. */
-    private function weightedFinal(Collection $scores): ?float
+    private function weightedFinal(Collection $scores, ?int $unitId): ?float
     {
-        if (array_diff(array_keys(self::WEIGHTS), $scores->keys()->all())) {
+        return self::weighted($scores, AcademicPolicy::forUnit($unitId)->weights());
+    }
+
+    /**
+     * The one weighting formula, shared with WatchlistService. Null when a
+     * category is missing - never a guess from a partial average.
+     *
+     * @param  Collection<string, mixed>  $scores  keyed by category
+     * @param  array<string, float>  $weights
+     */
+    public static function weighted(Collection $scores, array $weights): ?float
+    {
+        if (array_diff(array_keys($weights), $scores->keys()->all())) {
             return null;
         }
 
         $total = 0.0;
-        foreach (self::WEIGHTS as $category => $weight) {
+        foreach ($weights as $category => $weight) {
             $total += (float) $scores[$category] * $weight;
         }
 
@@ -145,7 +157,7 @@ class GradeService
                 'tugas' => isset($scores['tugas']) ? (float) $scores['tugas'] : null,
                 'uts' => isset($scores['uts']) ? (float) $scores['uts'] : null,
                 'uas' => isset($scores['uas']) ? (float) $scores['uas'] : null,
-                'final' => $this->weightedFinal($scores),
+                'final' => $this->weightedFinal($scores, $student->school_unit_id),
             ];
         });
     }
@@ -189,7 +201,7 @@ class GradeService
                 ->map(fn (Subject $subject) => ['ulid' => $subject->ulid, 'name' => $subject->name])
                 ->all(),
             'students' => $students
-                ->map(function (Student $student) use ($subjects, $grades) {
+                ->map(function (Student $student) use ($subjects, $grades, $classroom) {
                     $bySubject = ($grades->get($student->id) ?? collect())->groupBy('subject_id');
 
                     return [
@@ -199,7 +211,7 @@ class GradeService
                         // Keyed by subject ULID so the UI can index the matrix
                         // directly - subject_id never leaves the API.
                         'scores' => $subjects
-                            ->mapWithKeys(function (Subject $subject) use ($bySubject) {
+                            ->mapWithKeys(function (Subject $subject) use ($bySubject, $classroom) {
                                 $scores = ($bySubject->get($subject->id) ?? collect())
                                     ->pluck('score', 'category');
 
@@ -207,7 +219,7 @@ class GradeService
                                     'tugas' => isset($scores['tugas']) ? (float) $scores['tugas'] : null,
                                     'uts' => isset($scores['uts']) ? (float) $scores['uts'] : null,
                                     'uas' => isset($scores['uas']) ? (float) $scores['uas'] : null,
-                                    'final' => $this->weightedFinal($scores),
+                                    'final' => $this->weightedFinal($scores, $classroom->school_unit_id),
                                 ]];
                             })
                             ->all(),

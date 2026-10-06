@@ -9,6 +9,7 @@ import {
   Download,
   Edit2,
   FileSpreadsheet,
+  FileText,
   GraduationCap,
   Percent,
   Phone,
@@ -21,6 +22,8 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { GuardianLinks } from "@/components/guardian-links";
+import { StudentDocuments } from "@/components/student-documents";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -118,6 +121,10 @@ function AdminStudentsContent() {
 
   // Edit/Delete (administrator only)
   const [editingStudent, setEditingStudent] = useState<StudentItem | null>(null);
+  // Student documents dialog (audit 6 Okt 2026 #7) - admin_unit too, not only central.
+  const [docsFor, setDocsFor] = useState<StudentItem | null>(null);
+  // Guardian link dialog (audit 6 Okt 2026 #9).
+  const [guardiansFor, setGuardiansFor] = useState<StudentItem | null>(null);
   const [deletingStudent, setDeletingStudent] = useState<StudentItem | null>(null);
   const [deleteConfirmInput, setDeleteConfirmInput] = useState("");
   const [formNamaLengkap, setFormNamaLengkap] = useState("");
@@ -618,6 +625,13 @@ function AdminStudentsContent() {
                           <p className="text-xs text-muted-foreground mt-0.5 font-mono">
                             NIS: {s.nis ?? "—"} {s.nisn ? `· NISN: ${s.nisn}` : ""}
                           </p>
+                          <button
+                            type="button"
+                            onClick={() => setDocsFor(s)}
+                            className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                          >
+                            <FileText className="size-3" /> Dokumen
+                          </button>
                         </div>
                       </td>
 
@@ -653,6 +667,13 @@ function AdminStudentsContent() {
                         ) : (
                           <span className="text-muted-foreground italic">Belum terhubung</span>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => setGuardiansFor(s)}
+                          className="mt-1 block text-xs font-medium text-primary hover:underline"
+                        >
+                          Kelola wali
+                        </button>
                       </td>
 
                       <td className="px-5 py-4 text-right font-medium text-foreground">
@@ -838,6 +859,37 @@ function AdminStudentsContent() {
       )}
 
       {/* MODAL: EDIT SISWA (Administrator saja) */}
+      {guardiansFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-2xl p-6 border-border shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-lg font-bold text-foreground">Wali {guardiansFor.nama_lengkap}</h2>
+              <button onClick={() => setGuardiansFor(null)} className="text-muted-foreground hover:text-foreground" aria-label="Tutup">
+                <X className="size-5" />
+              </button>
+            </div>
+            <GuardianLinks studentUlid={guardiansFor.ulid} onChanged={() => loadStudents()} />
+          </Card>
+        </div>
+      )}
+
+      {docsFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <Card className="w-full max-w-2xl p-6 border-border shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <FileText className="size-5 text-primary" />
+                <span>Dokumen {docsFor.nama_lengkap}</span>
+              </h2>
+              <button onClick={() => setDocsFor(null)} className="text-muted-foreground hover:text-foreground" aria-label="Tutup">
+                <X className="size-5" />
+              </button>
+            </div>
+            <StudentDocuments base="/api/admin" studentUlid={docsFor.ulid} />
+          </Card>
+        </div>
+      )}
+
       {editingStudent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
           <Card className="w-full max-w-lg p-6 border-border shadow-2xl space-y-4 my-8">

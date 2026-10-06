@@ -462,6 +462,7 @@ function LedgerPanel({ student }: { student: StudentRow }) {
   const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  const [wholeBatch, setWholeBatch] = useState(false);
 
   function load() {
     api
@@ -476,11 +477,19 @@ function LedgerPanel({ student }: { student: StudentRow }) {
 
   async function revoke(ulid: string) {
     if (!reason.trim()) return;
+    const record = records?.find((r) => r.ulid === ulid);
     try {
-      await api.patch(`/api/guru/points/${ulid}/revoke`, { reason });
-      toast.success("Catatan dibatalkan.");
+      if (wholeBatch && record?.batch_id) {
+        // The whole bulk entry at once (audit 6 Okt 2026 #10).
+        const res = await api.post<{ revoked: number }>(`/api/guru/points/batches/${record.batch_id}/revoke`, { reason });
+        toast.success(`${res.revoked} catatan dari input massal ini dibatalkan.`);
+      } else {
+        await api.patch(`/api/guru/points/${ulid}/revoke`, { reason });
+        toast.success("Catatan dibatalkan.");
+      }
       setRevoking(null);
       setReason("");
+      setWholeBatch(false);
       load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal membatalkan.");
@@ -502,9 +511,17 @@ function LedgerPanel({ student }: { student: StudentRow }) {
             <p className="font-semibold text-foreground">{r.description} {r.status === "revoked" && <span className="text-[10px] text-muted-foreground">(dibatalkan)</span>}</p>
             <p className="text-[11px] text-muted-foreground mt-0.5">{tanggal(r.occurred_on)} · {r.recorded_by}</p>
             {revoking === r.ulid && (
-              <div className="mt-1.5 flex gap-1.5">
-                <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Alasan pembatalan..." className="h-7 w-48 text-[11px]" />
-                <Button size="sm" variant="destructive" onClick={() => revoke(r.ulid)} className="h-7 text-[11px]">OK</Button>
+              <div className="mt-1.5 flex flex-col gap-1">
+                <div className="flex gap-1.5">
+                  <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Alasan pembatalan..." className="h-7 w-48 text-[11px]" />
+                  <Button size="sm" variant="destructive" onClick={() => revoke(r.ulid)} className="h-7 text-[11px]">OK</Button>
+                </div>
+                {r.batch_id && (
+                  <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <input type="checkbox" checked={wholeBatch} onChange={(e) => setWholeBatch(e.target.checked)} className="size-3.5 accent-destructive" />
+                    Batalkan juga untuk semua siswa di input massal yang sama
+                  </label>
+                )}
               </div>
             )}
           </div>
@@ -720,8 +737,8 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
                     onClick={() => downloadRapor(student)}
                     disabled={raporLoading === student.ulid}
                     className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-                    aria-label="Unduh rapor"
-                    title="Unduh rapor (semester berjalan)"
+                    aria-label="Unduh rekap nilai"
+                    title="Unduh rekap nilai internal (semester berjalan)"
                   >
                     {raporLoading === student.ulid ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
                   </button>

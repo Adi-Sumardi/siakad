@@ -3,11 +3,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { CalendarCheck2 } from "lucide-react";
 import { toast } from "sonner";
+import { CorrectionCell } from "@/components/attendance-correction";
+import { LeaveReviewPanel } from "@/components/leave-review-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
+import { todayJakarta } from "@/lib/format";
 
 type RosterEntry = {
   ulid: string;
@@ -17,6 +21,7 @@ type RosterEntry = {
   attendance_status: "hadir" | "sakit" | "izin" | "alpa" | null;
   is_late: boolean;
   source: "self" | "wali_kelas" | "tu" | null;
+  leave: "sakit" | "izin" | null;
 };
 
 type DailySession = {
@@ -32,6 +37,7 @@ type DailySession = {
 
 type TodayResponse = {
   date: string;
+  is_today: boolean;
   enabled: boolean;
   intake_mode: "wali_kelas" | "gerbang";
   homeroom_classrooms: { ulid: string; name: string }[];
@@ -62,13 +68,16 @@ const SOURCE_LABEL: Record<string, string> = {
 export default function GuruDailyAttendancePage() {
   const [today, setToday] = useState<TodayResponse | null>(null);
   const [marking, setMarking] = useState<string | null>(null);
+  // Today by default; a past day is correction mode (audit 6 Okt 2026 #1).
+  const [boardDate, setBoardDate] = useState(todayJakarta());
+  const isToday = boardDate === todayJakarta();
 
   const load = useCallback(() => {
     api
-      .get<TodayResponse>("/api/guru/daily-attendance/today")
+      .get<TodayResponse>(`/api/guru/daily-attendance/today?date=${boardDate}`)
       .then(setToday)
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat presensi harian."));
-  }, []);
+  }, [boardDate]);
 
   useEffect(load, [load]);
 
@@ -139,12 +148,36 @@ export default function GuruDailyAttendancePage() {
     <div className="flex flex-col gap-5">
       <Header />
 
+      <LeaveReviewPanel endpoint="/api/guru/leave-requests" onChanged={load} />
+
+      <Card className="flex flex-wrap items-center gap-2 p-3">
+        <span className="text-sm font-medium">{isToday ? "Hari ini" : "Koreksi tanggal"}</span>
+        <Input
+          type="date"
+          value={boardDate}
+          max={todayJakarta()}
+          onChange={(e) => e.target.value && setBoardDate(e.target.value)}
+          className="h-8 w-40"
+        />
+        {!isToday && (
+          <Button size="sm" variant="outline" onClick={() => setBoardDate(todayJakarta())}>
+            Kembali ke hari ini
+          </Button>
+        )}
+        {!isToday && (
+          <p className="w-full text-xs text-muted-foreground">
+            Mode koreksi: pilih status baru dan tulis alasannya. Catatan lama tetap tersimpan sebagai jejak.
+          </p>
+        )}
+      </Card>
+
       {today === null && <Skeleton className="h-64 w-full" />}
 
       {today?.sessions.length === 0 && (
         <Card className="p-6 text-sm text-muted-foreground">
-          Hari ini bukan hari presensi untuk unit Anda (sesuai pengaturan hari
-          aktif), atau sedang tidak ada semester aktif.
+          {isToday
+            ? "Hari ini bukan hari presensi untuk unit Anda (sesuai pengaturan hari aktif), atau sedang tidak ada semester aktif."
+            : "Tidak ada sesi presensi pada tanggal ini (libur atau bukan hari presensi)."}
         </Card>
       )}
 
@@ -178,7 +211,7 @@ export default function GuruDailyAttendancePage() {
                 <Badge variant={session.is_open ? "good" : "default"}>
                   {session.is_open ? "Jendela terbuka" : "Ditutup"}
                 </Badge>
-                {tally.belum > 0 && (
+                {isToday && tally.belum > 0 && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -217,8 +250,20 @@ export default function GuruDailyAttendancePage() {
                           {student.source && ` (${SOURCE_LABEL[student.source]})`}
                         </>
                       )}
+                      {!student.attendance_status && student.leave && (
+                        <span className="text-info"> · {student.leave === "sakit" ? "Sakit" : "Izin"} (pengajuan wali disetujui)</span>
+                      )}
                     </p>
                   </div>
+                  {!isToday ? (
+                    <CorrectionCell
+                      session={session}
+                      row={student}
+                      requireReason
+                      endpoint={`/api/guru/daily-attendance/sessions/${session.ulid}/records`}
+                      onDone={load}
+                    />
+                  ) : (
                   <div className="flex flex-wrap gap-1">
                     {MARK_OPTIONS.map((option) => {
                       const active =
@@ -237,6 +282,7 @@ export default function GuruDailyAttendancePage() {
                       );
                     })}
                   </div>
+                  )}
                 </div>
               ))}
               {roster.length === 0 && (

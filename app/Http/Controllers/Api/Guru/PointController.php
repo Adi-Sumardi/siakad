@@ -138,7 +138,7 @@ class PointController extends Controller
             'rule' => $rule->code, 'student_count' => $records->count(),
         ]);
 
-        return response()->json(['recorded' => $records->count()], 201);
+        return response()->json(['recorded' => $records->count(), 'batch_id' => $records->first()?->batch_id], 201);
     }
 
     /** Excludes the record from every balance from now on; the row and its reasoning stay on file. */
@@ -157,6 +157,36 @@ class PointController extends Controller
         ActivityLog::record($request->user(), 'point.revoked', $record, ['reason' => $validated['reason']]);
 
         return response()->json(['record' => new PointRecordResource($record->fresh())]);
+    }
+
+    /**
+     * Undoes a whole bulk entry at once (audit 6 Okt 2026 #10) - the wrong
+     * rule applied to a line of thirty students was thirty separate revokes.
+     * Only rows the teacher can see are touched; the reason lands on each.
+     */
+    public function revokeBatch(RevokeReasonRequest $request, string $batchId, PointLedger $ledger): JsonResponse
+    {
+        $validated = $request->validated();
+        $user = $request->user();
+
+        $count = $ledger->revokeBatch(
+            $batchId,
+            $user,
+            $validated['reason'],
+            fn ($q) => $q->visibleTo($user),
+        );
+
+        if ($count === 0) {
+            return response()->json(['message' => 'Tidak ada catatan aktif dari input massal ini.'], 422);
+        }
+
+        ActivityLog::record($user, 'point.batch_revoked', null, [
+            'batch_id' => $batchId,
+            'count' => $count,
+            'reason' => $validated['reason'],
+        ]);
+
+        return response()->json(['revoked' => $count]);
     }
 
     /** @return array{0: Student, 1: PointRule, 2: Term} */

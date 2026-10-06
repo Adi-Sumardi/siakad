@@ -11,7 +11,7 @@ class PointRecord extends Model
     use HasUlidKey;
 
     protected $fillable = [
-        'student_id', 'term_id', 'point_rule_id', 'related_achievement_id',
+        'student_id', 'term_id', 'point_rule_id', 'related_achievement_id', 'batch_id',
         'type', 'points', 'occurred_on', 'description', 'evidence_path', 'evidence_name',
         'recorded_by', 'status', 'revoked_by', 'revoked_at', 'revoke_reason',
         'acknowledged_at',
