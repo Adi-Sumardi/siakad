@@ -78,6 +78,10 @@ class PaymentAllocator
             return;
         }
 
+        // Settlement replaces gateway_response with e-SPP's poll response,
+        // which no longer names the VA or bank - the recon keeps them.
+        $opened = $payment->gateway_response;
+
         DB::transaction(function () use ($payment, $externalId, $gatewayResponse) {
             $payment->forceFill([
                 'status' => 'completed',
@@ -88,6 +92,14 @@ class PaymentAllocator
         });
 
         $this->recomputeFor($payment->allocations()->pluck('bill_id')->all());
+
+        try {
+            app(PaidBankRecorder::class)->record($payment->fresh(), is_array($opened) ? $opened : null);
+        } catch (Throwable $e) {
+            Log::warning('[PaymentAllocator] Recording the paying bank failed: '.$e->getMessage(), [
+                'payment' => $payment->payment_number,
+            ]);
+        }
 
         // Best-effort by design, and each channel on its own: money that
         // already arrived is never rolled back because a gateway hiccuped,

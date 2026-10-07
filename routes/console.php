@@ -22,6 +22,14 @@ Schedule::command('bills:generate --type=spp')
 
 // After the generator, so a bill issued today is never marked late on the same
 // run that created it.
+// Settlement records the paying bank itself; this catches what e-SPP was
+// too slow to answer for (recon's Ref. Bank, 2026-10-07).
+Schedule::command('payments:record-paid-bank')
+    ->hourly()
+    ->name('record-paid-bank')
+    ->withoutOverlapping(10)
+    ->description('Catat bank dan referensi bank pembayaran VA yang lunas');
+
 Schedule::command('bills:mark-overdue')
     ->dailyAt('01:00')
     ->name('mark-overdue-bills')

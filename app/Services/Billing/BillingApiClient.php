@@ -445,4 +445,31 @@ class BillingApiClient
 
         return $response->json() ?? [];
     }
+
+    /**
+     * Transactions e-SPP recorded on a VA (POST /api/transaction/va/{va}) -
+     * each carries the va_number actually paid, the billing_uuid it settled
+     * and the bank's own reference_no (the number on the bank statement).
+     * Used for the recon's Ref. Bank (2026-10-07, same call as PMB).
+     *
+     * @return array<string, mixed>
+     */
+    public function getTransactionsByVa(string $vaNumber): array
+    {
+        $response = $this->client()->post("/api/transaction/va/{$vaNumber}");
+
+        if ($response->status() === 401) {
+            Cache::forget(self::TOKEN_CACHE_KEY);
+            $response = $this->client()->post("/api/transaction/va/{$vaNumber}");
+        }
+
+        if ($response->failed()) {
+            throw new BillingApiException(
+                "e-SPP getTransactionsByVa failed for VA {$vaNumber}: ".$response->body(),
+                $response->status()
+            );
+        }
+
+        return $response->json() ?? [];
+    }
 }

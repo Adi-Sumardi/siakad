@@ -5,9 +5,15 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\DateRangeRequest;
 use App\Models\Bill;
+use App\Models\FeeType;
 use App\Models\Payment;
+use App\Models\SchoolUnit;
+use App\Services\Reporting\CollectionReconExcel;
+use App\Services\Reporting\CollectionReconPdf;
+use App\Services\Reporting\CollectionReconService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 
 class ReportController extends Controller
@@ -88,6 +94,60 @@ class ReportController extends Controller
                 'fee_type' => $name,
                 'total' => round((float) collect($group)->sum('amount'), 2),
             ])->values(),
+        ]);
+    }
+
+    /**
+     * What the recon dialog can narrow by: the fee types and units this
+     * admin can see. A unit admin's own unit only.
+     */
+    public function reconOptions(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        return response()->json([
+            'fee_types' => FeeType::query()->orderBy('sort_order')->orderBy('name')->get(['code', 'name']),
+            'units' => SchoolUnit::query()->ordered()
+                ->when($user->isUnitScoped(), fn ($q) => $q->whereKey($user->school_unit_id ?? 0))
+                ->get(['code', 'label']),
+        ]);
+    }
+
+    /** Recon PDF - per-unit totals, then each unit's paid allocations (2026-10-07). */
+    public function reconPdf(Request $request, CollectionReconService $recon, CollectionReconPdf $pdf): Response
+    {
+        $report = $recon->build($this->reconFilters($request), $request->user());
+
+        return new Response($pdf->render($report), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="'.$recon->filename($report, 'pdf').'"',
+        ]);
+    }
+
+    /** Recon Excel - Ringkasan, a sheet per unit, and Semua Transaksi. */
+    public function reconExcel(Request $request, CollectionReconService $recon, CollectionReconExcel $excel): Response
+    {
+        $report = $recon->build($this->reconFilters($request), $request->user());
+
+        return new Response($excel->render($report), 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="'.$recon->filename($report, 'xlsx').'"',
+        ]);
+    }
+
+    /** By PAYMENT date. */
+    private function reconFilters(Request $request): array
+    {
+        return $request->validate([
+            'from' => 'required|date',
+            'to' => 'required|date|after_or_equal:from',
+            'bank' => 'nullable|in:all,muamalat,bsi',
+            'fee_type' => 'nullable|string|max:40',
+            'unit' => 'nullable|string|max:40',
+        ], [
+            'from.required' => 'Tanggal bayar awal wajib diisi.',
+            'to.required' => 'Tanggal bayar akhir wajib diisi.',
+            'to.after_or_equal' => 'Tanggal akhir tidak boleh sebelum tanggal awal.',
         ]);
     }
 }

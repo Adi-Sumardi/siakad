@@ -264,6 +264,9 @@ Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin,admin_unit'])->
 
     Route::get('/reports/receivables', [ReportController::class, 'receivables']);
     Route::get('/reports/collections', [ReportController::class, 'collections']);
+    Route::get('/reports/collections/recon/options', [ReportController::class, 'reconOptions']);
+    Route::get('/reports/collections/recon/pdf', [ReportController::class, 'reconPdf']);
+    Route::get('/reports/collections/recon/excel', [ReportController::class, 'reconExcel']);
     Route::get('/reports/attendance', [AttendanceReportController::class, 'summary']);
 
     Route::get('/subjects', [SubjectController::class, 'index']);

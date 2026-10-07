@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import {
   Calendar,
   CreditCard,
+  FileDown,
+  FileSpreadsheet,
   Layers,
   RefreshCw,
   TrendingDown,
@@ -12,12 +14,12 @@ import {
   Users,
 } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, API_BASE } from "@/lib/api";
 import { rupiah, todayJakarta } from "@/lib/format";
 
 type Receivables = {
@@ -142,6 +144,8 @@ export default function ReportsPage() {
             </div>
           </div>
         </div>
+
+        <ReconBar from={from} to={to} />
 
         {collections === null ? (
           <Skeleton className="h-32 w-full" />
@@ -345,6 +349,78 @@ export default function ReportsPage() {
             </Card>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+type ReconOptions = {
+  fee_types: { code: string; name: string }[];
+  units: { code: string; label: string }[];
+};
+
+/**
+ * Recon download (2026-10-07, same report as PMB): paid allocations in the
+ * section's date range, by payment date - per-unit totals by fee type and by
+ * bank, then each unit's list with the bank reference, for matching against
+ * the BSI and Muamalat statements.
+ */
+function ReconBar({ from, to }: { from: string; to: string }) {
+  const [options, setOptions] = useState<ReconOptions | null>(null);
+  const [bank, setBank] = useState("all");
+  const [feeType, setFeeType] = useState("all");
+  const [unit, setUnit] = useState("all");
+
+  useEffect(() => {
+    api.get<ReconOptions>("/api/admin/reports/collections/recon/options")
+      .then(setOptions)
+      .catch(() => setOptions({ fee_types: [], units: [] }));
+  }, []);
+
+  const valid = from !== "" && to !== "" && from <= to;
+  const qs = new URLSearchParams({ from, to });
+  if (bank !== "all") qs.set("bank", bank);
+  if (feeType !== "all") qs.set("fee_type", feeType);
+  if (unit !== "all") qs.set("unit", unit);
+
+  const selectClass = "h-8 rounded-lg border border-input bg-card px-2 text-xs outline-none focus-visible:border-ring";
+  const linkClass = (variant: "outline" | "default") =>
+    `${buttonVariants({ variant, size: "sm" })} gap-1.5 ${valid ? "" : "pointer-events-none opacity-50"}`;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 className="text-sm font-bold text-foreground">Recon per Unit</h3>
+        <p className="text-xs text-muted-foreground">
+          Pembayaran lunas pada tanggal di atas: total per jenis biaya dan per bank, lalu daftar per unit dengan Ref. Bank.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <select id="recon-bank" value={bank} onChange={(e) => setBank(e.target.value)} className={selectClass} aria-label="Bank">
+          <option value="all">Semua bank</option>
+          <option value="muamalat">Bank Muamalat</option>
+          <option value="bsi">BSI</option>
+        </select>
+        <select id="recon-fee-type" value={feeType} onChange={(e) => setFeeType(e.target.value)} className={selectClass} aria-label="Jenis biaya">
+          <option value="all">Semua jenis biaya</option>
+          {options?.fee_types.map((f) => (
+            <option key={f.code} value={f.code}>{f.name}</option>
+          ))}
+        </select>
+        {(options?.units.length ?? 0) > 1 && (
+          <select id="recon-unit" value={unit} onChange={(e) => setUnit(e.target.value)} className={selectClass} aria-label="Unit">
+            <option value="all">Semua unit</option>
+            {options?.units.map((u) => (
+              <option key={u.code} value={u.code}>{u.label}</option>
+            ))}
+          </select>
+        )}
+        <a href={`${API_BASE}/api/admin/reports/collections/recon/pdf?${qs}`} target="_blank" rel="noreferrer" className={linkClass("outline")} aria-disabled={!valid}>
+          <FileDown className="size-3.5" /> Recon PDF
+        </a>
+        <a href={`${API_BASE}/api/admin/reports/collections/recon/excel?${qs}`} target="_blank" rel="noreferrer" className={linkClass("default")} aria-disabled={!valid}>
+          <FileSpreadsheet className="size-3.5" /> Recon Excel
+        </a>
       </div>
     </div>
   );
