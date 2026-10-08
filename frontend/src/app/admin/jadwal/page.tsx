@@ -440,6 +440,124 @@ function NewScheduleForm({
   );
 }
 
+/**
+ * "Semua kelas": one day at a time (tabs), a row per period, a column per
+ * kelas - so an empty cell is a free period and a teacher booked in two
+ * kelas at once shows up red. Scrolls sideways on a narrow screen with the
+ * Jam column pinned.
+ */
+function ScheduleGrid({
+  rows, classrooms, onRemove,
+}: { rows: ClassSchedule[]; classrooms: ClassroomOption[]; onRemove: (s: ClassSchedule) => void }) {
+  const [day, setDay] = useState(() => {
+    const today = new Date().getDay(); // 0 = Minggu
+    return today >= 1 && today <= 6 ? today : 1;
+  });
+
+  const dayRows = rows.filter((r) => r.day_of_week === day);
+  const slots = [...new Set(dayRows.map((r) => `${r.start_time}-${r.end_time}`))].sort();
+  const columns = classrooms;
+
+  const clashing = new Set(
+    dayRows
+      .filter((a) => a.teacher && dayRows.some((b) =>
+        b.ulid !== a.ulid && b.teacher?.ulid === a.teacher!.ulid && b.start_time < a.end_time && b.end_time > a.start_time))
+      .map((r) => r.ulid),
+  );
+
+  const countByDay = rows.reduce<Record<number, number>>((acc, r) => {
+    acc[r.day_of_week] = (acc[r.day_of_week] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <Card className="p-4">
+      <div role="tablist" className="mb-3 flex flex-wrap gap-1.5">
+        {Object.entries(DAY_OF_WEEK_LABEL).map(([value, label]) => {
+          const active = Number(value) === day;
+          return (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setDay(Number(value))}
+              className={`h-8 rounded-lg border px-3 text-xs font-semibold transition-colors ${
+                active ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {label}
+              <span className="ml-1 opacity-70">{countByDay[Number(value)] ?? 0}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {clashing.size > 0 && (
+        <p className="mb-3 rounded-lg bg-bad-soft px-3 py-2 text-xs text-bad">
+          Ada guru yang terjadwal di dua kelas pada jam yang sama - sel bertanda merah.
+        </p>
+      )}
+
+      {columns.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Belum ada kelas.</p>
+      ) : slots.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Belum ada jadwal pada hari {DAY_OF_WEEK_LABEL[day]}.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-max min-w-full border-separate border-spacing-0 text-xs">
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-10 border-b border-border bg-card px-2 py-2 text-left font-semibold">Jam</th>
+                {columns.map((c) => (
+                  <th key={c.ulid} className="min-w-36 border-b border-border px-2 py-2 text-left font-semibold">Kelas {c.name}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {slots.map((slot) => {
+                const [start, end] = slot.split("-");
+                return (
+                  <tr key={slot}>
+                    <td className="sticky left-0 z-10 whitespace-nowrap border-b border-border/60 bg-card px-2 py-2 font-medium tabular-nums">
+                      {start}–{end}
+                    </td>
+                    {columns.map((c) => {
+                      const s = dayRows.find((r) => r.classroom.ulid === c.ulid && r.start_time === start && r.end_time === end);
+                      if (!s) {
+                        return <td key={c.ulid} className="border-b border-border/60 px-2 py-2 text-muted-foreground/60">Kosong</td>;
+                      }
+                      const bad = clashing.has(s.ulid);
+                      return (
+                        <td key={c.ulid} className={`border-b border-border/60 px-2 py-2 align-top ${bad ? "bg-bad-soft" : ""}`}>
+                          <div className="flex items-start justify-between gap-1">
+                            <div className="min-w-0">
+                              <p className="font-semibold">{s.subject.name}</p>
+                              <p className={bad ? "text-bad" : "text-muted-foreground"}>{s.teacher?.name ?? "Belum ada guru"}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => onRemove(s)}
+                              title={`Hapus jadwal kelas ${s.classroom.name}`}
+                              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function JadwalPage() {
   const { user } = useAuth();
   const isCentral = user?.role === "admin";
@@ -643,42 +761,47 @@ export default function JadwalPage() {
         />
       </Card>
 
-      <div className="flex flex-col gap-4">
-        {loadedRows === null && <Skeleton className="h-40 w-full" />}
-        {loadedRows !== null && Object.keys(byDay).length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            {selectedClassroom ? "Belum ada jadwal untuk kelas ini." : "Belum ada jadwal."}
-          </p>
-        )}
-        {Object.entries(DAY_OF_WEEK_LABEL).map(([dayValue, dayLabel]) => {
-          const items = byDay[Number(dayValue)];
-          if (!items || items.length === 0) return null;
+      {loadedRows === null && <Skeleton className="h-40 w-full" />}
 
-          return (
-            <div key={dayValue}>
-              <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{dayLabel}</h3>
-              <div className="flex flex-col gap-2">
-                {items.map((s) => (
-                  <Card key={s.ulid} className="flex items-center justify-between gap-3 p-4">
-                    <div>
-                      <p className="font-medium">
-                        {s.subject.name}
-                        <Badge variant="default" className="ml-2 text-[10px] px-1.5 py-0 align-middle">Kelas {s.classroom.name}</Badge>
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {s.start_time}–{s.end_time} · {s.teacher?.name ?? "Belum ada guru"}
-                      </p>
-                    </div>
-                    <Button size="sm" variant="ghost" onClick={() => removeSchedule(s)} title="Hapus jadwal">
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </Card>
-                ))}
+      {loadedRows !== null && !selectedClassroom && (
+        <ScheduleGrid rows={loadedRows} classrooms={visibleClassrooms} onRemove={removeSchedule} />
+      )}
+
+      {loadedRows !== null && selectedClassroom && (
+        <div className="flex flex-col gap-4">
+          {Object.keys(byDay).length === 0 && (
+            <p className="text-sm text-muted-foreground">Belum ada jadwal untuk kelas ini.</p>
+          )}
+          {Object.entries(DAY_OF_WEEK_LABEL).map(([dayValue, dayLabel]) => {
+            const items = byDay[Number(dayValue)];
+            if (!items || items.length === 0) return null;
+  
+            return (
+              <div key={dayValue}>
+                <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{dayLabel}</h3>
+                <div className="flex flex-col gap-2">
+                  {items.map((s) => (
+                    <Card key={s.ulid} className="flex items-center justify-between gap-3 p-4">
+                      <div>
+                        <p className="font-medium">
+                          {s.subject.name}
+                          <Badge variant="default" className="ml-2 text-[10px] px-1.5 py-0 align-middle">Kelas {s.classroom.name}</Badge>
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {s.start_time}–{s.end_time} · {s.teacher?.name ?? "Belum ada guru"}
+                        </p>
+                      </div>
+                      <Button size="sm" variant="ghost" onClick={() => removeSchedule(s)} title="Hapus jadwal">
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </Card>
+                  ))}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
