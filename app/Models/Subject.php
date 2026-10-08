@@ -11,7 +11,7 @@ class Subject extends Model
 {
     use HasUlidKey;
 
-    protected $fillable = ['school_unit_id', 'code', 'name', 'is_active'];
+    protected $fillable = ['school_unit_id', 'code', 'name', 'is_active', 'merged_into_id'];
 
     protected $casts = [
         'is_active' => 'boolean',
@@ -30,6 +30,25 @@ class Subject extends Model
     public function grades(): HasMany
     {
         return $this->hasMany(Grade::class);
+    }
+
+    public function tingkatRows(): HasMany
+    {
+        return $this->hasMany(SubjectTingkat::class)->orderBy('tingkat');
+    }
+
+    /** A subject with no tingkat rows predates per-tingkat subjects and applies everywhere. */
+    public function appliesToTingkat(int $tingkat): bool
+    {
+        $rows = $this->relationLoaded('tingkatRows') ? $this->tingkatRows : $this->tingkatRows()->get();
+
+        return $rows->isEmpty() || $rows->contains(fn (SubjectTingkat $r) => $r->tingkat === $tingkat && $r->is_active);
+    }
+
+    /** Duplicates folded into another subject by SubjectMerger stay on file but out of every list. */
+    public function scopeNotMerged($query)
+    {
+        return $query->whereNull('merged_into_id');
     }
 
     public function scopeActive($query)

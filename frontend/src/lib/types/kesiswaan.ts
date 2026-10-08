@@ -74,9 +74,11 @@ export type AttendanceOverview = {
 export type Subject = {
   ulid: string;
   school_unit: string | null;
-  code: string;
   name: string;
   is_active?: boolean;
+  schedules_count?: number;
+  /** Grade levels the subject runs in; empty = applies to every tingkat (legacy rows). */
+  tingkat?: { tingkat: number; is_active: boolean; schedules_count: number }[];
 };
 
 export type ClassSchedule = {

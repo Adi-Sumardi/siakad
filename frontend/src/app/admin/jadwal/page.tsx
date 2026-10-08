@@ -19,19 +19,71 @@ import { DAY_OF_WEEK_LABEL, type ClassSchedule, type Subject } from "@/lib/types
 type ClassroomOption = { ulid: string; name: string; tingkat: number; school_unit: { code: string; label: string; jenjang_group?: string | null } };
 type TeacherOption = { ulid: string; name: string };
 
-function NewSubjectForm({ onCreated }: { onCreated: () => void }) {
-  const [code, setCode] = useState("");
+/** "7 · 8 · 9" - an inactive tingkat stays visible but struck through. Empty = every tingkat. */
+function TingkatChips({ subject }: { subject: Subject }) {
+  const rows = subject.tingkat ?? [];
+  if (rows.length === 0) {
+    return <Badge variant="default" className="text-[10px] px-1.5 py-0">Semua tingkat</Badge>;
+  }
+  return (
+    <span className="text-xs text-muted-foreground">
+      Tingkat{" "}
+      {rows.map((t, i) => (
+        <span key={t.tingkat}>
+          {i > 0 && " · "}
+          <span className={t.is_active ? "font-semibold text-foreground" : "line-through"} title={t.is_active ? undefined : "Nonaktif untuk tingkat ini"}>
+            {t.tingkat}
+          </span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** Toggle chips for the grade levels a subject runs in - options come from the unit's own classrooms. */
+function TingkatPicker({ options, value, onChange }: { options: number[]; value: number[]; onChange: (next: number[]) => void }) {
+  if (options.length === 0) {
+    return <p className="text-xs text-muted-foreground">Belum ada kelas di unit ini.</p>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((t) => {
+        const on = value.includes(t);
+        return (
+          <button
+            key={t}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onChange(on ? value.filter((v) => v !== t) : [...value, t].sort((a, b) => a - b))}
+            className={`h-8 min-w-9 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+              on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            {t}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function NewSubjectForm({ tingkatOptions, onCreated }: { tingkatOptions: number[]; onCreated: () => void }) {
   const [name, setName] = useState("");
+  const [tingkat, setTingkat] = useState<number[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (tingkat.length === 0) {
+      toast.error("Pilih minimal satu tingkat.");
+      return;
+    }
     setSubmitting(true);
     try {
-      await api.post("/api/admin/subjects", { code, name });
+      await api.post("/api/admin/subjects", { name, tingkat });
       toast.success("Mata pelajaran ditambahkan.");
-      setCode("");
       setName("");
+      setTingkat([]);
       onCreated();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menambah mata pelajaran.");
@@ -43,12 +95,12 @@ function NewSubjectForm({ onCreated }: { onCreated: () => void }) {
   return (
     <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
       <div className="flex flex-col gap-1.5">
-        <Label>Kode</Label>
-        <Input value={code} onChange={(e) => setCode(e.target.value)} required className="w-28" placeholder="BINDO" />
-      </div>
-      <div className="flex flex-col gap-1.5">
         <Label>Nama mata pelajaran</Label>
         <Input value={name} onChange={(e) => setName(e.target.value)} required className="w-56" placeholder="Bahasa Indonesia" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label>Tingkat</Label>
+        <TingkatPicker options={tingkatOptions} value={tingkat} onChange={setTingkat} />
       </div>
       <Button type="submit" size="sm" disabled={submitting}>{submitting ? "Menyimpan…" : "Tambah Mapel"}</Button>
     </form>
@@ -56,24 +108,42 @@ function NewSubjectForm({ onCreated }: { onCreated: () => void }) {
 }
 
 /**
- * The catalogue as editable rows (T30): rename in place (code stays locked -
- * it is the key schedules and grades point at), deactivate a subject that
- * must stop offering itself to new schedules, or delete one that has never
- * been used - a subject with history is refused server-side with the reason,
- * surfaced here as a toast. School-wide rows (null unit) belong to the
- * central admin only, so a unit admin just sees them without buttons.
+ * The catalogue as editable rows (T30): one row per subject with the grade
+ * levels it runs in. Edit renames it and picks its tingkat - a tingkat that
+ * still has schedules is switched off (not removed) server-side, after a
+ * warning here. Deactivate/delete warn first when the subject is already
+ * timetabled. School-wide rows (null unit) belong to the central admin only,
+ * so a unit admin just sees them without buttons.
  */
-function SubjectCatalog({ subjects, isCentral, reload }: { subjects: Subject[]; isCentral: boolean; reload: () => void }) {
+function SubjectCatalog({
+  subjects, tingkatOptions, isCentral, reload,
+}: { subjects: Subject[]; tingkatOptions: number[]; isCentral: boolean; reload: () => void }) {
   const [editing, setEditing] = useState<Subject | null>(null);
   const [name, setName] = useState("");
+  const [tingkat, setTingkat] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
+
+  function startEdit(s: Subject) {
+    setEditing(s);
+    setName(s.name);
+    setTingkat((s.tingkat ?? []).filter((t) => t.is_active).map((t) => t.tingkat));
+  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!editing) return;
+    if (tingkat.length === 0) {
+      toast.error("Pilih minimal satu tingkat.");
+      return;
+    }
+    const dropped = (editing.tingkat ?? []).filter((t) => t.is_active && !tingkat.includes(t.tingkat) && t.schedules_count > 0);
+    if (dropped.length > 0) {
+      const detail = dropped.map((t) => `tingkat ${t.tingkat} (${t.schedules_count} jadwal)`).join(", ");
+      if (!confirm(`${editing.name} masih dipakai di ${detail}. Tingkat tersebut akan dinonaktifkan untuk jadwal baru; jadwal yang ada tetap tersimpan. Lanjutkan?`)) return;
+    }
     setBusy(true);
     try {
-      await api.patch(`/api/admin/subjects/${editing.ulid}`, { name });
+      await api.patch(`/api/admin/subjects/${editing.ulid}`, { name, tingkat });
       toast.success("Mata pelajaran diperbarui.");
       setEditing(null);
       reload();
@@ -85,9 +155,14 @@ function SubjectCatalog({ subjects, isCentral, reload }: { subjects: Subject[]; 
   }
 
   async function toggleActive(s: Subject) {
+    const deactivating = s.is_active !== false;
+    if (deactivating && (s.schedules_count ?? 0) > 0
+      && !confirm(`${s.name} sudah dipakai di ${s.schedules_count} jadwal. Jika dinonaktifkan, mapel ini tidak bisa dipilih untuk jadwal baru (jadwal yang ada tetap). Lanjutkan?`)) {
+      return;
+    }
     try {
-      await api.patch(`/api/admin/subjects/${s.ulid}`, { is_active: s.is_active === false });
-      toast.success(s.is_active === false ? "Mata pelajaran diaktifkan kembali." : "Mata pelajaran dinonaktifkan - tidak lagi tawarkan di jadwal baru.");
+      await api.patch(`/api/admin/subjects/${s.ulid}`, { is_active: !deactivating });
+      toast.success(deactivating ? "Mata pelajaran dinonaktifkan - tidak lagi ditawarkan di jadwal baru." : "Mata pelajaran diaktifkan kembali.");
       reload();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal mengubah status mata pelajaran.");
@@ -95,6 +170,15 @@ function SubjectCatalog({ subjects, isCentral, reload }: { subjects: Subject[]; 
   }
 
   async function remove(s: Subject) {
+    if ((s.schedules_count ?? 0) > 0) {
+      if (s.is_active !== false && confirm(`${s.name} sudah dipakai di ${s.schedules_count} jadwal sehingga tidak bisa dihapus. Nonaktifkan saja?`)) {
+        await toggleActiveConfirmed(s);
+      } else if (s.is_active === false) {
+        toast.error(`${s.name} sudah dipakai di ${s.schedules_count} jadwal sehingga tidak bisa dihapus.`);
+      }
+      return;
+    }
+    if (!confirm(`Hapus mata pelajaran ${s.name}?`)) return;
     try {
       await api.delete(`/api/admin/subjects/${s.ulid}`);
       toast.success("Mata pelajaran dihapus.");
@@ -104,29 +188,56 @@ function SubjectCatalog({ subjects, isCentral, reload }: { subjects: Subject[]; 
     }
   }
 
+  async function toggleActiveConfirmed(s: Subject) {
+    try {
+      await api.patch(`/api/admin/subjects/${s.ulid}`, { is_active: false });
+      toast.success("Mata pelajaran dinonaktifkan - tidak lagi ditawarkan di jadwal baru.");
+      reload();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal mengubah status mata pelajaran.");
+    }
+  }
+
   return (
     <div className="mt-3 flex flex-col">
       {subjects.map((s) => {
         const centralOwned = s.school_unit === null && !isCentral;
 
-        return (
-          <div key={s.ulid} className="flex items-center justify-between gap-3 border-t border-border/60 py-2 first:border-t-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
-              <span className={`font-medium ${s.is_active === false ? "text-muted-foreground line-through" : ""}`}>{s.name}</span>
-              <Badge variant="default" className="text-[10px] px-1.5 py-0 font-mono">{s.code}</Badge>
-              {isCentral && <span className="text-xs text-muted-foreground">{s.school_unit ?? "Seluruh sekolah"}</span>}
-              {s.is_active === false && <Badge variant="default" className="text-[10px] px-1.5 py-0">Nonaktif</Badge>}
-            </div>
-
-            {editing?.ulid === s.ulid ? (
-              <form onSubmit={save} className="flex shrink-0 items-center gap-1.5">
+        if (editing?.ulid === s.ulid) {
+          return (
+            <form key={s.ulid} onSubmit={save} className="flex flex-wrap items-end gap-3 border-t border-border/60 py-3 first:border-t-0">
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Nama</Label>
                 <Input value={name} onChange={(e) => setName(e.target.value)} required className="h-8 w-48 text-xs" autoFocus />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Tingkat</Label>
+                <TingkatPicker
+                  options={[...new Set([...tingkatOptions, ...(s.tingkat ?? []).map((t) => t.tingkat)])].sort((a, b) => a - b)}
+                  value={tingkat}
+                  onChange={setTingkat}
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
                 <Button type="submit" size="sm" disabled={busy} className="h-8 px-2.5 text-xs font-semibold">Simpan</Button>
                 <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(null)} disabled={busy} className="h-8 px-2">
                   <X className="size-3.5" />
                 </Button>
-              </form>
-            ) : centralOwned ? (
+              </div>
+            </form>
+          );
+        }
+
+        return (
+          <div key={s.ulid} className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 py-2 first:border-t-0">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+              <span className={`font-medium ${s.is_active === false ? "text-muted-foreground line-through" : ""}`}>{s.name}</span>
+              <TingkatChips subject={s} />
+              {isCentral && <span className="text-xs text-muted-foreground">{s.school_unit ?? "Seluruh sekolah"}</span>}
+              {s.is_active === false && <Badge variant="default" className="text-[10px] px-1.5 py-0">Nonaktif</Badge>}
+            </div>
+
+            {centralOwned ? (
               <span className="shrink-0 text-xs text-muted-foreground">Dikelola admin pusat</span>
             ) : (
               <div className="flex shrink-0 items-center gap-1.5">
@@ -143,8 +254,8 @@ function SubjectCatalog({ subjects, isCentral, reload }: { subjects: Subject[]; 
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => { setEditing(s); setName(s.name); }}
-                  title="Edit nama"
+                  onClick={() => startEdit(s)}
+                  title="Edit nama dan tingkat"
                   className="h-8 px-2.5 text-xs font-semibold gap-1"
                 >
                   <Edit2 className="size-3.5" />
@@ -154,7 +265,7 @@ function SubjectCatalog({ subjects, isCentral, reload }: { subjects: Subject[]; 
                   size="sm"
                   variant="ghost"
                   onClick={() => remove(s)}
-                  title="Hapus (ditolak bila sudah terpakai)"
+                  title="Hapus (hanya bila belum dipakai di jadwal)"
                   className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
                 >
                   <Trash2 className="size-3.5" />
@@ -167,6 +278,7 @@ function SubjectCatalog({ subjects, isCentral, reload }: { subjects: Subject[]; 
     </div>
   );
 }
+
 
 function NewScheduleForm({
   classroomUlid, subjects, teachers, onCreated,
@@ -326,6 +438,10 @@ export default function JadwalPage() {
   // in the picked unit.
   const jenjangByUnit = deriveUnitJenjang(classrooms ?? []);
 
+  // The tingkat a subject can run in: whatever the visible classrooms use
+  // (the API already scopes a unit admin to their own unit), never hardcoded.
+  const tingkatOptions = [...new Set((classrooms ?? []).map((c) => c.tingkat))].sort((a, b) => a - b);
+
   /** Top-down cascade (Poin 3): when Unit/Jenjang change, a selected kelas that no longer matches steps down to the first one that does - same auto-pick the first load uses. */
   function refocusKelas(nextUnit: string, nextJenjang: string) {
     const stillMatches = (c: ClassroomOption) =>
@@ -368,9 +484,9 @@ export default function JadwalPage() {
 
       <Card className="p-5">
         <h2 className="mb-3 text-sm font-semibold">Katalog mata pelajaran</h2>
-        <NewSubjectForm onCreated={loadSubjects} />
+        <NewSubjectForm tingkatOptions={tingkatOptions} onCreated={loadSubjects} />
         {subjects.length > 0 && (
-          <SubjectCatalog subjects={subjects} isCentral={isCentral} reload={loadSubjects} />
+          <SubjectCatalog subjects={subjects} tingkatOptions={tingkatOptions} isCentral={isCentral} reload={loadSubjects} />
         )}
       </Card>
 
