@@ -12,9 +12,25 @@ class ActivityLog extends Model
 
     public $timestamps = false;
 
+    /**
+     * Rows written during the current request, so LogAdminActivity knows
+     * whether an explicit record() already covered it. Reset per request.
+     *
+     * @var list<int>
+     */
+    public static array $recordedThisRequest = [];
+
     protected $fillable = [
         'user_id',
+        'user_name',
+        'role',
+        'school_unit_id',
+        'unit_label',
         'action',
+        'label',
+        'category',
+        'status',
+        'path',
         'subject_type',
         'subject_id',
         'ip_address',
@@ -36,9 +52,20 @@ class ActivityLog extends Model
     /** Every money and points action records one of these. */
     public static function record(?User $user, string $action, ?Model $subject = null, array $meta = []): self
     {
-        return static::create([
+        $user?->loadMissing('schoolUnit');
+        $described = \App\Support\ActivityCatalog::describe($action);
+
+        $log = static::create([
             'user_id' => $user?->id,
+            // As they were at the time - see the 2026_10_01 migration.
+            'user_name' => $user?->name,
+            'role' => $user?->role,
+            'school_unit_id' => $user?->school_unit_id,
+            'unit_label' => $user?->schoolUnit?->label,
             'action' => $action,
+            'label' => $described['label'],
+            'category' => $described['category'],
+            'path' => request()->path() ? mb_substr('/'.request()->path(), 0, 500) : null,
             'subject_type' => $subject ? $subject::class : null,
             'subject_id' => $subject?->getKey(),
             'ip_address' => request()->ip(),
@@ -46,5 +73,9 @@ class ActivityLog extends Model
             'meta' => $meta ?: null,
             'created_at' => now(),
         ]);
+
+        static::$recordedThisRequest[] = $log->id;
+
+        return $log;
     }
 }

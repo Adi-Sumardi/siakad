@@ -277,7 +277,7 @@ Route::middleware(['auth:sanctum', 'active'])->prefix('files')->group(function (
  * a separate question answered by visibleTo() on each model - a role check
  * alone would let one unit's admin open another unit's student.
  */
-Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->group(function () {
+Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin,admin_unit'])->prefix('admin')->group(function () {
     // (billing-chart / achievements-chart were removed 2026-09-21: no screen
     // ever read them - everything visual lives in /dashboard/summary.)
     Route::get('/dashboard/summary', [DashboardSummaryController::class, 'summary']);
@@ -329,6 +329,9 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
 
     Route::get('/reports/receivables', [ReportController::class, 'receivables']);
     Route::get('/reports/collections', [ReportController::class, 'collections']);
+    Route::get('/reports/collections/recon/options', [ReportController::class, 'reconOptions']);
+    Route::get('/reports/collections/recon/pdf', [ReportController::class, 'reconPdf']);
+    Route::get('/reports/collections/recon/excel', [ReportController::class, 'reconExcel']);
     Route::get('/reports/attendance', [AttendanceReportController::class, 'summary']);
     // CSV downloads of the same three reports (audit 6 Okt 2026 #5) - the
     // monthly class recap and the bendahara's lists, openable in Excel.
@@ -495,7 +498,7 @@ Route::middleware(['auth:sanctum', 'role:admin,admin_unit'])->prefix('admin')->g
  * sole rate exception (a unit's own Cambridge nominal) lives in the shared
  * group above; deleting any rate, Cambridge included, stays here.
  */
-Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
+Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin'])->prefix('admin')->group(function () {
     Route::put('/academic-policy', [AcademicPolicyController::class, 'update']);
     Route::delete('/academic-policy/{unitUlid}', [AcademicPolicyController::class, 'destroy']);
     Route::post('/fee-types', [FeeSettingController::class, 'storeType']);

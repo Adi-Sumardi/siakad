@@ -28,8 +28,18 @@ class ActivityLogController extends Controller
             // matches point.recorded, point.revoked, point_rule.*, ...
             ->when($request->string('action')->value(), fn ($q, $action) => $q
                 ->where('action', 'like', "%{$action}%"))
-            ->when($request->string('user')->value(), fn ($q, $name) => $q
-                ->whereIn('user_id', User::where('name', 'like', "%{$name}%")->pluck('id')))
+            ->when($request->string('user')->value(), fn ($q, $name) => $q->where(fn ($w) => $w
+                ->where('user_name', 'like', "%{$name}%")
+                ->orWhereIn('user_id', User::where('name', 'like', "%{$name}%")->pluck('id'))))
+            // 2026-10-01: role, unit ("pusat" = no unit), category, outcome.
+            ->when($request->string('role')->value(), fn ($q, $role) => $q->where('role', $role))
+            ->when($request->string('unit')->value(), fn ($q, $unit) => $unit === 'pusat'
+                ? $q->whereNull('school_unit_id')
+                : $q->where('school_unit_id', (int) $unit))
+            ->when($request->string('category')->value(), fn ($q, $c) => $q->where('category', $c))
+            ->when($request->string('status')->value(), fn ($q, $st) => $st === 'failed'
+                ? $q->where('status', '>=', 400)
+                : $q->where(fn ($w) => $w->whereNull('status')->orWhere('status', '<', 400)))
             ->when($request->string('from')->value(), fn ($q, $from) => $q
                 ->where('created_at', '>=', $from.' 00:00:00'))
             ->when($request->string('to')->value(), fn ($q, $to) => $q
@@ -45,7 +55,15 @@ class ActivityLogController extends Controller
             'data' => $rows->map(fn (ActivityLog $log) => [
                 'ulid' => $log->ulid,
                 'user' => $log->user?->only(['ulid', 'name', 'role']),
+                // As they were when it happened (see the 2026_10_01 migration).
+                'user_name' => $log->user_name ?? $log->user?->name,
+                'role' => $log->role ?? $log->user?->role,
+                'unit' => $log->unit_label,
                 'action' => $log->action,
+                'label' => $log->label ?? \App\Support\ActivityCatalog::describe($log->action)['label'],
+                'category' => $log->category ?? 'Lainnya',
+                'status' => $log->status,
+                'success' => $log->status === null || $log->status < 400,
                 'subject_type' => $log->subject_type ? class_basename($log->subject_type) : null,
                 'subject_ulid' => $log->subject_type
                     ? ($subjectUlids[$log->subject_type][$log->subject_id] ?? null)
@@ -53,6 +71,10 @@ class ActivityLogController extends Controller
                 'meta' => $log->meta,
                 'created_at' => $log->created_at?->toIso8601String(),
             ]),
+            'options' => [
+                'units' => \App\Models\SchoolUnit::orderBy('label')->get(['id', 'label']),
+                'categories' => \App\Support\ActivityCatalog::categories(),
+            ],
             'meta' => [
                 'current_page' => $logs->currentPage(),
                 'last_page' => $logs->lastPage(),

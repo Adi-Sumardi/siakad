@@ -95,6 +95,10 @@ class PaymentAllocator
         // snapshots of the same row - both pass it and both run the full
         // settle, double-sending receipts. The loser here changes nothing
         // and sends nothing.
+        // Settlement replaces gateway_response with e-SPP's poll response,
+        // which no longer names the VA or bank - the recon keeps them.
+        $opened = $payment->gateway_response;
+
         $outcome = DB::transaction(function () use ($payment, $externalId, $gatewayResponse) {
             $fresh = Payment::query()
                 ->whereKey($payment->id)
@@ -253,6 +257,14 @@ class PaymentAllocator
             $this->supersedeSiblingVaPayments($payment);
         } catch (Throwable $e) {
             Log::warning('[PaymentAllocator] Sibling VA supersede after settle failed: '.$e->getMessage(), [
+                'payment' => $payment->payment_number,
+            ]);
+        }
+
+        try {
+            app(PaidBankRecorder::class)->record($payment->fresh(), is_array($opened) ? $opened : null);
+        } catch (Throwable $e) {
+            Log::warning('[PaymentAllocator] Recording the paying bank failed: '.$e->getMessage(), [
                 'payment' => $payment->payment_number,
             ]);
         }
