@@ -41,7 +41,10 @@ class ScheduleController extends Controller
     public function all(Request $request): JsonResponse
     {
         $schedules = ClassSchedule::visibleTo($request->user())
+            // Active year only: last year's classrooms (same names) stay on
+            // file for history but are not part of the running timetable.
             ->whereHas('classroom', fn ($q) => $q->where('is_active', true)
+                ->whereHas('academicYear', fn ($y) => $y->where('is_active', true))
                 ->when($request->string('unit')->value(), fn ($q, $code) => $q->whereHas('schoolUnit', fn ($u) => $u->where('code', $code))))
             ->with('subject', 'teacher', 'classroom')
             ->orderBy('day_of_week')->orderBy('start_time')

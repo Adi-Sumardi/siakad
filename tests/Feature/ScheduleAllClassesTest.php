@@ -35,6 +35,14 @@ class ScheduleAllClassesTest extends TestCase
         $make($smp, '7-B');
         $make($sma, '10-A');
 
+        // Last year's 7-A keeps its schedule on file but is not this year's timetable.
+        $oldYear = AcademicYear::create(['year' => '2025/2026', 'starts_on' => '2025-07-01', 'ends_on' => '2026-06-30']);
+        $old = Classroom::create(['school_unit_id' => $smp->id, 'academic_year_id' => $oldYear->id, 'name' => '7-A', 'tingkat' => 7]);
+        ClassSchedule::create([
+            'classroom_id' => $old->id, 'subject_id' => $subject->id,
+            'day_of_week' => 1, 'start_time' => '07:00', 'end_time' => '08:00',
+        ]);
+
         $admin = User::create([
             'name' => 'Admin SMP', 'email' => 'a@yapinet.id', 'role' => 'admin_unit',
             'school_unit_id' => $smp->id, 'is_active' => true, 'activated_at' => now(),

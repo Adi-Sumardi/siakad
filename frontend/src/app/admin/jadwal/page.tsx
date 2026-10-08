@@ -587,7 +587,16 @@ export default function JadwalPage() {
   }
 
   useEffect(() => {
-    api.get<{ classrooms: ClassroomOption[] }>("/api/admin/classrooms")
+    // The timetable is for the running academic year only - last year's
+    // 7-A/9-A rows (kept for history) would otherwise show up twice, out of
+    // step with Data Kelas, which also opens on the active year.
+    api.get<{ academic_years: { ulid: string; is_active: boolean }[] }>("/api/admin/academic-years")
+      .then((y) => {
+        const active = y.academic_years.find((a) => a.is_active);
+        return api.get<{ classrooms: ClassroomOption[] }>(
+          `/api/admin/classrooms${active ? `?academic_year_ulid=${active.ulid}` : ""}`,
+        );
+      })
       .then((d) => setClassrooms(d.classrooms))
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar kelas."));
 
