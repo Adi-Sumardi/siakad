@@ -358,17 +358,19 @@ export default function JadwalPage() {
   const isCentral = user?.role === "admin";
 
   const [classrooms, setClassrooms] = useState<ClassroomOption[] | null>(null);
+  // "" = Semua kelas (the default): the whole unit's timetable on one screen,
+  // so teacher clashes and free periods across classes are visible.
   const [selectedClassroom, setSelectedClassroom] = useState<string>("");
-  // Display-only narrowing ahead of the picker (Poin 4): a central admin's
-  // classroom list is unit- and jenjang-filterable so one campus's timetable
-  // never drowns in every other unit's; admin_unit is already scoped by the
-  // API, where jenjang still helps inside their own unit.
+  // Unit and Jenjang only narrow a central admin's cross-unit view; a unit
+  // admin is locked to one unit by the API and picks a kelas directly.
   const [unitFilter, setUnitFilter] = useState("");
   const [jenjangFilter, setJenjangFilter] = useState("");
   const [unitOptions, setUnitOptions] = useState<{ code: string; label: string }[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
-  const [schedules, setSchedules] = useState<{ classroomUlid: string; rows: ClassSchedule[] } | null>(null);
+  // Every visible period, tagged with the unit filter it was fetched for;
+  // the single-class view is a client-side slice of it.
+  const [schedules, setSchedules] = useState<{ unit: string; rows: ClassSchedule[] } | null>(null);
 
   function loadSubjects() {
     // include_inactive so the catalogue below can show - and re-activate or
@@ -381,10 +383,7 @@ export default function JadwalPage() {
 
   useEffect(() => {
     api.get<{ classrooms: ClassroomOption[] }>("/api/admin/classrooms")
-      .then((d) => {
-        setClassrooms(d.classrooms);
-        if (d.classrooms.length > 0) setSelectedClassroom(d.classrooms[0].ulid);
-      })
+      .then((d) => setClassrooms(d.classrooms))
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar kelas."));
 
     loadSubjects();
@@ -398,22 +397,17 @@ export default function JadwalPage() {
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat daftar guru."));
   }, []);
 
-  // Rows are stored tagged with the classroom they belong to: a classroom
-  // switch shows the skeleton (not the previous classroom's timetable) until
-  // the new one lands, without any synchronous setState in the effect.
-  // Request-tagged + reconciled (audit 2026-09-28): a late OLD response
-  // used to overwrite the fresh tag and strand the panel on a skeleton
-  // forever - a stale response is now dropped, and a mismatched store
-  // triggers one corrective refetch that converges.
+  // Request-tagged (audit 2026-09-28): a late response for a previous unit
+  // filter is dropped instead of overwriting the fresh one.
   const schedulesRequestId = useRef(0);
 
-  function loadSchedules(classroomUlid: string) {
-    if (!classroomUlid) return;
+  function loadSchedules(unit: string) {
     const requestId = ++schedulesRequestId.current;
-    api.get<{ schedules: ClassSchedule[] }>(`/api/admin/classrooms/${classroomUlid}/schedules`)
+    const query = unit ? `?unit=${encodeURIComponent(unit)}` : "";
+    api.get<{ schedules: ClassSchedule[] }>(`/api/admin/schedules${query}`)
       .then((d) => {
         if (requestId !== schedulesRequestId.current) return;
-        setSchedules({ classroomUlid, rows: d.schedules });
+        setSchedules({ unit, rows: d.schedules });
       })
       .catch((err) => {
         if (requestId !== schedulesRequestId.current) return;
@@ -422,16 +416,8 @@ export default function JadwalPage() {
   }
 
   useEffect(() => {
-    if (selectedClassroom) loadSchedules(selectedClassroom);
-  }, [selectedClassroom]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reconciliation: the store's tag can only disagree with the selection
-  // through an out-of-order write - refetch once and converge.
-  useEffect(() => {
-    if (schedules !== null && selectedClassroom && schedules.classroomUlid !== selectedClassroom) {
-      loadSchedules(selectedClassroom);
-    }
-  }, [schedules, selectedClassroom]); // eslint-disable-line react-hooks/exhaustive-deps
+    loadSchedules(unitFilter);
+  }, [unitFilter]);
 
   // The cascade's map (bug batch Poin 3): derived from the SAME classrooms
   // the Kelas picker lists, so Jenjang offers exactly the ladder that runs
@@ -442,30 +428,32 @@ export default function JadwalPage() {
   // (the API already scopes a unit admin to their own unit), never hardcoded.
   const tingkatOptions = [...new Set((classrooms ?? []).map((c) => c.tingkat))].sort((a, b) => a - b);
 
-  /** Top-down cascade (Poin 3): when Unit/Jenjang change, a selected kelas that no longer matches steps down to the first one that does - same auto-pick the first load uses. */
-  function refocusKelas(nextUnit: string, nextJenjang: string) {
-    const stillMatches = (c: ClassroomOption) =>
-      (!nextUnit || c.school_unit.code === nextUnit) && matchesClassroom(c, nextJenjang || null);
+  const matchesFilters = (c: ClassroomOption, unit: string, jenjang: string) =>
+    (!unit || c.school_unit.code === unit) && matchesClassroom(c, jenjang || null);
 
+  const visibleClassrooms = (classrooms ?? []).filter((c) => matchesFilters(c, unitFilter, jenjangFilter));
+
+  /** Top-down cascade (Poin 3): when Unit/Jenjang change, a selected kelas that no longer matches falls back to "Semua kelas". */
+  function refocusKelas(nextUnit: string, nextJenjang: string) {
     if (!selectedClassroom) return;
     const current = (classrooms ?? []).find((c) => c.ulid === selectedClassroom);
-    if (current && !stillMatches(current)) {
-      setSelectedClassroom((classrooms ?? []).find(stillMatches)?.ulid ?? "");
-    }
+    if (current && !matchesFilters(current, nextUnit, nextJenjang)) setSelectedClassroom("");
   }
 
-  async function removeSchedule(ulid: string) {
+  async function removeSchedule(s: ClassSchedule) {
+    if (!confirm(`Hapus jadwal ${s.subject.name} kelas ${s.classroom.name} (${DAY_OF_WEEK_LABEL[s.day_of_week]} ${s.start_time}–${s.end_time})?`)) return;
     try {
-      await api.delete(`/api/admin/classrooms/${selectedClassroom}/schedules/${ulid}`);
+      await api.delete(`/api/admin/classrooms/${s.classroom.ulid}/schedules/${s.ulid}`);
       toast.success("Jadwal dihapus.");
-      loadSchedules(selectedClassroom);
+      loadSchedules(unitFilter);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menghapus jadwal.");
     }
   }
 
-  const loadedRows = schedules !== null && schedules.classroomUlid === selectedClassroom
-    ? schedules.rows
+  const visibleIds = new Set(visibleClassrooms.map((c) => c.ulid));
+  const loadedRows = schedules !== null && schedules.unit === unitFilter
+    ? schedules.rows.filter((s) => (selectedClassroom ? s.classroom.ulid === selectedClassroom : visibleIds.has(s.classroom.ulid)))
     : null;
 
   const byDay = (loadedRows ?? []).reduce<Record<number, ClassSchedule[]>>((acc, s) => {
@@ -502,8 +490,6 @@ export default function JadwalPage() {
                   setUnitFilter(nextUnit);
                   // Top-down cascade (Poin 3): a new unit resets a jenjang
                   // it doesn't run, and the kelas follows whatever survives.
-                  // "Semua Unit" runs every jenjang and keeps the pick
-                  // (audit 2026-09-28: it used to clear it).
                   const nextJenjang =
                     jenjangFilter && nextUnit && !(jenjangByUnit[nextUnit] ?? []).includes(jenjangFilter)
                       ? ""
@@ -520,18 +506,20 @@ export default function JadwalPage() {
               </select>
             </div>
           )}
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-xs">Jenjang</Label>
-            <JenjangSelect
-              value={jenjangFilter}
-              onChange={(key) => {
-                setJenjangFilter(key);
-                refocusKelas(unitFilter, key);
-              }}
-              allowedKeys={jenjangKeysForUnit(jenjangByUnit, unitFilter || null)}
-              className="h-10 w-56 rounded-lg border border-input bg-card px-3 text-sm"
-            />
-          </div>
+          {isCentral && (
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs">Jenjang</Label>
+              <JenjangSelect
+                value={jenjangFilter}
+                onChange={(key) => {
+                  setJenjangFilter(key);
+                  refocusKelas(unitFilter, key);
+                }}
+                allowedKeys={jenjangKeysForUnit(jenjangByUnit, unitFilter || null)}
+                className="h-10 w-56 rounded-lg border border-input bg-card px-3 text-sm"
+              />
+            </div>
+          )}
           <div className="flex flex-col gap-1.5">
             <Label>Kelas</Label>
             {classrooms === null ? (
@@ -542,12 +530,10 @@ export default function JadwalPage() {
                 onChange={(e) => setSelectedClassroom(e.target.value)}
                 className="h-10 w-64 rounded-lg border border-input bg-card px-3 text-sm"
               >
-                {classrooms
-                  .filter((c) => !unitFilter || c.school_unit.code === unitFilter)
-                  .filter((c) => matchesClassroom(c, jenjangFilter || null))
-                  .map((c) => (
-                    <option key={c.ulid} value={c.ulid}>{c.school_unit.label} · {c.name}</option>
-                  ))}
+                <option value="">Semua kelas</option>
+                {visibleClassrooms.map((c) => (
+                  <option key={c.ulid} value={c.ulid}>{isCentral ? `${c.school_unit.label} · ` : ""}{c.name}</option>
+                ))}
               </select>
             )}
           </div>
@@ -561,7 +547,7 @@ export default function JadwalPage() {
             classroomUlid={selectedClassroom}
             subjects={subjects}
             teachers={teachers}
-            onCreated={() => loadSchedules(selectedClassroom)}
+            onCreated={() => loadSchedules(unitFilter)}
           />
         </Card>
       )}
@@ -569,7 +555,9 @@ export default function JadwalPage() {
       <div className="flex flex-col gap-4">
         {loadedRows === null && <Skeleton className="h-40 w-full" />}
         {loadedRows !== null && Object.keys(byDay).length === 0 && (
-          <p className="text-sm text-muted-foreground">Belum ada jadwal untuk kelas ini.</p>
+          <p className="text-sm text-muted-foreground">
+            {selectedClassroom ? "Belum ada jadwal untuk kelas ini." : "Belum ada jadwal."}
+          </p>
         )}
         {Object.entries(DAY_OF_WEEK_LABEL).map(([dayValue, dayLabel]) => {
           const items = byDay[Number(dayValue)];
@@ -582,12 +570,15 @@ export default function JadwalPage() {
                 {items.map((s) => (
                   <Card key={s.ulid} className="flex items-center justify-between gap-3 p-4">
                     <div>
-                      <p className="font-medium">{s.subject.name}</p>
+                      <p className="font-medium">
+                        {s.subject.name}
+                        <Badge variant="default" className="ml-2 text-[10px] px-1.5 py-0 align-middle">Kelas {s.classroom.name}</Badge>
+                      </p>
                       <p className="text-sm text-muted-foreground">
-                        {s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)} · {s.teacher?.name ?? "Belum ada guru"}
+                        {s.start_time}–{s.end_time} · {s.teacher?.name ?? "Belum ada guru"}
                       </p>
                     </div>
-                    <Button size="sm" variant="ghost" onClick={() => removeSchedule(s.ulid)}>
+                    <Button size="sm" variant="ghost" onClick={() => removeSchedule(s)} title="Hapus jadwal">
                       <Trash2 className="size-4" />
                     </Button>
                   </Card>

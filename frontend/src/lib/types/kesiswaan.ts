@@ -83,6 +83,7 @@ export type Subject = {
 
 export type ClassSchedule = {
   ulid: string;
+  classroom: { ulid: string; name: string; tingkat: number };
   subject: { ulid: string; name: string };
   teacher: { ulid: string; name: string } | null;
   day_of_week: number;

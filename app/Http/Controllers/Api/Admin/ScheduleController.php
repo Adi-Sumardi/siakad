@@ -22,21 +22,47 @@ class ScheduleController extends Controller
         $classroom = Classroom::visibleTo($request->user())->where('ulid', $classroomUlid)->firstOrFail();
 
         $schedules = $classroom->classSchedules()
-            ->with('subject', 'teacher')
+            ->with('subject', 'teacher', 'classroom')
             ->orderBy('day_of_week')->orderBy('start_time')
             ->get();
 
         return response()->json([
             'classroom' => ['ulid' => $classroom->ulid, 'name' => $classroom->name],
-            'schedules' => $schedules->map(fn (ClassSchedule $s) => [
-                'ulid' => $s->ulid,
-                'subject' => ['ulid' => $s->subject->ulid, 'name' => $s->subject->name],
-                'teacher' => $s->teacher ? ['ulid' => $s->teacher->ulid, 'name' => $s->teacher->name] : null,
-                'day_of_week' => $s->day_of_week,
-                'start_time' => $s->start_time,
-                'end_time' => $s->end_time,
-            ]),
+            'schedules' => $schedules->map(fn (ClassSchedule $s) => $this->row($s)),
         ]);
+    }
+
+    /**
+     * Every period of every active classroom the caller can see - the
+     * "Semua kelas" view, where clashes and free periods across classes
+     * show up. Scoping is ClassSchedule::visibleTo (the classroom's unit),
+     * unchanged; `unit` only narrows a central admin's view further.
+     */
+    public function all(Request $request): JsonResponse
+    {
+        $schedules = ClassSchedule::visibleTo($request->user())
+            ->whereHas('classroom', fn ($q) => $q->where('is_active', true)
+                ->when($request->string('unit')->value(), fn ($q, $code) => $q->whereHas('schoolUnit', fn ($u) => $u->where('code', $code))))
+            ->with('subject', 'teacher', 'classroom')
+            ->orderBy('day_of_week')->orderBy('start_time')
+            ->get();
+
+        return response()->json([
+            'schedules' => $schedules->map(fn (ClassSchedule $s) => $this->row($s)),
+        ]);
+    }
+
+    private function row(ClassSchedule $s): array
+    {
+        return [
+            'ulid' => $s->ulid,
+            'classroom' => ['ulid' => $s->classroom->ulid, 'name' => $s->classroom->name, 'tingkat' => $s->classroom->tingkat],
+            'subject' => ['ulid' => $s->subject->ulid, 'name' => $s->subject->name],
+            'teacher' => $s->teacher ? ['ulid' => $s->teacher->ulid, 'name' => $s->teacher->name] : null,
+            'day_of_week' => $s->day_of_week,
+            'start_time' => substr((string) $s->start_time, 0, 5),
+            'end_time' => substr((string) $s->end_time, 0, 5),
+        ];
     }
 
     public function store(StoreClassScheduleRequest $request, string $classroomUlid): JsonResponse

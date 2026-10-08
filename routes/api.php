@@ -344,6 +344,7 @@ Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin,admin_unit'])->
     Route::patch('/subjects/{subject}', [SubjectController::class, 'update']);
     Route::delete('/subjects/{subject}', [SubjectController::class, 'destroy']);
 
+    Route::get('/schedules', [ScheduleController::class, 'all']);
     Route::get('/classrooms/{classroomUlid}/schedules', [ScheduleController::class, 'index']);
     Route::post('/classrooms/{classroomUlid}/schedules', [ScheduleController::class, 'store']);
     Route::patch('/classrooms/{classroomUlid}/schedules/{ulid}', [ScheduleController::class, 'update']);
