@@ -71,7 +71,7 @@ class ScheduleController extends Controller
 
         $validated = $request->validated();
 
-        $subject = Subject::where('ulid', $validated['subject_ulid'])->firstOrFail();
+        $subject = $this->resolveSubject($validated['subject_ulid'], $classroom);
         $teacher = $this->resolveTeacher($validated['teacher_ulid'] ?? null, $classroom);
 
         $this->assertNoClassroomClash(
@@ -116,6 +116,10 @@ class ScheduleController extends Controller
         $day = (int) ($validated['day_of_week'] ?? $schedule->day_of_week);
         $start = substr((string) ($validated['start_time'] ?? $schedule->start_time), 0, 5);
         $end = substr((string) ($validated['end_time'] ?? $schedule->end_time), 0, 5);
+
+        if ($end <= $start) {
+            return response()->json(['message' => 'Jam selesai harus lebih besar dari jam mulai.'], 422);
+        }
 
         $this->assertNoClassroomClash($classroom, $day, $start, $end, $schedule->id);
         if ($teacher) {
@@ -182,6 +186,36 @@ class ScheduleController extends Controller
         }
 
         return $teacher;
+    }
+
+    /**
+     * The subject must be one this classroom can actually take: from the
+     * classroom's own unit (or school-wide), not merged away, active, and
+     * running in the classroom's tingkat.
+     */
+    private function resolveSubject(string $ulid, Classroom $classroom): Subject
+    {
+        $subject = Subject::forUnit($classroom->school_unit_id)->notMerged()->where('ulid', $ulid)->with('tingkatRows')->first();
+
+        if (! $subject) {
+            throw new HttpResponseException(response()->json([
+                'message' => 'Mata pelajaran tidak ditemukan untuk unit kelas ini.',
+            ], 422));
+        }
+
+        if (! $subject->is_active) {
+            throw new HttpResponseException(response()->json([
+                'message' => "Mata pelajaran {$subject->name} sedang nonaktif.",
+            ], 422));
+        }
+
+        if (! $subject->appliesToTingkat($classroom->tingkat)) {
+            throw new HttpResponseException(response()->json([
+                'message' => "Mata pelajaran {$subject->name} tidak berlaku untuk tingkat {$classroom->tingkat} (kelas {$classroom->name}).",
+            ], 422));
+        }
+
+        return $subject;
     }
 
     /** Two periods of one classroom may touch (07:00-08:30 then 08:30-10:00) but never overlap. */

@@ -25,4 +25,11 @@ class StoreClassScheduleRequest extends FormRequest
             'end_time' => 'required|date_format:H:i|after:start_time',
         ];
     }
+
+    public function messages(): array
+    {
+        return [
+            'end_time.after' => 'Jam selesai harus lebih besar dari jam mulai.',
+        ];
+    }
 }

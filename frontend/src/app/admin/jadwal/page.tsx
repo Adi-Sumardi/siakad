@@ -280,14 +280,58 @@ function SubjectCatalog({
 }
 
 
+/** Whether a subject can be timetabled for this classroom: active, from its unit (or school-wide), and running in its tingkat. */
+function subjectFitsClassroom(s: Subject, c: ClassroomOption): boolean {
+  if (s.is_active === false) return false;
+  if (s.school_unit !== null && s.school_unit !== c.school_unit.label) return false;
+  const rows = s.tingkat ?? [];
+  return rows.length === 0 || rows.some((t) => t.tingkat === c.tingkat && t.is_active);
+}
+
+/**
+ * Same rules as ScheduleController's clash checks, run before submit so the
+ * admin sees the conflict right away: periods may touch (07:00-08:00 then
+ * 08:00-09:00) but never overlap, per classroom and per teacher.
+ */
+function findScheduleClash(
+  rows: ClassSchedule[],
+  slot: { classroomUlid: string; teacherUlid: string; day: number; start: string; end: string },
+  teacherName?: string,
+): string | null {
+  if (slot.end <= slot.start) return "Jam selesai harus lebih besar dari jam mulai.";
+
+  const overlapping = rows.filter((r) => r.day_of_week === slot.day && r.start_time < slot.end && r.end_time > slot.start);
+
+  const classClash = overlapping.find((r) => r.classroom.ulid === slot.classroomUlid);
+  if (classClash) {
+    return `Bentrok dengan ${classClash.subject.name} (${classClash.start_time}-${classClash.end_time}) di kelas ${classClash.classroom.name} pada hari yang sama.`;
+  }
+
+  const teacherClash = slot.teacherUlid ? overlapping.find((r) => r.teacher?.ulid === slot.teacherUlid) : undefined;
+  if (teacherClash) {
+    return `Guru ${teacherName ?? teacherClash.teacher?.name} sudah mengajar ${teacherClash.subject.name} di kelas ${teacherClash.classroom.name} pada jam yang sama (${teacherClash.start_time}-${teacherClash.end_time}).`;
+  }
+
+  return null;
+}
+
+/**
+ * Kelas → Mapel → Guru → Hari → Jam. The kelas comes pre-filled from the
+ * filter (still changeable); the subject list only offers what runs in that
+ * kelas's tingkat, and teachers who already teach the subject come first.
+ */
 function NewScheduleForm({
-  classroomUlid, subjects, teachers, onCreated,
+  classrooms, defaultClassroom, subjects, teachers, schedules, showUnit, onCreated,
 }: {
-  classroomUlid: string;
+  classrooms: ClassroomOption[];
+  defaultClassroom: string;
   subjects: Subject[];
   teachers: TeacherOption[];
+  schedules: ClassSchedule[];
+  showUnit: boolean;
   onCreated: () => void;
 }) {
+  const [classroomUlid, setClassroomUlid] = useState(defaultClassroom);
   const [subjectUlid, setSubjectUlid] = useState("");
   const [teacherUlid, setTeacherUlid] = useState("");
   const [dayOfWeek, setDayOfWeek] = useState("1");
@@ -296,13 +340,36 @@ function NewScheduleForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const classroom = classrooms.find((c) => c.ulid === classroomUlid);
+  const subjectOptions = classroom ? subjects.filter((s) => subjectFitsClassroom(s, classroom)) : [];
+  // A subject picked for another kelas that doesn't run here falls away.
+  const effectiveSubject = subjectOptions.some((s) => s.ulid === subjectUlid) ? subjectUlid : "";
+
+  const teachingThis = new Set(
+    schedules.filter((r) => r.subject.ulid === effectiveSubject && r.teacher).map((r) => r.teacher!.ulid),
+  );
+  const primaryTeachers = teachers.filter((t) => teachingThis.has(t.ulid));
+  const otherTeachers = teachers.filter((t) => !teachingThis.has(t.ulid));
+
+  const clash = classroomUlid
+    ? findScheduleClash(
+        schedules,
+        { classroomUlid, teacherUlid, day: Number(dayOfWeek), start: startTime, end: endTime },
+        teachers.find((t) => t.ulid === teacherUlid)?.name,
+      )
+    : null;
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (clash) {
+      setError(clash);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       await api.post(`/api/admin/classrooms/${classroomUlid}/schedules`, {
-        subject_ulid: subjectUlid,
+        subject_ulid: effectiveSubject,
         teacher_ulid: teacherUlid || undefined,
         day_of_week: Number(dayOfWeek),
         start_time: startTime,
@@ -320,17 +387,37 @@ function NewScheduleForm({
   return (
     <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
       <div className="flex flex-col gap-1.5">
+        <Label>Kelas</Label>
+        <select value={classroomUlid} onChange={(e) => setClassroomUlid(e.target.value)} required className="h-10 w-44 rounded-lg border border-input bg-card px-3 text-sm">
+          <option value="">Pilih kelas</option>
+          {classrooms.map((c) => (
+            <option key={c.ulid} value={c.ulid}>{showUnit ? `${c.school_unit.label} · ` : ""}{c.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="flex flex-col gap-1.5">
         <Label>Mata pelajaran</Label>
-        <select value={subjectUlid} onChange={(e) => setSubjectUlid(e.target.value)} required className="h-10 w-48 rounded-lg border border-input bg-card px-3 text-sm">
-          <option value="">Pilih mapel</option>
-          {subjects.filter((s) => s.is_active !== false).map((s) => <option key={s.ulid} value={s.ulid}>{s.name}</option>)}
+        <select value={effectiveSubject} onChange={(e) => setSubjectUlid(e.target.value)} required disabled={!classroom} className="h-10 w-48 rounded-lg border border-input bg-card px-3 text-sm disabled:opacity-60">
+          <option value="">{!classroom ? "Pilih kelas dulu" : subjectOptions.length === 0 ? `Belum ada mapel tingkat ${classroom.tingkat}` : "Pilih mapel"}</option>
+          {subjectOptions.map((s) => <option key={s.ulid} value={s.ulid}>{s.name}</option>)}
         </select>
       </div>
       <div className="flex flex-col gap-1.5">
         <Label>Guru pengampu</Label>
         <select value={teacherUlid} onChange={(e) => setTeacherUlid(e.target.value)} className="h-10 w-48 rounded-lg border border-input bg-card px-3 text-sm">
           <option value="">Belum ditentukan</option>
-          {teachers.map((t) => <option key={t.ulid} value={t.ulid}>{t.name}</option>)}
+          {primaryTeachers.length > 0 ? (
+            <>
+              <optgroup label="Mengampu mapel ini">
+                {primaryTeachers.map((t) => <option key={t.ulid} value={t.ulid}>{t.name}</option>)}
+              </optgroup>
+              <optgroup label="Guru lain">
+                {otherTeachers.map((t) => <option key={t.ulid} value={t.ulid}>{t.name}</option>)}
+              </optgroup>
+            </>
+          ) : (
+            teachers.map((t) => <option key={t.ulid} value={t.ulid}>{t.name}</option>)
+          )}
         </select>
       </div>
       <div className="flex flex-col gap-1.5">
@@ -347,8 +434,8 @@ function NewScheduleForm({
         <Label>Jam selesai</Label>
         <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} required className="w-28" />
       </div>
-      <Button type="submit" disabled={submitting}>{submitting ? "Menyimpan…" : "Tambah Jadwal"}</Button>
-      {error && <p className="w-full rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">{error}</p>}
+      <Button type="submit" disabled={submitting || !!clash}>{submitting ? "Menyimpan…" : "Tambah Jadwal"}</Button>
+      {(clash ?? error) && <p className="w-full rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">{clash ?? error}</p>}
     </form>
   );
 }
@@ -540,17 +627,21 @@ export default function JadwalPage() {
         </div>
       </Card>
 
-      {selectedClassroom && (
-        <Card className="p-5">
-          <h2 className="mb-3 text-sm font-semibold">Tambah jadwal</h2>
-          <NewScheduleForm
-            classroomUlid={selectedClassroom}
-            subjects={subjects}
-            teachers={teachers}
-            onCreated={() => loadSchedules(unitFilter)}
-          />
-        </Card>
-      )}
+      <Card className="p-5">
+        <h2 className="mb-3 text-sm font-semibold">Tambah jadwal</h2>
+        <NewScheduleForm
+          // Remount on a filter change so the Kelas field picks up the newly
+          // selected kelas (or goes blank for "Semua kelas").
+          key={selectedClassroom}
+          classrooms={visibleClassrooms}
+          defaultClassroom={selectedClassroom}
+          subjects={subjects}
+          teachers={teachers}
+          schedules={schedules?.rows ?? []}
+          showUnit={isCentral}
+          onCreated={() => loadSchedules(unitFilter)}
+        />
+      </Card>
 
       <div className="flex flex-col gap-4">
         {loadedRows === null && <Skeleton className="h-40 w-full" />}
