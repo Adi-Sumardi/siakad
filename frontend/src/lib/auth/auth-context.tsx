@@ -14,7 +14,7 @@ export type User = {
   welcomed_at?: string | null;
   /** Null until the "Panduan Fitur" tour has been seen once (per account). */
   onboarded_at?: string | null;
-  school_unit?: { ulid: string; code: string; label: string } | null;
+  school_unit?: { ulid: string; code: string; label: string; jenjang_group?: string | null } | null;
 };
 
 /**

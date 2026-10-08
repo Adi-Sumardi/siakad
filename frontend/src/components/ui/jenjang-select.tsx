@@ -1,6 +1,8 @@
 "use client";
 
 import { JENJANG, JENJANG_GROUPS } from "@/lib/jenjang";
+import { useAuth } from "@/lib/auth/auth-context";
+import { ownUnitJenjangKeys } from "@/lib/unit-jenjang";
 import { cn } from "@/lib/utils";
 
 /**
@@ -37,7 +39,14 @@ export function JenjangSelect({
   id?: string;
   allowedKeys?: string[] | null;
 }) {
-  const isAllowed = (key: string) => !allowedKeys || allowedKeys.includes(key);
+  // A unit-scoped account only ever sees its own unit's ladder (SD 1-6,
+  // SMP 7-9, SMA 10-12), whatever the page passes. An early-childhood unit
+  // also keeps the keys its own classrooms use (RA classes in a TK unit).
+  const { user } = useAuth();
+  const own = ownUnitJenjangKeys(user);
+  const schoolLadder = ["sd", "smp", "sma"].includes(user?.school_unit?.jenjang_group ?? "");
+  const effective = !own ? allowedKeys : schoolLadder ? own : [...new Set([...own, ...(allowedKeys ?? [])])];
+  const isAllowed = (key: string) => !effective || effective.includes(key);
 
   return (
     <select
