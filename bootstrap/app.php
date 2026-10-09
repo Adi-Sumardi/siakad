@@ -26,6 +26,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin.activity' => \App\Http\Middleware\LogAdminActivity::class,
             'active' => EnsureUserIsActive::class,
             'pmb.signature' => VerifyPmbSignature::class,
+            // Endpoint ringkasan untuk portal Yapinet (API key statis).
+            'yapinet.auth' => \App\Http\Middleware\EnsureYapinetApiKey::class,
         ]);
 
         // The signature is computed over the raw body, so nothing may rewrite

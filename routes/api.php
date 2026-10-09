@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\AchievementController as AdminAchievementController;
+use App\Http\Controllers\Api\YapinetSummaryController;
 use App\Http\Controllers\Api\Admin\ActivityLogController;
 use App\Http\Controllers\Api\Admin\AnnouncementController as AdminAnnouncementController;
 use App\Http\Controllers\Api\Admin\AttendanceReportController;
@@ -476,3 +477,6 @@ if (app()->environment(['local', 'testing'])) {
     Route::middleware(['auth:sanctum', 'role:orangtua'])
         ->post('/wali/payments/{ulid}/simulate-settle', [WaliBillController::class, 'simulateSettle']);
 }
+
+// Ringkasan untuk portal Yapinet — dipanggil server-ke-server dengan API key.
+Route::middleware('yapinet.auth')->get('integrations/yapinet/summary', [YapinetSummaryController::class, 'summary']);

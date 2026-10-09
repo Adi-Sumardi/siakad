@@ -184,4 +184,11 @@ return [
         ],
     ],
 
+
+    // Portal Yapinet (yapinet.id) membaca ringkasan lewat
+    // GET /api/integrations/yapinet/summary dengan API key ini.
+    'yapinet' => [
+        'api_key' => env('YAPINET_API_KEY'),
+    ],
+
 ];
