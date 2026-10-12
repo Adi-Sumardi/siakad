@@ -38,6 +38,7 @@ class YapinetSummaryController extends Controller
         $metrics = [];
         $attention = [];
         $sections = [];
+        $hero = [];
 
         // Cakupan "semua unit" dari total pusat.
         $all = [
@@ -53,6 +54,7 @@ class YapinetSummaryController extends Controller
         foreach ($this->metrics($all, $billingLabel, $units->count()) as $metric) {
             $metrics[] = $metric + ['when' => ['unit' => 'all']];
         }
+        $hero[] = $this->hero($all, "di **{$units->count()} unit sekolah**") + ['when' => ['unit' => 'all']];
 
         foreach ($units as $unit) {
             $scope = [
@@ -68,6 +70,7 @@ class YapinetSummaryController extends Controller
             foreach ($this->metrics($scope, $billingLabel, null) as $metric) {
                 $metrics[] = $metric + ['when' => ['unit' => $unit['unit_code']]];
             }
+            $hero[] = $this->hero($scope, "di **{$unit['unit_label']}**") + ['when' => ['unit' => $unit['unit_code']]];
         }
 
         // Peringatan dashboard SIAKAD → kartu "Perlu perhatian", total & per unit.
@@ -111,6 +114,7 @@ class YapinetSummaryController extends Controller
                     ->values(),
             ]],
             'attention' => $attention,
+            'hero' => $hero,
             'metrics' => $metrics,
             'sections' => $sections,
             'detail_path' => '/admin',
@@ -144,6 +148,7 @@ class YapinetSummaryController extends Controller
                 'value' => $d['today_rate'] !== null ? (float) $d['today_rate'] / 100 : '—',
                 'format' => $d['today_rate'] !== null ? 'percent' : 'text',
                 'progress' => $d['today_rate'] !== null ? (float) $d['today_rate'] / 100 : null,
+                'display' => $d['today_rate'] !== null ? 'ring' : null,
                 'hint' => $today
                     ? "Sakit {$today['sakit']} · Izin {$today['izin']} · Alpa {$today['alpa']}"
                     : ($d['today_rate'] === null ? 'belum ada presensi hari ini' : 'presensi harian'),
@@ -155,6 +160,7 @@ class YapinetSummaryController extends Controller
                 'value' => $collection,
                 'format' => 'percent',
                 'progress' => min(1, $collection),
+                'display' => 'gauge',
                 'hint' => 'Rp'.$this->rp($d['paid']).' dari Rp'.$this->rp($d['billed']).($billingLabel ? " · {$billingLabel}" : ''),
             ],
             [
@@ -163,6 +169,19 @@ class YapinetSummaryController extends Controller
                 'format' => 'currency',
                 'hint' => "{$d['overdue']} tagihan lewat jatuh tempo",
             ],
+        ];
+    }
+
+    /** v1.2: angka utama panel atas; label sama dengan metric supaya tidak tampil dua kali. */
+    private function hero(array $d, string $where): array
+    {
+        return [
+            'value' => (int) $d['students'],
+            'format' => 'number',
+            'label' => 'Siswa aktif',
+            'story' => "{$where} · sisa piutang **Rp".$this->rp($d['outstanding']).'**'
+                .((int) $d['overdue'] > 0 ? " dengan **{$d['overdue']}** tagihan lewat jatuh tempo." : '.'),
+            'side' => ['Kehadiran hari ini', 'Penagihan'],
         ];
     }
 

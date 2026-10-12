@@ -89,6 +89,13 @@ class YapinetSummaryTest extends TestCase
         $prestasi = collect($json['sections'])->where('when.unit', 'sd')->firstWhere('title', 'Prestasi terbaru');
         $this->assertSame('Juara 1 Olimpiade Matematika', $prestasi['items'][0]['title']);
 
+        // v1.2: hero siswa aktif per unit + cincin kehadiran & gauge penagihan.
+        $hero = collect($json['hero'])->firstWhere('when.unit', 'all');
+        $this->assertSame('Siswa aktif', $hero['label']);
+        $this->assertSame(['Kehadiran hari ini', 'Penagihan'], $hero['side']);
+        $this->assertNotNull(collect($json['hero'])->firstWhere('when.unit', 'sd'));
+        $this->assertSame('gauge', collect($json['metrics'])->where('when.unit', 'all')->firstWhere('label', 'Penagihan')['display']);
+
         file_put_contents(sys_get_temp_dir().'/yapinet-summary-siakad.json', json_encode($json));
     }
 }
