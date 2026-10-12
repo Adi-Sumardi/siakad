@@ -279,7 +279,7 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
   const canCompleteQr = roster !== null && (isOpen || notYet.length > 0);
 
   return (
-    <div className="flex flex-col gap-5 pb-24">
+    <div className="flex flex-col gap-5">
       <Link href="/guru" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" />
         Kelas saya
@@ -373,8 +373,8 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
             {students.length === 0 && <p className="text-sm text-muted-foreground">Belum ada siswa aktif di kelas ini.</p>}
           </div>
 
-          <div className="fixed inset-x-0 bottom-0 border-t border-border bg-card/95 p-4 backdrop-blur-sm">
-            <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
+          <div className="sticky bottom-3 z-10 rounded-xl border border-border bg-card/95 p-3 shadow-sm backdrop-blur-sm">
+            <div className="flex items-center justify-between gap-3">
               <p className="text-sm text-muted-foreground">
                 {pending.length > 0 ? `${pending.length} siswa akan disimpan.` : "Tidak ada perubahan."}
               </p>
@@ -470,8 +470,8 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
           </div>
 
           {canCompleteQr && (
-            <div className="fixed inset-x-0 bottom-0 border-t border-border bg-card/95 p-4 backdrop-blur-sm">
-              <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
+            <div className="sticky bottom-3 z-10 rounded-xl border border-border bg-card/95 p-3 shadow-sm backdrop-blur-sm">
+              <div className="flex items-center justify-between gap-3">
                 <p className="text-sm text-muted-foreground">Sisa {notYet.length} siswa akan ditandai sesuai pilihan di atas.</p>
                 <Button
                   onClick={() => submit(notYet.map((s) => ({ student_ulid: s.ulid, status: manualStatus[s.ulid] ?? "alpa" })))}
