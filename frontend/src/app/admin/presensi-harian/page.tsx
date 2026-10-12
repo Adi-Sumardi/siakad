@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
 import { downloadApiFile } from "@/lib/download";
 import { useAuth } from "@/lib/auth/auth-context";
-import { todayJakarta } from "@/lib/format";
+import { nowJakartaHm, todayJakarta } from "@/lib/format";
 
 type Settings = {
   unit: { ulid: string; label: string };
@@ -1079,13 +1079,17 @@ function ManualMark({ session, query, onDone }: { session: TodaySession; query: 
       return;
     }
 
+    // Past the late bell, a walk-up at the booth is late like any scan would
+    // be - a plain "hadir" here used to record a 07:40 arrival as on time.
+    const late = session.late_after !== null && nowJakartaHm() > session.late_after;
+
     setBusy(true);
     try {
       await api.post(`/api/admin/daily-attendance/sessions/${session.ulid}/records${query}`, {
         student_ulid: row.ulid,
-        status: "hadir",
+        status: late ? "terlambat" : "hadir",
       });
-      toast.success(`${row.nama_lengkap} ditandai hadir.`);
+      toast.success(`${row.nama_lengkap} ditandai ${late ? "hadir (terlambat)" : "hadir"}.`);
       setNis("");
       onDone();
     } catch (err) {
@@ -1119,6 +1123,7 @@ function ManualMark({ session, query, onDone }: { session: TodaySession; query: 
         </Button>
       </form>
       <p className="text-xs text-muted-foreground">
+        {session.late_after && `Lewat ${session.late_after} otomatis dicatat terlambat. `}
         Menandai ulang siswa yang sudah ada otomatis mengoreksi catatan sebelumnya.
       </p>
     </div>

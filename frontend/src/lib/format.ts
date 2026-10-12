@@ -49,3 +49,8 @@ export function tanggalWaktu(iso: string | null): string {
 export function todayJakarta(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
 }
+
+/** The current Jakarta wall-clock time as HH:MM - comparable as a string against the API's "H:i" bells. */
+export function nowJakartaHm(): string {
+  return new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false });
+}

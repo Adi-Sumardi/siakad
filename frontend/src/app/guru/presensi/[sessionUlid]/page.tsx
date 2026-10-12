@@ -195,8 +195,14 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
   }
 
   const students = roster?.students ?? [];
-  const checkedIn = students.filter((s) => s.attendance_status);
+  // A completed (or auto-closed) session gives everyone a status - only a
+  // hadir belongs under "Sudah hadir", or an alpa shows up with a green tick.
+  const checkedIn = students.filter((s) => s.attendance_status === "hadir");
+  const absent = students.filter((s) => s.attendance_status && s.attendance_status !== "hadir");
   const notYet = students.filter((s) => !s.attendance_status);
+  // The server accepts completion on a closed session too: that is how a
+  // finished period ("Lengkapi") or a revoked auto-alpa gets re-marked.
+  const canComplete = roster !== null && (roster.session.is_open || notYet.length > 0);
 
   return (
     <div className="flex flex-col gap-5">
@@ -237,7 +243,7 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
                     </p>
                   </div>
                 </div>
-                <Button size="sm" variant="ghost" onClick={() => setRevokeTarget(s)}>
+                <Button size="sm" variant="ghost" onClick={() => setRevokeTarget(s)} aria-label={`Batalkan presensi ${s.nama_lengkap}`}>
                   <X className="size-4" />
                 </Button>
               </Card>
@@ -248,8 +254,30 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
           </div>
         </div>
 
-        <div>
-          <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Belum check-in ({notYet.length})</h2>
+        <div className="flex flex-col gap-4">
+          {absent.length > 0 && (
+            <div>
+              <h2 className="mb-2 text-sm font-semibold text-bad">Tidak hadir ({absent.length})</h2>
+              <div className="flex flex-col gap-1.5">
+                {absent.map((s) => (
+                  <Card key={s.ulid} className="flex items-center justify-between gap-2 p-3">
+                    <div>
+                      <p className="text-sm font-medium">{s.nama_lengkap}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {s.attendance_status && ATTENDANCE_STATUS_LABEL[s.attendance_status]} · batalkan untuk menandai ulang
+                      </p>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => setRevokeTarget(s)} aria-label={`Batalkan status ${s.nama_lengkap}`}>
+                      <X className="size-4" />
+                    </Button>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+          <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Belum tercatat ({notYet.length})</h2>
           <div className="flex flex-col gap-1.5">
             {notYet.map((s) => (
               <Card key={s.ulid} className="flex items-center justify-between gap-2 p-3">
@@ -269,17 +297,18 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
               <p className="text-sm text-muted-foreground">Semua siswa sudah tercatat.</p>
             )}
           </div>
+          </div>
         </div>
       </div>
 
-      {roster?.session.is_open && (
+      {canComplete && (
         <div className="fixed inset-x-0 bottom-0 border-t border-border bg-card/95 p-4 backdrop-blur-sm">
-          <div className="mx-auto flex max-w-3xl items-center justify-between">
+          <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground">
               Sisa {notYet.length} siswa akan ditandai sesuai pilihan di atas.
             </p>
             <Button onClick={complete} disabled={completing}>
-              {completing ? "Menyelesaikan…" : "Selesaikan Presensi"}
+              {completing ? "Menyimpan…" : roster?.session.is_open ? "Selesaikan Presensi" : "Simpan Presensi"}
             </Button>
           </div>
         </div>

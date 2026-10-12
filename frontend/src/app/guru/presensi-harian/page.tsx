@@ -265,7 +265,9 @@ export default function GuruDailyAttendancePage() {
                     />
                   ) : (
                   <div className="flex flex-wrap gap-1">
-                    {MARK_OPTIONS.map((option) => {
+                    {/* A pulang window only accepts hadir/terlambat (server rule T65-e) -
+                        offering sakit/izin/alpa there only earned the teacher an error. */}
+                    {MARK_OPTIONS.filter((o) => session.type === "masuk" || o.value === "hadir" || o.value === "terlambat").map((option) => {
                       const active =
                         student.attendance_status === option.value ||
                         (option.value === "terlambat" && student.attendance_status === "hadir" && student.is_late);
