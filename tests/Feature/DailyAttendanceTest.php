@@ -10,6 +10,7 @@ use App\Models\DailySession;
 use App\Models\Enrollment;
 use App\Models\Guardian;
 use App\Models\Holiday;
+use App\Models\LeaveRequest;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\Term;
@@ -354,6 +355,60 @@ class DailyAttendanceTest extends TestCase
 
         $this->assertDatabaseMissing('daily_records', ['student_id' => $notMine->id]);
         $this->assertDatabaseMissing('daily_records', ['student_id' => $studentSmp->id]);
+    }
+
+    public function test_mark_all_fills_only_blank_rows_of_the_teachers_own_roster(): void
+    {
+        $this->enabledSetting($this->sd);
+        $guru = $this->staff('guru', $this->sd);
+        $classroom = $this->classroomIn($this->sd, $guru);
+        $blank = $this->studentIn($classroom, '20010');
+        $sick = $this->studentIn($classroom, '20011');
+        $onLeave = $this->studentIn($classroom, '20012');
+        $notMine = $this->studentIn($this->classroomIn($this->sd), '20013');
+
+        LeaveRequest::create([
+            'student_id' => $onLeave->id, 'school_unit_id' => $this->sd->id,
+            'type' => 'izin', 'date_from' => $this->monday->toDateString(), 'date_to' => $this->monday->toDateString(),
+            'reason' => 'Acara keluarga', 'status' => 'approved',
+        ]);
+
+        $session = $this->masukSessionFor($this->sd);
+        app(DailyAttendanceService::class)->mark($session, $sick, 'sakit', $guru, 'wali_kelas');
+
+        $this->actingAs($guru)->postJson("/api/guru/daily-attendance/sessions/{$session->ulid}/mark-all")
+            ->assertOk()
+            ->assertJsonPath('marked', 2)
+            ->assertJsonPath('tally.hadir', 1)
+            ->assertJsonPath('tally.izin', 1);
+
+        $live = fn (Student $s) => $session->dailyRecords()->active()->where('student_id', $s->id)->value('attendance_status');
+
+        $this->assertSame('hadir', $live($blank));
+        // An earlier mark is never overwritten, and an approved guardian
+        // notice lands as itself rather than as hadir.
+        $this->assertSame('sakit', $live($sick));
+        $this->assertSame('izin', $live($onLeave));
+        // Another homeroom's student is out of scope entirely.
+        $this->assertDatabaseMissing('daily_records', ['student_id' => $notMine->id]);
+    }
+
+    public function test_mark_all_is_today_only_and_unit_scoped(): void
+    {
+        $this->enabledSetting($this->sd);
+        $guru = $this->staff('guru', $this->sd);
+        $this->studentIn($this->classroomIn($this->sd, $guru), '20014');
+        $session = $this->masukSessionFor($this->sd);
+
+        $guruSmp = $this->staff('guru', $this->smp);
+        $this->actingAs($guruSmp)->postJson("/api/guru/daily-attendance/sessions/{$session->ulid}/mark-all")
+            ->assertNotFound();
+
+        // A past day is correction mode: one row at a time, with a reason.
+        Carbon::setTestNow($this->monday->copy()->addDay()->utc());
+        $this->actingAs($guru)->postJson("/api/guru/daily-attendance/sessions/{$session->ulid}/mark-all")
+            ->assertStatus(422);
+        $this->assertSame(0, $session->dailyRecords()->count());
     }
 
     // --- Close & sweep -----------------------------------------------------

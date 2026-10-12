@@ -104,13 +104,13 @@ export default function GuruDailyAttendancePage() {
 
     setMarking("all");
     try {
-      for (const student of unmarked) {
-        await api.post(`/api/guru/daily-attendance/sessions/${session.ulid}/records`, {
-          student_ulid: student.ulid,
-          status: "hadir",
-        });
-      }
-      toast.success(`${unmarked.length} siswa ditandai hadir.`);
+      // One request for the whole roster; approved guardian notices land as
+      // their own sakit/izin on the server, not as hadir.
+      const { tally } = await api.post<{ marked: number; tally: { hadir: number; sakit: number; izin: number } }>(
+        `/api/guru/daily-attendance/sessions/${session.ulid}/mark-all`,
+      );
+      const extra = [tally.sakit && `${tally.sakit} sakit`, tally.izin && `${tally.izin} izin`].filter(Boolean);
+      toast.success(`${tally.hadir} siswa ditandai hadir${extra.length ? ` (${extra.join(", ")} sesuai pengajuan wali)` : ""}.`);
       load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Gagal menandai presensi.");

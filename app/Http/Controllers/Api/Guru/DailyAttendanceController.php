@@ -108,6 +108,55 @@ class DailyAttendanceController extends Controller
     }
 
     /**
+     * "Tandai semua hadir" in one request - the board used to fire one POST
+     * per student in sequence, seconds of spinner on a phone at 07:00. Only
+     * still-blank rows are touched: a scan, an earlier mark or a correction
+     * is never overwritten. A child whose guardian notice was approved is
+     * marked with that notice on the masuk window (the board already shows
+     * it; "hadir" would contradict it) and left alone on pulang.
+     */
+    public function markAll(Request $request, string $ulid): JsonResponse
+    {
+        $session = DailySession::where('ulid', $ulid)->firstOrFail();
+
+        if ($session->school_unit_id !== $request->user()->school_unit_id) {
+            abort(404);
+        }
+
+        if (! $session->date->isSameDay(Carbon::now('Asia/Jakarta'))) {
+            return response()->json(['message' => 'Tandai semua hanya untuk presensi hari ini - hari yang lewat dikoreksi satu per satu beserta alasannya.'], 422);
+        }
+
+        $blank = $this->service->roster($session, $this->homeroomClassroomIds($request))
+            ->filter(fn (array $row) => $row['attendance_status'] === null)
+            ->reject(fn (array $row) => $session->type === 'pulang' && $row['leave'] !== null);
+
+        $students = Student::whereIn('ulid', $blank->pluck('ulid'))->get()->keyBy('ulid');
+        $tally = ['hadir' => 0, 'sakit' => 0, 'izin' => 0];
+
+        try {
+            foreach ($blank as $row) {
+                $status = $session->type === 'masuk' && $row['leave'] ? $row['leave'] : 'hadir';
+
+                $this->service->mark(
+                    $session,
+                    $students[$row['ulid']],
+                    $status,
+                    $request->user(),
+                    'wali_kelas',
+                    $status === 'hadir' ? null : 'Pengajuan wali disetujui.',
+                );
+
+                $tally[$status]++;
+            }
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['marked' => array_sum($tally), 'tally' => $tally]);
+    }
+
+    /**
      * The teacher's own rooms in the current academic year - empty for a
      * teacher who is nobody's homeroom, which fails closed in roster().
      */

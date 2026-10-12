@@ -90,9 +90,33 @@ export default function AdminDailyAttendancePage() {
   // correction mode - read-only history plus re-marking with a reason.
   const [boardDate, setBoardDate] = useState(todayJakarta());
   const isToday = boardDate === todayJakarta();
+  // A whole unit's roster runs to hundreds of rows - correcting one child
+  // must not mean scrolling for them.
+  const [rosterSearch, setRosterSearch] = useState("");
+  const [rosterClass, setRosterClass] = useState("");
+  const [rosterStatus, setRosterStatus] = useState<"" | "belum" | "tidak_hadir">("");
 
   const query = isCentral && unitUlid ? `?unit=${unitUlid}` : "";
   const boardQuery = `${query ? `${query}&` : "?"}date=${boardDate}`;
+
+  // The board alone, apart from the settings: a background refresh must not
+  // overwrite a settings form the admin is halfway through editing.
+  const loadBoard = useCallback(
+    (quiet = false) => {
+      if (isCentral && !unitUlid) return;
+      api
+        .get<{ sessions: TodaySession[] }>(`/api/admin/daily-attendance/today${boardQuery}`)
+        .then((res) => setSessions(res.sessions))
+        .catch((err) => {
+          // A failed background refresh keeps the last board rather than
+          // blanking it or toasting every 15 seconds.
+          if (quiet) return;
+          toast.error(err instanceof ApiError ? err.message : "Gagal memuat papan presensi.");
+          setSessions([]);
+        });
+    },
+    [isCentral, unitUlid, boardQuery],
+  );
 
   const load = useCallback(() => {
     if (isCentral && !unitUlid) return;
@@ -100,14 +124,20 @@ export default function AdminDailyAttendancePage() {
       .get<Settings>(`/api/admin/daily-attendance/settings${query}`)
       .then(setSettings)
       .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat pengaturan."));
-    api
-      .get<{ sessions: TodaySession[] }>(`/api/admin/daily-attendance/today${boardQuery}`)
-      .then((res) => setSessions(res.sessions))
-      .catch((err) => {
-        toast.error(err instanceof ApiError ? err.message : "Gagal memuat papan presensi.");
-        setSessions([]);
-      });
-  }, [isCentral, unitUlid, query, boardQuery]);
+    loadBoard();
+  }, [isCentral, unitUlid, query, loadBoard]);
+
+  // Today's board follows the gate live: the "check-in terakhir" feed, the
+  // tallies and the shared-device warning are only worth anything to a TU
+  // watching the queue if they move without a manual reload. Past days are
+  // history - nothing to follow.
+  useEffect(() => {
+    if (!isToday) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") loadBoard(true);
+    }, 15_000);
+    return () => clearInterval(interval);
+  }, [isToday, loadBoard]);
 
   useEffect(() => {
     if (!isCentral) return;
@@ -405,7 +435,7 @@ export default function AdminDailyAttendancePage() {
             <PublicLinkCard slug={settings.public_slug} query={query} onChanged={load} />
           )}
 
-          <LeaveReviewPanel endpoint="/api/admin/leave-requests" onChanged={load} />
+          <LeaveReviewPanel endpoint="/api/admin/leave-requests" onChanged={() => loadBoard()} />
 
           <Card className="p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -439,7 +469,65 @@ export default function AdminDailyAttendancePage() {
                   : "Tidak ada sesi presensi pada tanggal ini (libur, bukan hari presensi, atau presensi belum aktif)."}
               </p>
             )}
-            {sessions?.map((session) => (
+            {sessions && sessions.length > 0 && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Input
+                  value={rosterSearch}
+                  onChange={(e) => setRosterSearch(e.target.value)}
+                  placeholder="Cari nama atau NIS"
+                  aria-label="Cari siswa di papan"
+                  className="h-8 w-full sm:w-56"
+                />
+                <select
+                  value={rosterClass}
+                  onChange={(e) => setRosterClass(e.target.value)}
+                  aria-label="Filter kelas"
+                  className="h-8 rounded-lg border border-input bg-card px-2 text-xs"
+                >
+                  <option value="">Semua kelas</option>
+                  {[...new Set(sessions[0].roster.map((r) => r.classroom).filter((c): c is string => !!c))]
+                    .sort((a, b) => a.localeCompare(b, "id", { numeric: true }))
+                    .map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                </select>
+                <select
+                  value={rosterStatus}
+                  onChange={(e) => setRosterStatus(e.target.value as typeof rosterStatus)}
+                  aria-label="Filter status"
+                  className="h-8 rounded-lg border border-input bg-card px-2 text-xs"
+                >
+                  <option value="">Semua status</option>
+                  <option value="belum">Belum tercatat</option>
+                  <option value="tidak_hadir">Sakit / izin / alpa</option>
+                </select>
+                {(rosterSearch || rosterClass || rosterStatus) && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setRosterSearch("");
+                      setRosterClass("");
+                      setRosterStatus("");
+                    }}
+                  >
+                    Reset filter
+                  </Button>
+                )}
+              </div>
+            )}
+            {sessions?.map((session) => {
+              const needle = rosterSearch.trim().toLowerCase();
+              const rows = session.roster.filter(
+                (r) =>
+                  (!needle || r.nama_lengkap.toLowerCase().includes(needle) || r.nis.includes(needle)) &&
+                  (!rosterClass || r.classroom === rosterClass) &&
+                  (rosterStatus === "" ||
+                    (rosterStatus === "belum" && !r.attendance_status) ||
+                    (rosterStatus === "tidak_hadir" && !!r.attendance_status && r.attendance_status !== "hadir")),
+              );
+
+              return (
               <div key={session.ulid} className="mt-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-sm font-semibold">
@@ -460,7 +548,7 @@ export default function AdminDailyAttendancePage() {
                 {isToday && settings.intake_mode === "gerbang" && session.type === "masuk" && session.status === "open" && (
                   <div className="mt-3 grid gap-4 lg:grid-cols-2">
                     <GateQrPanel sessionUlid={session.ulid} query={query} />
-                    <ManualMark session={session} query={query} onDone={load} />
+                    <ManualMark session={session} query={query} onDone={() => loadBoard()} />
                   </div>
                 )}
 
@@ -535,7 +623,7 @@ export default function AdminDailyAttendancePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {session.roster.map((row) => (
+                      {rows.map((row) => (
                         <tr key={row.ulid} className="border-b border-border/60">
                           <td className="py-1.5 pr-3">
                             {row.nama_lengkap}
@@ -579,16 +667,24 @@ export default function AdminDailyAttendancePage() {
                               row={row}
                               requireReason={!isToday}
                               endpoint={`/api/admin/daily-attendance/sessions/${session.ulid}/records${query}`}
-                              onDone={load}
+                              onDone={() => loadBoard()}
                             />
                           </td>
                         </tr>
                       ))}
+                      {rows.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="py-3 text-center text-xs text-muted-foreground">
+                            Tidak ada siswa yang cocok dengan filter.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </Card>
         </>
       )}

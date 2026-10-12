@@ -196,6 +196,7 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     // re-marking supersedes so a correction is one tap.
     Route::get('/daily-attendance/today', [GuruDailyAttendanceController::class, 'today']);
     Route::post('/daily-attendance/sessions/{ulid}/records', [GuruDailyAttendanceController::class, 'mark']);
+    Route::post('/daily-attendance/sessions/{ulid}/mark-all', [GuruDailyAttendanceController::class, 'markAll']);
     // Guardians' izin/sakit notices for the teacher's own homeroom students.
     Route::get('/leave-requests', [LeaveRequestReviewController::class, 'index']);
     Route::post('/leave-requests/{ulid}/approve', [LeaveRequestReviewController::class, 'approve']);
