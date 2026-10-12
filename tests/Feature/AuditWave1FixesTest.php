@@ -203,10 +203,12 @@ class AuditWave1FixesTest extends TestCase
 
         $this->assertSame('overdue', $bill->fresh()->status);
 
-        // Control: a partial on a bill NOT yet due stays partial. Month 10 of
-        // TA 2026/2027 is due 2026-10-10 - safely ahead of today.
+        // Control: a partial on a bill NOT yet due stays partial. Its due
+        // date is set relative to today - month 10's own 2026-10-10 was
+        // "safely ahead" when written and turned this test red on 2026-10-11.
         app(BillGenerator::class)->run($this->spp, $this->year, $this->unit, 10);
         $control = Bill::where('period_month', 10)->first();
+        $control->forceFill(['due_date' => now()->addMonth()->startOfDay()])->save();
 
         app(PaymentAllocator::class)->allocate(
             Payment::create([
