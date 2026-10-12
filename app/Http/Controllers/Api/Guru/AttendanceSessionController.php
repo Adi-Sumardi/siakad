@@ -91,6 +91,9 @@ class AttendanceSessionController extends Controller
             // authorized for this classroom sees it - the QR still needs to
             // survive a page reload without re-opening the session.
             'checkin_path' => $this->checkinPath($session),
+            // The quick mode's pre-fill rule hinges on this: with the daily
+            // layer off, "no gate mark" is not evidence of absence.
+            'daily_enabled' => $sessions->dailyLayerEnabled($session),
             'students' => $sessions->roster($session),
         ]);
     }

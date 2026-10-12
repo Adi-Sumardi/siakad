@@ -5,6 +5,7 @@ namespace App\Services\Attendance;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\ClassSchedule;
+use App\Models\DailyAttendanceSetting;
 use App\Models\DailyRecord;
 use App\Models\Enrollment;
 use App\Models\Holiday;
@@ -206,8 +207,20 @@ class AttendanceSessionService
             ->get()
             ->keyBy('student_id');
 
-        return $students->map(function ($student) use ($checkedIn) {
+        // The morning's masuk mark - what the quick mode pre-fills the lesson
+        // roster from (a child the gate counted is presumed in class; the
+        // teacher only corrects who is not).
+        $daily = DailyRecord::query()
+            ->whereIn('student_id', $students->pluck('id'))
+            ->whereDate('date', $session->occurred_on)
+            ->whereHas('dailySession', fn ($q) => $q->where('type', 'masuk'))
+            ->active()
+            ->get()
+            ->keyBy('student_id');
+
+        return $students->map(function ($student) use ($checkedIn, $daily) {
             $record = $checkedIn->get($student->id);
+            $gate = $daily->get($student->id);
 
             return [
                 'ulid' => $student->ulid,
@@ -217,7 +230,16 @@ class AttendanceSessionService
                 'attendance_status' => $record?->attendance_status,
                 'source' => $record?->source,
                 'checked_in_at' => $record?->created_at,
+                'daily_status' => $gate?->attendance_status,
+                'daily_is_late' => (bool) $gate?->is_late,
             ];
         });
+    }
+
+    /** Whether the classroom's unit runs the daily layer at all - without it, a blank gate status says nothing about the child. */
+    public function dailyLayerEnabled(AttendanceSession $session): bool
+    {
+        return (bool) DailyAttendanceSetting::where('school_unit_id', $session->classSchedule->classroom->school_unit_id)
+            ->value('enabled');
     }
 }

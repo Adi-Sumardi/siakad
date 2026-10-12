@@ -124,6 +124,9 @@ export type AttendanceRosterEntry = {
   attendance_status: AttendanceStatus | null;
   source: "self" | "guru" | null;
   checked_in_at: string | null;
+  /** The morning's daily (gate / wali kelas) masuk mark - the quick mode's pre-fill. */
+  daily_status: AttendanceStatus | null;
+  daily_is_late: boolean;
 };
 
 export type GradeCategory = "tugas" | "uts" | "uas";

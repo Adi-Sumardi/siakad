@@ -68,10 +68,14 @@ class AttendanceSessionTest extends TestCase
     /** A daily-layer mark (the official report source since T14 §8), seeded straight - the service paths have their own DailyAttendanceTest. */
     private function dailyMark(Student $student, Classroom $classroom, string $status, string $date): DailyRecord
     {
-        $session = DailySession::firstOrCreate(
-            ['school_unit_id' => $classroom->school_unit_id, 'date' => $date, 'type' => 'masuk'],
-            ['opens_at' => "{$date} 06:30:00", 'closes_at' => "{$date} 08:00:00", 'status' => 'closed'],
-        );
+        // whereDate, not firstOrCreate: the date column is cast, so an exact
+        // match on the bare string misses the row on a second call that day.
+        $session = DailySession::where('school_unit_id', $classroom->school_unit_id)
+            ->whereDate('date', $date)->where('type', 'masuk')->first()
+            ?? DailySession::create([
+                'school_unit_id' => $classroom->school_unit_id, 'date' => $date, 'type' => 'masuk',
+                'opens_at' => "{$date} 06:30:00", 'closes_at' => "{$date} 08:00:00", 'status' => 'closed',
+            ]);
 
         return DailyRecord::create([
             'daily_session_id' => $session->id,
@@ -396,6 +400,64 @@ class AttendanceSessionTest extends TestCase
         $this->assertSame('hadir', $aisyah['attendance_status']);
         $this->assertSame('self', $aisyah['source']);
         $this->assertNotNull($aisyah['checked_in_at']);
+    }
+
+    public function test_roster_carries_the_gate_mark_that_pre_fills_the_quick_mode(): void
+    {
+        $classroom = $this->classroomIn($this->smp);
+        $present = $this->studentIn($classroom, 'Hadir Gerbang', '20101');
+        $late = $this->studentIn($classroom, 'Terlambat Gerbang', '20102');
+        $sick = $this->studentIn($classroom, 'Sakit Gerbang', '20103');
+        $this->studentIn($classroom, 'Belum Gerbang', '20104');
+        $guru = $this->staff('guru', $this->smp);
+        $session = $this->openSession($this->scheduleFor($classroom, $this->subject(), $guru), $guru);
+
+        $today = Carbon::today()->toDateString();
+        $this->dailyMark($present, $classroom, 'hadir', $today);
+        $this->dailyMark($late, $classroom, 'hadir', $today)->forceFill(['is_late' => true])->save();
+        $this->dailyMark($sick, $classroom, 'sakit', $today);
+
+        $response = $this->actingAs($guru)->getJson("/api/guru/attendance-sessions/{$session->ulid}/roster")
+            ->assertOk()
+            // The unit never switched its daily layer on: a blank gate mark
+            // is no evidence of absence, and the client must know that.
+            ->assertJsonPath('daily_enabled', false);
+
+        $byNis = collect($response->json('students'))->keyBy('nis');
+        $this->assertSame('hadir', $byNis['20101']['daily_status']);
+        $this->assertFalse($byNis['20101']['daily_is_late']);
+        $this->assertTrue($byNis['20102']['daily_is_late']);
+        $this->assertSame('sakit', $byNis['20103']['daily_status']);
+        $this->assertNull($byNis['20104']['daily_status']);
+        // The gate mark is a pre-fill only - nothing lands on the lesson
+        // ledger until the teacher saves.
+        $this->assertNull($byNis['20101']['attendance_status']);
+
+        app(DailyAttendanceService::class)->ensureSettings($this->smp)->forceFill(['enabled' => true])->save();
+        $this->actingAs($guru)->getJson("/api/guru/attendance-sessions/{$session->ulid}/roster")
+            ->assertJsonPath('daily_enabled', true);
+    }
+
+    public function test_the_quick_mode_save_rewrites_an_earlier_scan_without_a_revoke_step(): void
+    {
+        $classroom = $this->classroomIn($this->sd);
+        $student = $this->studentIn($classroom, 'Aisyah', '20105');
+        $guru = $this->staff('guru', $this->sd);
+        $session = $this->openSession($this->scheduleFor($classroom, $this->subject(), $guru), $guru);
+
+        $this->postJson("/api/presensi/{$session->token}/check-in", ['nis' => '20105', 'qr_code' => $this->rollCode($session)])
+            ->assertOk();
+
+        // The teacher looks up and the child is not in the room.
+        $this->actingAs($guru)->postJson("/api/guru/attendance-sessions/{$session->ulid}/complete", [
+            'records' => [['student_ulid' => $student->ulid, 'status' => 'alpa']],
+        ])->assertOk();
+
+        $live = AttendanceRecord::where('attendance_session_id', $session->id)->active()->get();
+        $this->assertCount(1, $live);
+        $this->assertSame('alpa', $live->first()->attendance_status);
+        // The scan stays on file as a revoked trace, never deleted.
+        $this->assertSame(1, AttendanceRecord::where('attendance_session_id', $session->id)->where('record_status', 'revoked')->count());
     }
 
     public function test_the_assigned_teacher_can_fetch_the_rotating_code_but_others_cannot(): void
