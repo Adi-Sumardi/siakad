@@ -18,6 +18,9 @@
         </include>
     </source>
     <php>
+        <!-- The PDF/Excel export tests (zipstream) outgrow PHP's default
+             128M, which killed the whole `php artisan test` run. -->
+        <ini name="memory_limit" value="512M"/>
         <env name="APP_ENV" value="testing"/>
         <!-- The suite runs the production timezone so the flip is what the
              tests exercise, not a UTC fallback the real app never uses. -->

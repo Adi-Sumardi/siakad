@@ -84,11 +84,15 @@ export default function GenerateBillsPage() {
   // A stale preview is a live grenade (audit 2026-09-28): execute() rebuilds
   // its body from the CURRENT parameters, so the button used to promise
   // "Eksekusi 300 Tagihan" while actually billing whatever was selected at
-  // click time. Any parameter change voids the preview and the last result.
-  useEffect(() => {
+  // click time. Any parameter change voids the preview and the last result -
+  // reset during render (not in an effect) so no frame shows the stale one.
+  const paramsKey = `${feeTypeCode}|${month}|${issuedAt}`;
+  const [previewKey, setPreviewKey] = useState(paramsKey);
+  if (previewKey !== paramsKey) {
+    setPreviewKey(paramsKey);
     setPreview(null);
     setResult(null);
-  }, [feeTypeCode, month, issuedAt]);
+  }
 
   async function runPreview() {
     // feeTypes gates the run (audit 2026-09-28): isMonthly is undefined

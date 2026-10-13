@@ -98,4 +98,23 @@ class YapinetSummaryTest extends TestCase
 
         file_put_contents(sys_get_temp_dir().'/yapinet-summary-siakad.json', json_encode($json));
     }
+
+    public function test_ringkasan_di_cache_sebentar(): void
+    {
+        $year = AcademicYear::create(['year' => '2026/2027', 'starts_on' => '2026-07-01', 'ends_on' => '2027-06-30', 'is_active' => true]);
+        $sd = SchoolUnit::create(['code' => 'sd', 'label' => 'SD', 'jenjang_group' => 'sd', 'is_active' => true]);
+        $this->student($year, $sd, '1001', 500_000, 500_000);
+
+        $siswaAktif = fn () => collect($this->withToken('kunci-yapinet')->getJson('/api/integrations/yapinet/summary')
+            ->assertOk()->json('metrics'))->where('when.unit', 'all')->firstWhere('label', 'Siswa aktif')['value'];
+
+        $this->assertSame(1, $siswaAktif());
+
+        // Panggilan berikutnya dalam jendela cache tidak menghitung ulang.
+        $this->student($year, $sd, '1002', 500_000, 500_000);
+        $this->assertSame(1, $siswaAktif());
+
+        $this->travel(3)->minutes();
+        $this->assertSame(2, $siswaAktif());
+    }
 }

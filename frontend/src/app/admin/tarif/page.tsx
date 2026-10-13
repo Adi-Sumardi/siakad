@@ -220,7 +220,6 @@ export default function FeeRatesPage() {
         toast.error(err instanceof ApiError ? err.message : "Gagal memuat data tarif.");
       });
     // rateForm.fee_type_ulid deliberately NOT a dep (see above).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterUnit, filterType, filterYear, isCentral, user?.school_unit?.ulid]);
 
   useEffect(() => {

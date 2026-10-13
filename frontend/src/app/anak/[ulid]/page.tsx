@@ -15,7 +15,7 @@ import { PointMeter } from "@/components/point-meter";
 import { AttendanceMeter } from "@/components/attendance-meter";
 import { LeaveRequestCard } from "@/components/wali/leave-request-card";
 import { StudentDocuments } from "@/components/student-documents";
-import { API_BASE, api, ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useRequireRole } from "@/lib/auth/use-require-role";
 import { downloadApiFile } from "@/lib/download";
 import { tanggal, todayJakarta } from "@/lib/format";

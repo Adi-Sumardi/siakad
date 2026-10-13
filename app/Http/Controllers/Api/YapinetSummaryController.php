@@ -9,6 +9,7 @@ use App\Models\Achievement;
 use App\Models\User;
 use App\Services\Academic\WatchlistService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 /**
@@ -28,7 +29,22 @@ class YapinetSummaryController extends Controller
     /** Penagihan (terbayar / ditagih) di bawah ini → Kritis. */
     private const LOW_COLLECTION = 60.0;
 
+    /**
+     * Payload disimpan sebentar: tiap panggilan menjalankan seluruh agregasi
+     * dashboard pusat, sedangkan Yapinet bisa memanggil berulang kali.
+     */
+    private const CACHE_SECONDS = 120;
+
     public function summary(DashboardSummaryController $dashboard, WatchlistService $watchlist): JsonResponse
+    {
+        return response()->json(Cache::remember(
+            'yapinet:summary',
+            self::CACHE_SECONDS,
+            fn () => $this->build($dashboard, $watchlist),
+        ));
+    }
+
+    private function build(DashboardSummaryController $dashboard, WatchlistService $watchlist): array
     {
         $data = $this->dashboard($dashboard, $watchlist);
         $kpi = $data['kpi'];
@@ -99,7 +115,7 @@ class YapinetSummaryController extends Controller
             default => 'ok',
         };
 
-        return response()->json([
+        return [
             'contract_version' => 2,
             'status' => $status,
             'headline' => "{$all['students']} siswa aktif · penagihan ".$this->pct($all['collection'])
@@ -118,7 +134,7 @@ class YapinetSummaryController extends Controller
             'metrics' => $metrics,
             'sections' => $sections,
             'detail_path' => '/admin',
-        ]);
+        ];
     }
 
     /** Jalankan dashboard admin pusat dengan konteks super admin sistem (tanpa login). */

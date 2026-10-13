@@ -591,4 +591,4 @@ if (app()->environment(['local', 'testing'])) {
 }
 
 // Ringkasan untuk portal Yapinet — dipanggil server-ke-server dengan API key.
-Route::middleware('yapinet.auth')->get('integrations/yapinet/summary', [YapinetSummaryController::class, 'summary']);
+Route::middleware(['throttle:30,1', 'yapinet.auth'])->get('integrations/yapinet/summary', [YapinetSummaryController::class, 'summary']);

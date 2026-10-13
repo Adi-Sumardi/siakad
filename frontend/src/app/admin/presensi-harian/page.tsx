@@ -721,12 +721,14 @@ function AttendanceRecapCard({ unitUlid, waitForUnit = false }: { unitUlid: stri
 
   useEffect(() => {
     if (!ready) return;
-    setFailed(false);
     const params = new URLSearchParams({ from, to });
     if (unitUlid) params.set("unit", unitUlid);
     api
       .get<AttendanceRecap>(`/api/admin/reports/attendance?${params.toString()}`)
-      .then(setRecap)
+      .then((data) => {
+        setRecap(data);
+        setFailed(false);
+      })
       .catch(() => {
         setRecap(null);
         setFailed(true);

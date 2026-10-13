@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, FileDown, RefreshCw} from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -157,26 +157,47 @@ export default function AdminAchievementsPage() {
   // admin_unit of their unit only; central admin sees, decides nothing).
   const [tab, setTab] = useState<"siswa" | "guru">("siswa");
 
-  function load() {
-    // Null FIRST (audit 2026-09-28): switching tabs used to leave the OLD
-    // tab's rows rendered with live decision buttons while the new fetch
-    // was in flight - and isTeacher came from the NEW tab, so clicking a
-    // stale student row verified it with the wrong payload (no points, the
-    // proposal destroyed).
-    setAchievements(null);
+  const fetchAchievements = useCallback(() => {
     const params = new URLSearchParams();
     if (filter) params.set("status", filter);
     params.set("achiever_type", tab);
-    const qs = params.toString();
-    api
-      .get<{ achievements: (Achievement & { student?: { nama_lengkap: string }; teacher?: { nama_lengkap: string } | null; school_unit?: string | null })[] }>(`/api/admin/achievements?${qs}`)
-      .then((d) => setAchievements(d.achievements))
-      .catch((err) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat prestasi."));
+    return api
+      .get<{ achievements: (Achievement & { student?: { nama_lengkap: string }; teacher?: { nama_lengkap: string } | null; school_unit?: string | null })[] }>(`/api/admin/achievements?${params.toString()}`)
+      .then((d) => d.achievements);
+  }, [filter, tab]);
+
+  const onLoadError = (err: unknown) => toast.error(err instanceof ApiError ? err.message : "Gagal memuat prestasi.");
+
+  // Null FIRST (audit 2026-09-28): switching tabs used to leave the OLD
+  // tab's rows rendered with live decision buttons while the new fetch
+  // was in flight - and isTeacher came from the NEW tab, so clicking a
+  // stale student row verified it with the wrong payload (no points, the
+  // proposal destroyed). Reset during render so no frame shows them.
+  const viewKey = `${tab}|${filter}`;
+  const [shownKey, setShownKey] = useState(viewKey);
+  if (shownKey !== viewKey) {
+    setShownKey(viewKey);
+    setAchievements(null);
+  }
+
+  // Manual refresh and after a decision.
+  function load() {
+    setAchievements(null);
+    fetchAchievements().then(setAchievements).catch(onLoadError);
   }
 
   useEffect(() => {
-    load();
-  }, [filter, tab]); // eslint-disable-line react-hooks/exhaustive-deps
+    // A slower response for the previous tab must not land on the new one.
+    let stale = false;
+    fetchAchievements()
+      .then((rows) => {
+        if (!stale) setAchievements(rows);
+      })
+      .catch(onLoadError);
+    return () => {
+      stale = true;
+    };
+  }, [fetchAchievements]);
 
   return (
     <div className="space-y-6">
