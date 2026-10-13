@@ -28,6 +28,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'active' => EnsureUserIsActive::class,
             'pmb.signature' => VerifyPmbSignature::class,
             'ip.allowlist' => RestrictToIpRanges::class,
+            // Endpoint ringkasan untuk portal Yapinet (API key statis).
+            'yapinet.auth' => \App\Http\Middleware\EnsureYapinetApiKey::class,
         ]);
 
         // The signature is computed over the raw body, so nothing may rewrite
