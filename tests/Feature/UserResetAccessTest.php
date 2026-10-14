@@ -73,7 +73,17 @@ class UserResetAccessTest extends TestCase
 
                 return NotificationResult::ok();
             }
+
+            // Account invitations over WhatsApp go through a Qontak template
+            // (2026-10-14); the token rides the URL button.
+            public function sendTemplate(string $phone, string $toName, string $templateId, array $bodyValues, array $buttonValues = []): NotificationResult
+            {
+                $this->sent[] = ['phone' => $phone, 'message' => implode(' | ', $bodyValues).' /aktivasi?token='.($buttonValues[0] ?? '')];
+
+                return NotificationResult::ok();
+            }
         });
+        config(['services.qontak.account_invite_template_id' => 'tpl-undangan-akun']);
 
         SchoolUnit::create(['code' => 'SD-13', 'label' => 'SDI Al Azhar 13', 'jenjang_group' => 'sd']);
 
@@ -114,7 +124,8 @@ class UserResetAccessTest extends TestCase
             'status' => 'sent',
         ]);
         $this->assertCount(1, $this->sentWhatsApp);
-        $this->assertSame('081299000111', $this->sentWhatsApp[0]['phone']);
+        // Qontak takes the international form; the invitation itself keeps 08... (above).
+        $this->assertSame('6281299000111', $this->sentWhatsApp[0]['phone']);
     }
 
     public function test_a_second_reset_supersedes_the_first_but_never_an_activation_link(): void
@@ -254,5 +265,17 @@ class UserResetAccessTest extends TestCase
         preg_match('/\b(\d{6})\b/', end($messages)['message'], $m);
 
         return $m[1];
+    }
+
+    public function test_without_the_qontak_template_a_whatsapp_reset_is_not_attempted_and_leaves_no_error_row(): void
+    {
+        config(['services.qontak.account_invite_template_id' => null]);
+
+        $this->actingAs($this->admin)
+            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => '081299000444'])
+            ->assertCreated();
+
+        $this->assertSame([], $this->sentWhatsApp);
+        $this->assertDatabaseMissing('notification_logs', ['channel' => 'whatsapp']);
     }
 }

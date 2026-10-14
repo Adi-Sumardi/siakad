@@ -7,6 +7,8 @@ import {
   CreditCard,
   FileDown,
   FileSpreadsheet,
+  Scale,
+  X,
   Layers,
   RefreshCw,
   TrendingDown,
@@ -121,7 +123,8 @@ export default function ReportsPage() {
             <p className="text-xs text-muted-foreground">Pilih rentang tanggal untuk melihat total penerimaan kas/gateway.</p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ReconButton from={from} to={to} />
             <div className="flex items-center gap-1.5 bg-card px-2.5 py-1.5 rounded-lg border border-input shadow-2xs">
               <Calendar className="size-3.5 text-muted-foreground" />
               <Label className="text-xs text-muted-foreground">Dari:</Label>
@@ -144,8 +147,6 @@ export default function ReportsPage() {
             </div>
           </div>
         </div>
-
-        <ReconBar from={from} to={to} />
 
         {collections === null ? (
           <Skeleton className="h-32 w-full" />
@@ -360,67 +361,127 @@ type ReconOptions = {
 };
 
 /**
- * Recon download (2026-10-07, same report as PMB): paid allocations in the
- * section's date range, by payment date - per-unit totals by fee type and by
- * bank, then each unit's list with the bank reference, for matching against
- * the BSI and Muamalat statements.
+ * Recon download - same dialog as PMB's Transaksi > Recon (2026-10-14):
+ * paid allocations by PAYMENT date, per-unit totals by fee type and bank,
+ * then each unit's list with the bank reference, for matching against the
+ * BSI and Muamalat statements. Starts from the section's own date range.
  */
-function ReconBar({ from, to }: { from: string; to: string }) {
+function ReconButton({ from, to }: { from: string; to: string }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button size="sm" className="gap-1.5" onClick={() => setOpen(true)}>
+        <Scale className="size-3.5" /> Recon
+      </Button>
+      {open && <ReconDialog initialFrom={from} initialTo={to} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function ReconDialog({ initialFrom, initialTo, onClose }: { initialFrom: string; initialTo: string; onClose: () => void }) {
   const [options, setOptions] = useState<ReconOptions | null>(null);
+  const [range, setRange] = useState({ from: initialFrom, to: initialTo });
   const [bank, setBank] = useState("all");
   const [feeType, setFeeType] = useState("all");
   const [unit, setUnit] = useState("all");
 
+  // Once per opening - not on every parent render.
   useEffect(() => {
     api.get<ReconOptions>("/api/admin/reports/collections/recon/options")
       .then(setOptions)
       .catch(() => setOptions({ fee_types: [], units: [] }));
   }, []);
 
-  const valid = from !== "" && to !== "" && from <= to;
-  const qs = new URLSearchParams({ from, to });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const valid = range.from !== "" && range.to !== "" && range.from <= range.to;
+  const qs = new URLSearchParams({ from: range.from, to: range.to });
   if (bank !== "all") qs.set("bank", bank);
   if (feeType !== "all") qs.set("fee_type", feeType);
   if (unit !== "all") qs.set("unit", unit);
 
-  const selectClass = "h-8 rounded-lg border border-input bg-card px-2 text-xs outline-none focus-visible:border-ring";
+  const selectClass = "h-9 w-full rounded-lg border border-input bg-card px-2 text-xs outline-none focus-visible:border-ring";
   const linkClass = (variant: "outline" | "default") =>
     `${buttonVariants({ variant, size: "sm" })} gap-1.5 ${valid ? "" : "pointer-events-none opacity-50"}`;
 
   return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h3 className="text-sm font-bold text-foreground">Recon per Unit</h3>
-        <p className="text-xs text-muted-foreground">
-          Pembayaran lunas pada tanggal di atas: total per jenis biaya dan per bank, lalu daftar per unit dengan Ref. Bank.
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <select id="recon-bank" value={bank} onChange={(e) => setBank(e.target.value)} className={selectClass} aria-label="Bank">
-          <option value="all">Semua bank</option>
-          <option value="muamalat">Bank Muamalat</option>
-          <option value="bsi">BSI</option>
-        </select>
-        <select id="recon-fee-type" value={feeType} onChange={(e) => setFeeType(e.target.value)} className={selectClass} aria-label="Jenis biaya">
-          <option value="all">Semua jenis biaya</option>
-          {options?.fee_types.map((f) => (
-            <option key={f.code} value={f.code}>{f.name}</option>
-          ))}
-        </select>
-        {(options?.units.length ?? 0) > 1 && (
-          <select id="recon-unit" value={unit} onChange={(e) => setUnit(e.target.value)} className={selectClass} aria-label="Unit">
-            <option value="all">Semua unit</option>
-            {options?.units.map((u) => (
-              <option key={u.code} value={u.code}>{u.label}</option>
-            ))}
-          </select>
-        )}
-        <a href={`${API_BASE}/api/admin/reports/collections/recon/pdf?${qs}`} target="_blank" rel="noreferrer" className={linkClass("outline")} aria-disabled={!valid}>
-          <FileDown className="size-3.5" /> Recon PDF
-        </a>
-        <a href={`${API_BASE}/api/admin/reports/collections/recon/excel?${qs}`} target="_blank" rel="noreferrer" className={linkClass("default")} aria-disabled={!valid}>
-          <FileSpreadsheet className="size-3.5" /> Recon Excel
-        </a>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div role="dialog" aria-modal="true" aria-labelledby="recon-title" className="w-full max-w-md rounded-2xl bg-card p-6 shadow-2xl border border-border my-8">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 id="recon-title" className="text-lg font-bold text-foreground">Download Recon</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Pembayaran lunas per unit: total per jenis biaya dan per bank, lalu daftar transaksinya dengan Ref. Bank
+              untuk dicocokkan dengan rekening koran.
+            </p>
+          </div>
+          <button onClick={onClose} aria-label="Tutup" className="text-muted-foreground hover:text-foreground">
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-4 text-xs">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Tanggal bayar</Label>
+            <div className="flex items-center gap-1.5">
+              <Input id="recon-from" type="date" value={range.from} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="h-9 text-xs" />
+              <span className="text-muted-foreground">s/d</span>
+              <Input id="recon-to" type="date" value={range.to} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} className="h-9 text-xs" />
+            </div>
+            {!valid && <p className="text-destructive">Isi kedua tanggal, dan tanggal akhir tidak boleh sebelum tanggal awal.</p>}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="recon-bank" className="text-xs">Bank</Label>
+              <select id="recon-bank" value={bank} onChange={(e) => setBank(e.target.value)} className={selectClass}>
+                <option value="all">Semua bank</option>
+                <option value="muamalat">Bank Muamalat</option>
+                <option value="bsi">BSI</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="recon-fee-type" className="text-xs">Jenis biaya</Label>
+              <select id="recon-fee-type" value={feeType} onChange={(e) => setFeeType(e.target.value)} className={selectClass}>
+                <option value="all">Semua jenis biaya</option>
+                {options?.fee_types.map((f) => (
+                  <option key={f.code} value={f.code}>{f.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {(options?.units.length ?? 0) > 1 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="recon-unit" className="text-xs">Unit</Label>
+              <select id="recon-unit" value={unit} onChange={(e) => setUnit(e.target.value)} className={selectClass}>
+                <option value="all">Semua unit</option>
+                {options?.units.map((u) => (
+                  <option key={u.code} value={u.code}>{u.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <p className="text-[11px] text-muted-foreground">
+            Berdasarkan tanggal bayar (saat lunas tercatat di SIAKAD). Satu transfer yang melunasi tagihan beberapa anak
+            dibagi ke unit masing-masing, dengan No. Pembayaran yang sama.
+          </p>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <a href={`${API_BASE}/api/admin/reports/collections/recon/pdf?${qs}`} target="_blank" rel="noreferrer" className={linkClass("outline")} aria-disabled={!valid}>
+            <FileDown className="size-3.5" /> Recon PDF
+          </a>
+          <a href={`${API_BASE}/api/admin/reports/collections/recon/excel?${qs}`} target="_blank" rel="noreferrer" className={linkClass("default")} aria-disabled={!valid}>
+            <FileSpreadsheet className="size-3.5" /> Recon Excel
+          </a>
+        </div>
       </div>
     </div>
   );

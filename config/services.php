@@ -80,6 +80,13 @@ return [
         // variables: nama anak, bulan tagihan, jumlah, VA Muamalat, kode
         // bayar BSI (VA BSI minus its 4-digit institution code, 7895 for SPP).
         'spp_reminder_template_id' => env('QONTAK_SPP_REMINDER_TEMPLATE_ID'),
+        // UUID of the approved 'undangan_akun_siakad' Utility template - the
+        // activation link for a guardian with no email (2026-10-14). Body
+        // {{1}} nama wali, {{2}} nama murid, {{3}} unit, {{4}} berlaku s.d.;
+        // URL button suffix = the activation token. Empty = WhatsApp
+        // invitations are not sent at all (no failed rows in Monitoring) -
+        // the old Sendago path failed for every one of them.
+        'account_invite_template_id' => env('QONTAK_ACCOUNT_INVITE_TEMPLATE_ID'),
         // UUID of the approved 'receipt_spp_school' Utility template
         // (confirms money arrived) - see PaymentReceiptSender. 6 positional
         // variables: nama anak, bulan tagihan, jumlah dibayar, tanggal+jam

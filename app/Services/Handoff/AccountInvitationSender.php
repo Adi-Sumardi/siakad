@@ -2,13 +2,13 @@
 
 namespace App\Services\Handoff;
 
-use App\Jobs\SendWhatsAppMessage;
+use App\Jobs\SendQontakTemplateMessage;
 use App\Models\AccountInvitation;
 use App\Models\NotificationLog;
 use App\Models\User;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
-use App\Services\Notification\WhatsAppGateway;
+use App\Services\Notification\PhoneNumberFormatter;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -20,7 +20,6 @@ class AccountInvitationSender
 {
     public function __construct(
         private MailGateway $mail,
-        private WhatsAppGateway $whatsapp,
     ) {}
 
     /**
@@ -108,9 +107,21 @@ class AccountInvitationSender
             'guardian_name' => $invitation->user?->name ?? (string) ($log->payload['guardian_name'] ?? ''),
         ]);
 
-        return $log->channel === 'email'
-            ? $this->mail->send($log->recipient, $template, $data)
-            : $this->whatsapp->sendMessage($log->recipient, $this->renderWhatsAppMessage($data, $invitation->purpose));
+        if ($log->channel === 'email') {
+            return $this->mail->send($log->recipient, $template, $data);
+        }
+
+        // WhatsApp goes through Qontak only (2026-10-14); the sweep updates
+        // this same row, so the job is not handed its ulid.
+        $templateId = config('services.qontak.account_invite_template_id');
+
+        if (blank($templateId)) {
+            return NotificationResult::fail('Template undangan WhatsApp di Qontak belum aktif.');
+        }
+
+        $this->dispatchQontak($invitation, $data, $templateId, null);
+
+        return NotificationResult::ok(['mode' => 'queued']);
     }
 
     /**
@@ -173,13 +184,20 @@ class AccountInvitationSender
     }
 
     /**
-     * Queued rather than sent inline - see App\Jobs\SendWhatsAppMessage for
-     * why. Logs itself (as 'queued', updated to sent/failed by the job, which
-     * is what the retry sweep then picks up) instead of going through log(),
-     * which can only record an outcome it already knows.
+     * WhatsApp is only for a guardian with no email, and only through an
+     * approved Qontak template (2026-10-14): the old Sendago path failed for
+     * every such invitation and left a red row in Monitoring each time.
+     * Until the template id is configured nothing is sent or logged - the
+     * admin is told why instead, and re-sends once it is.
      */
     private function deliverWhatsApp(AccountInvitation $invitation, string $template, array $data): NotificationResult
     {
+        $templateId = config('services.qontak.account_invite_template_id');
+
+        if (blank($templateId)) {
+            return NotificationResult::fail('Wali ini belum punya email, dan template undangan WhatsApp di Qontak belum aktif. Tambahkan email wali, atau kirim ulang undangan setelah template disetujui.');
+        }
+
         $log = NotificationLog::create([
             'channel' => 'whatsapp',
             'template' => $template,
@@ -192,31 +210,46 @@ class AccountInvitationSender
             'notifiable_id' => $invitation->id,
         ]);
 
-        SendWhatsAppMessage::dispatch(
-            $invitation->sent_to,
-            $this->renderWhatsAppMessage($data, $invitation->purpose),
-            $log->ulid,
-        );
+        $this->dispatchQontak($invitation, $data, $templateId, $log->ulid);
 
         return NotificationResult::ok(['mode' => 'queued']);
     }
 
     /** @param array<string, mixed> $data */
-    private function renderWhatsAppMessage(array $data, ?string $purpose = 'activation'): string
+    private function dispatchQontak(AccountInvitation $invitation, array $data, string $templateId, ?string $logUlid): void
     {
-        if ($purpose === 'reset') {
-            return "Assalamu'alaikum {$data['guardian_name']},\n\n"
-                ."Kami menerima permintaan memperbarui kontak akun aplikasi sekolah Anda "
-                ."({$data['login_identifier']}).\n\n"
-                ."Buka tautan berikut untuk mengaktifkan kontak baru:\n{$data['activation_url']}\n\n"
-                ."Setelah tautan dibuka, kontak baru tersebut menjadi satu-satunya cara masuk akun Anda.\n"
-                ."Tautan berlaku sampai {$data['expires_at']}. Abaikan pesan ini bila Anda tidak meminta perubahan.";
+        [$studentName, $unitLabel] = $this->childFor($invitation, $data);
+
+        SendQontakTemplateMessage::dispatch(
+            // Qontak wants 62..., the formatter gives 08... (same step as BillReminderSender).
+            phone: '62'.substr((string) PhoneNumberFormatter::toWhatsAppFormat($invitation->sent_to), 1),
+            toName: (string) ($data['guardian_name'] ?: 'Orang Tua/Wali'),
+            templateId: $templateId,
+            bodyValues: [(string) ($data['guardian_name'] ?: 'Orang Tua/Wali'), $studentName, $unitLabel, (string) $data['expires_at']],
+            // The URL button's dynamic suffix: .../aktivasi?token={{1}}
+            buttonValues: [(string) str($data['activation_url'])->after('token=')],
+            notificationLogUlid: $logUlid,
+        );
+    }
+
+    /**
+     * The child the message names. An activation carries it from the PMB
+     * handoff; a reset (or a resend of an old row) looks it up.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function childFor(AccountInvitation $invitation, array $data): array
+    {
+        if (! empty($data['student_name'])) {
+            return [(string) $data['student_name'], (string) ($data['unit_label'] ?? 'YAPI Al Azhar')];
         }
 
-        return "Assalamu'alaikum {$data['guardian_name']},\n\n"
-            ."Uang pangkal {$data['student_name']} sudah lunas dan akun aplikasi sekolah sudah kami buatkan.\n\n"
-            ."Aktifkan akun Anda di tautan berikut (tanpa kata sandi - masuk berikutnya cukup dengan kode sekali pakai):\n{$data['activation_url']}\n\n"
-            ."Tautan berlaku sampai {$data['expires_at']}.";
+        $students = \App\Models\Guardian::where('user_id', $invitation->user_id)->first()?->students()->with('schoolUnit')->get() ?? collect();
+
+        return [
+            $students->pluck('nama_lengkap')->implode(', ') ?: 'putra/putri Anda',
+            $students->map(fn ($s) => $s->schoolUnit?->label)->filter()->unique()->implode(', ') ?: 'YAPI Al Azhar',
+        ];
     }
 
     /**

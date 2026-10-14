@@ -39,6 +39,10 @@ class SendQontakTemplateMessage implements ShouldQueue
         public string $templateId,
         public array $bodyValues,
         public array $buttonValues = [],
+        // When the caller logged this send (account invitations do, so
+        // Monitoring shows the real outcome), its status is set here once
+        // the send is attempted - same contract as SendWhatsAppMessage.
+        public ?string $notificationLogUlid = null,
     ) {}
 
     public function middleware(): array
@@ -49,6 +53,14 @@ class SendQontakTemplateMessage implements ShouldQueue
     public function handle(QontakWhatsAppGateway $gateway): void
     {
         $result = $gateway->sendTemplate($this->phone, $this->toName, $this->templateId, $this->bodyValues, $this->buttonValues);
+
+        if ($this->notificationLogUlid) {
+            \App\Models\NotificationLog::where('ulid', $this->notificationLogUlid)->update([
+                'status' => $result->success ? 'sent' : 'failed',
+                'error' => $result->message,
+                'sent_at' => $result->success ? now() : null,
+            ]);
+        }
 
         if (! $result->success) {
             Log::warning('[SendQontakTemplateMessage] Send failed', [
