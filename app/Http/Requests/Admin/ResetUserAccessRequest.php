@@ -2,7 +2,6 @@
 
 namespace App\Http\Requests\Admin;
 
-use App\Services\Notification\PhoneNumberFormatter;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -54,17 +53,8 @@ class ResetUserAccessRequest extends FormRequest
             return;
         }
 
-        $phone = PhoneNumberFormatter::toWhatsAppFormat($raw);
-
-        // A number with at least 9 digits (08 + 7+) is a phone; anything else
-        // is a typo, not a channel decision.
-        if ($phone !== null && strlen($phone) >= 9) {
-            $this->channel = 'whatsapp';
-            $this->normalized = $phone;
-
-            return;
-        }
-
+        // Email only (2026-10-14): a phone number is refused, not sent over
+        // WhatsApp - the school sends invitations and resets by email.
         $this->channel = null;
         $this->normalized = $raw;
     }
@@ -73,7 +63,7 @@ class ResetUserAccessRequest extends FormRequest
     {
         $validator->after(function ($validator) {
             if ($this->channel === null) {
-                $validator->errors()->add('contact', 'Isi dengan alamat email atau nomor HP/WhatsApp yang valid.');
+                $validator->errors()->add('contact', 'Isi dengan alamat email yang valid - tautan reset hanya dikirim lewat email.');
             }
         });
     }

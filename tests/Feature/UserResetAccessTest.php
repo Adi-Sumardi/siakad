@@ -29,6 +29,9 @@ class UserResetAccessTest extends TestCase
     /** @var list<array{phone: string, message: string}> */
     private array $sentWhatsApp = [];
 
+    /** @var list<array{to: string, template: string, data: array<string, mixed>}> */
+    private array $sentMail = [];
+
     private User $admin;
 
     private User $wali;
@@ -40,10 +43,14 @@ class UserResetAccessTest extends TestCase
         $this->withHeader('Origin', config('app.frontend_url'));
         RateLimiter::clear('otp:ip:127.0.0.1');
 
-        $this->app->bind(MailGateway::class, fn () => new class implements MailGateway
+        $this->app->bind(MailGateway::class, fn () => new class($this->sentMail) implements MailGateway
         {
+            public function __construct(private array &$sent) {}
+
             public function send(string $to, string $template, array $data, array $attachments = []): NotificationResult
             {
+                $this->sent[] = compact('to', 'template', 'data');
+
                 return NotificationResult::ok();
             }
         });
@@ -73,17 +80,7 @@ class UserResetAccessTest extends TestCase
 
                 return NotificationResult::ok();
             }
-
-            // Account invitations over WhatsApp go through a Qontak template
-            // (2026-10-14); the token rides the URL button.
-            public function sendTemplate(string $phone, string $toName, string $templateId, array $bodyValues, array $buttonValues = []): NotificationResult
-            {
-                $this->sent[] = ['phone' => $phone, 'message' => implode(' | ', $bodyValues).' /aktivasi?token='.($buttonValues[0] ?? '')];
-
-                return NotificationResult::ok();
-            }
         });
-        config(['services.qontak.account_invite_template_id' => 'tpl-undangan-akun']);
 
         SchoolUnit::create(['code' => 'SD-13', 'label' => 'SDI Al Azhar 13', 'jenjang_group' => 'sd']);
 
@@ -93,7 +90,7 @@ class UserResetAccessTest extends TestCase
         ]);
 
         $this->wali = User::create([
-            'name' => 'Wali Terkunci', 'phone' => '081200000001', 'role' => 'orangtua',
+            'name' => 'Wali Terkunci', 'email' => 'lama@example.com', 'phone' => '081200000001', 'role' => 'orangtua',
             'is_active' => true, 'activated_at' => now(),
         ]);
         Guardian::create([
@@ -104,28 +101,38 @@ class UserResetAccessTest extends TestCase
         ]);
     }
 
-    public function test_a_central_admin_sends_a_reset_invitation_to_a_new_contact(): void
+    public function test_a_central_admin_sends_a_reset_invitation_to_a_new_email(): void
     {
         $this->actingAs($this->admin)
-            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => '+6281299000111'])
+            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => 'Wali.Baru@Example.com'])
             ->assertCreated()
             ->assertJsonPath('invitation.purpose', 'reset')
-            ->assertJsonPath('invitation.channel', 'whatsapp')
-            ->assertJsonPath('invitation.sent_to', '081299000111');
+            ->assertJsonPath('invitation.channel', 'email')
+            ->assertJsonPath('invitation.sent_to', 'wali.baru@example.com');
 
         $invitation = AccountInvitation::where('purpose', 'reset')->first();
         $this->assertEquals($this->admin->id, $invitation->created_by);
-        $this->assertSame('081299000111', $invitation->sent_to);
         $this->assertDatabaseHas('notification_logs', [
-            'channel' => 'whatsapp',
+            'channel' => 'email',
             'template' => 'school_account_reset',
             'notifiable_type' => AccountInvitation::class,
             'notifiable_id' => $invitation->id,
             'status' => 'sent',
         ]);
-        $this->assertCount(1, $this->sentWhatsApp);
-        // Qontak takes the international form; the invitation itself keeps 08... (above).
-        $this->assertSame('6281299000111', $this->sentWhatsApp[0]['phone']);
+        $this->assertSame('wali.baru@example.com', end($this->sentMail)['to']);
+        $this->assertSame([], $this->sentWhatsApp);
+    }
+
+    /** Email only (2026-10-14): a phone number is refused, never sent over WhatsApp. */
+    public function test_a_phone_number_is_refused_as_a_reset_contact(): void
+    {
+        $this->actingAs($this->admin)
+            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => '081299000111'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['contact']);
+
+        $this->assertSame(0, AccountInvitation::where('purpose', 'reset')->count());
+        $this->assertSame([], $this->sentWhatsApp);
     }
 
     public function test_a_second_reset_supersedes_the_first_but_never_an_activation_link(): void
@@ -133,18 +140,18 @@ class UserResetAccessTest extends TestCase
         $activation = AccountInvitation::create([
             'user_id' => $this->wali->id,
             'token_hash' => AccountInvitation::hashToken(AccountInvitation::generateToken()),
-            'channel' => 'whatsapp',
-            'sent_to' => '081200000001',
+            'channel' => 'email',
+            'sent_to' => 'lama@example.com',
             'purpose' => 'activation',
             'expires_at' => now()->addDays(7),
         ]);
 
         $this->actingAs($this->admin)
-            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => '081299000111'])
+            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => 'satu@example.com'])
             ->assertCreated();
 
         $this->actingAs($this->admin)
-            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => '081299000222'])
+            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => 'dua@example.com'])
             ->assertCreated();
 
         $resets = AccountInvitation::where('purpose', 'reset')->orderBy('id')->get();
@@ -165,17 +172,13 @@ class UserResetAccessTest extends TestCase
             'name' => 'Korban', 'email' => 'korban@yapinet.id', 'role' => 'admin',
             'is_active' => true, 'activated_at' => now(),
         ]);
-        $phoneOwner = User::create([
-            'name' => 'Pemilik Nomor', 'phone' => '081299000333', 'role' => 'orangtua',
-            'is_active' => true, 'activated_at' => now(),
-        ]);
 
         $this->actingAs($unitAdmin)
-            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => '081299000111'])
+            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => 'baru@example.com'])
             ->assertForbidden();
 
         $this->actingAs($this->admin)
-            ->postJson("/api/admin/users/{$otherAdmin->ulid}/reset-access", ['contact' => '081299000111'])
+            ->postJson("/api/admin/users/{$otherAdmin->ulid}/reset-access", ['contact' => 'baru@example.com'])
             ->assertStatus(422);
 
         $this->actingAs($this->admin)
@@ -184,56 +187,43 @@ class UserResetAccessTest extends TestCase
             ->assertJsonPath('message', 'Kontak ini sudah dipakai akun lain - tidak bisa menjadi kontak akun ini.');
 
         $this->actingAs($this->admin)
-            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => '081299000333'])
-            ->assertStatus(422);
-
-        $this->actingAs($this->admin)
             ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => 'bukan-kontak'])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['contact']);
 
         $this->assertSame(0, AccountInvitation::where('purpose', 'reset')->count());
-        $this->assertNotNull($phoneOwner);
     }
 
-    public function test_opening_the_reset_link_writes_the_new_contact_and_login_follows_it(): void
+    public function test_opening_the_reset_link_writes_the_new_email_and_login_follows_it(): void
     {
         $this->actingAs($this->admin)
-            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => '+62 812-9900-0111'])
+            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => 'baru@example.com'])
             ->assertCreated();
 
-        // The plain token lives only inside the delivered message.
-        preg_match('#/aktivasi\?token=([A-Za-z0-9]+)#', $this->sentWhatsApp[0]['message'], $m);
-        $token = $m[1] ?? '';
+        // The plain token lives only inside the delivered email.
+        $token = (string) str(end($this->sentMail)['data']['activation_url'])->after('token=');
         $this->assertNotSame('', $token);
 
         $this->postJson("/api/invitations/{$token}/activate", [])
             ->assertOk()
             ->assertJsonPath('user.role', 'orangtua');
 
-        // The new phone (normalized 08xx) is now the account's contact, with
-        // the blind index OTP lookup reads, and the guardian mirror followed.
-        $this->assertSame('081299000111', $this->wali->fresh()->phone);
-        $this->assertSame(
-            app(FieldEncrypter::class)->blindIndex('081299000111'),
-            User::where('id', $this->wali->id)->value('phone_hash'),
-        );
-        $guardian = Guardian::where('user_id', $this->wali->id)->first();
-        $this->assertSame('081299000111', $guardian->no_hp);
+        $this->assertSame('baru@example.com', $this->wali->fresh()->email);
+        $this->assertSame('baru@example.com', Guardian::where('user_id', $this->wali->id)->first()->email);
 
-        // The dead old phone no longer resolves. The request endpoint answers
-        // the same for known and unknown identifiers on purpose
-        // (anti-enumeration) - the proof is that NO code was delivered for it.
-        $messagesBefore = count($this->sentWhatsApp);
-        $this->postJson('/api/auth/otp/request', ['identifier' => '081200000001'])->assertOk();
-        $this->assertCount($messagesBefore, $this->sentWhatsApp);
+        // The dead old email no longer resolves - the request endpoint
+        // answers the same either way (anti-enumeration); the proof is that
+        // no code was mailed for it.
+        $before = count($this->sentMail);
+        $this->postJson('/api/auth/otp/request', ['identifier' => 'lama@example.com'])->assertOk();
+        $this->assertCount($before, $this->sentMail);
 
         // The new one receives a code and logs the wali in.
-        $this->postJson('/api/auth/otp/request', ['identifier' => '081299000111'])->assertOk();
-        $this->assertCount($messagesBefore + 1, $this->sentWhatsApp);
+        $this->postJson('/api/auth/otp/request', ['identifier' => 'baru@example.com'])->assertOk();
+        $this->assertCount($before + 1, $this->sentMail);
+        $code = (string) end($this->sentMail)['data']['code'];
 
-        $code = $this->codeFromWhatsApp();
-        $this->postJson('/api/auth/otp/verify', ['identifier' => '081299000111', 'code' => $code])
+        $this->postJson('/api/auth/otp/verify', ['identifier' => 'baru@example.com', 'code' => $code])
             ->assertOk()
             ->assertJsonPath('user.name', 'Wali Terkunci');
     }
@@ -246,35 +236,27 @@ class UserResetAccessTest extends TestCase
         ];
 
         // Hand-minted activation invitation through the same sender the PMB
-        // handoff uses, delivered to the contact already on file.
+        // handoff uses, delivered to the email already on file.
         app(\App\Services\Handoff\AccountInvitationSender::class)
             ->send($this->wali, ['student_name' => 'Ananda', 'nama_panggilan' => 'Ananda', 'unit_label' => 'SD', 'academic_year' => '2026/2027']);
 
-        preg_match('#/aktivasi\?token=([A-Za-z0-9]+)#', $this->sentWhatsApp[0]['message'], $m);
-
-        $this->postJson("/api/invitations/{$m[1]}/activate", [])->assertOk();
+        $token = (string) str(end($this->sentMail)['data']['activation_url'])->after('token=');
+        $this->postJson("/api/invitations/{$token}/activate", [])->assertOk();
 
         $this->assertSame($before['phone'], $this->wali->fresh()->getRawAttributeValue('phone'));
         $this->assertSame($before['email'], $this->wali->fresh()->email);
     }
 
-    /** The code as the guardian receives it - the API never returns it. */
-    private function codeFromWhatsApp(): string
+    /** An account with no email gets no invitation - and no WhatsApp attempt or red row either. */
+    public function test_an_account_without_email_is_not_invited_over_whatsapp(): void
     {
-        $messages = $this->sentWhatsApp;
-        preg_match('/\b(\d{6})\b/', end($messages)['message'], $m);
+        $noEmail = User::create(['name' => 'Ayah Tanpa Email', 'phone' => '081277700001', 'role' => 'orangtua', 'is_active' => true]);
 
-        return $m[1];
-    }
+        $result = app(\App\Services\Handoff\AccountInvitationSender::class)
+            ->send($noEmail, ['student_name' => 'Ananda', 'nama_panggilan' => 'Ananda', 'unit_label' => 'SD', 'academic_year' => '2026/2027']);
 
-    public function test_without_the_qontak_template_a_whatsapp_reset_is_not_attempted_and_leaves_no_error_row(): void
-    {
-        config(['services.qontak.account_invite_template_id' => null]);
-
-        $this->actingAs($this->admin)
-            ->postJson("/api/admin/users/{$this->wali->ulid}/reset-access", ['contact' => '081299000444'])
-            ->assertCreated();
-
+        $this->assertFalse($result->success);
+        $this->assertSame(0, AccountInvitation::where('user_id', $noEmail->id)->count());
         $this->assertSame([], $this->sentWhatsApp);
         $this->assertDatabaseMissing('notification_logs', ['channel' => 'whatsapp']);
     }

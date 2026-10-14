@@ -353,6 +353,32 @@ class PmbHandoffTest extends TestCase
             ->assertJsonPath('students.0.nama_lengkap', 'Aisyah Nur Ramadhani');
     }
 
+    /**
+     * Invitations go by email only (2026-10-14): a primary father with no
+     * email used to get the login - and an invitation over WhatsApp that
+     * never arrived - while the mother's email went unused.
+     */
+    public function test_the_login_goes_to_the_guardian_with_an_email_when_the_primary_has_none(): void
+    {
+        // Set outright: payload() merges recursively and would hand the
+        // father the default guardian's email.
+        $payload = $this->payload(['event_id' => '01JCEVENT0000000000000009']);
+        $payload['guardians'] = [
+            ['nama' => 'Ayah Tanpa Email', 'hubungan' => 'ayah', 'no_hp' => '081200000101', 'is_primary' => true],
+            ['nama' => 'Ibu Punya Email', 'hubungan' => 'ibu', 'email' => 'ibu.punya@example.com', 'no_hp' => '081200000102', 'is_primary' => false],
+        ];
+        $this->postHandoff($payload)->assertStatus(202);
+
+        $mother = \App\Models\Guardian::where('nama', 'Ibu Punya Email')->first();
+        $father = \App\Models\Guardian::where('nama', 'Ayah Tanpa Email')->first();
+
+        $this->assertNotNull($mother->user_id);
+        $this->assertNull($father->user_id);
+        $this->assertSame('ibu.punya@example.com', User::find($mother->user_id)->email);
+        $this->assertCount(1, $this->sentMail);
+        $this->assertSame('ibu.punya@example.com', $this->sentMail[0]['to']);
+    }
+
     private function tokenFromLastMail(): string
     {
         $url = $this->sentMail[array_key_last($this->sentMail)]['data']['activation_url'];

@@ -152,7 +152,18 @@ class PmbHandoffProcessor
         $invitees = [];
         $billingAssigned = false;
 
-        foreach ($guardians as $data) {
+        // Invitations go by email only (2026-10-14), so the login goes to a
+        // guardian an email can reach: the primary if they have one, else
+        // the first who does - six fathers without email got the account
+        // while the mothers' emails sat unused, and were never invited.
+        // Nobody with email: the primary keeps it, to be invited once an
+        // admin adds one.
+        $list = collect($guardians)->values();
+        $holder = $list->search(fn ($g) => ($g['is_primary'] ?? false) && ! empty($g['email']));
+        $holder = $holder !== false ? $holder : $list->search(fn ($g) => ! empty($g['email']));
+        $holder = $holder !== false ? $holder : $list->search(fn ($g) => ($g['is_primary'] ?? false));
+
+        foreach ($list as $index => $data) {
             $guardian = $this->findGuardian($data) ?? new Guardian;
 
             $guardian->fill([
@@ -172,7 +183,7 @@ class PmbHandoffProcessor
             // The account goes to the primary guardian who has a way to receive
             // it. A guardian with neither email nor phone gets a record but no
             // login - there is nowhere to send the invitation.
-            if ($isPrimary && ! $guardian->user_id && ($guardian->email || ! empty($data['no_hp']))) {
+            if ($index === $holder && ! $guardian->user_id && ($guardian->email || ! empty($data['no_hp']))) {
                 $user = $this->resolveUser($data, $unit);
                 $guardian->user_id = $user->id;
 
