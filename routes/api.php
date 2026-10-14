@@ -186,6 +186,9 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
  * in their unit, not only their own homeroom, because they teach across it.
  */
 Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function () {
+    Route::get('/profile', [App\Http\Controllers\Api\Guru\ProfileController::class, 'show']);
+    Route::patch('/profile', [App\Http\Controllers\Api\Guru\ProfileController::class, 'update']);
+
     Route::get('/classrooms', [GuruClassroomController::class, 'index']);
     Route::get('/classrooms/{ulid}/students', [GuruClassroomController::class, 'students']);
     // Term-to-date H/S/I/A per student - the class-wide view the live
@@ -237,6 +240,12 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     Route::get('/my-subjects', [GuruGradeController::class, 'myAssignments']);
     Route::get('/classrooms/{classroomUlid}/subjects/{subjectUlid}/grades', [GuruGradeController::class, 'roster']);
     Route::post('/classrooms/{classroomUlid}/subjects/{subjectUlid}/grades', [GuruGradeController::class, 'store']);
+    // A semester has many assignments: each is a column, tugas = their
+    // average. The sheet endpoint saves every changed cell in one go.
+    Route::put('/classrooms/{classroomUlid}/subjects/{subjectUlid}/grades/sheet', [GuruGradeController::class, 'saveSheet']);
+    Route::post('/classrooms/{classroomUlid}/subjects/{subjectUlid}/assignments', [GuruGradeController::class, 'storeAssignment']);
+    Route::patch('/grade-assignments/{ulid}', [GuruGradeController::class, 'updateAssignment']);
+    Route::delete('/grade-assignments/{ulid}', [GuruGradeController::class, 'destroyAssignment']);
     // The whole-class matrix of those grades - entry only ever shows one
     // category of one subject at a time, so this is the only place a
     // teacher can see who still owes a UAS or how the class is doing.

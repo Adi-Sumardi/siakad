@@ -31,6 +31,7 @@ class GuruClassroomIndexTest extends TestCase
     private Classroom $kelas1a;
     private Classroom $kelas2b;
     private User $guru;
+    private AcademicYear $year;
 
     protected function setUp(): void
     {
@@ -44,11 +45,15 @@ class GuruClassroomIndexTest extends TestCase
 
         $this->kelas1a = Classroom::create(['school_unit_id' => $this->sd->id, 'academic_year_id' => $year->id, 'tingkat' => 1, 'name' => '1A']);
         $this->kelas2b = Classroom::create(['school_unit_id' => $this->sd->id, 'academic_year_id' => $year->id, 'tingkat' => 2, 'name' => '2B']);
+        $this->year = $year;
 
         $this->guru = User::create([
             'name' => 'Guru SD', 'email' => 'guru'.uniqid().'@yapinet.id', 'role' => 'guru',
             'school_unit_id' => $this->sd->id, 'is_active' => true, 'activated_at' => now(),
         ]);
+
+        // The guru homerooms 2B; 1A only shows up through a lesson period.
+        $this->kelas2b->update(['homeroom_teacher_id' => $this->guru->id]);
     }
 
     protected function tearDown(): void
@@ -84,6 +89,7 @@ class GuruClassroomIndexTest extends TestCase
         $this->assertSame('1A', $kelas1a['name']);
         $this->assertSame(2, $kelas1a['schedules_today']['total']);
         $this->assertSame(1, $kelas1a['schedules_today']['mine']); // colleague's period is the class's, not mine
+        $this->assertSame([['start' => '07:00', 'end' => '08:00']], $kelas1a['schedules_today']['mine_periods']);
         $this->assertStringStartsWith('07:00', $kelas1a['schedules_today']['first_start']);
         $this->assertStringStartsWith('10:00', $kelas1a['schedules_today']['last_end']);
 
@@ -113,13 +119,51 @@ class GuruClassroomIndexTest extends TestCase
 
     public function test_another_units_classroom_is_not_listed(): void
     {
-        Classroom::create([
+        $kelas7a = Classroom::create([
             'school_unit_id' => $this->smp->id, 'academic_year_id' => AcademicYear::first()->id,
             'tingkat' => 7, 'name' => '7A',
         ]);
+        ClassSchedule::create(['classroom_id' => $this->kelas1a->id, 'subject_id' => $this->subject()->id, 'teacher_id' => $this->guru->id, 'day_of_week' => 1, 'start_time' => '07:00', 'end_time' => '08:00']);
+        // Even a stray period in another unit's room must not leak it in.
+        ClassSchedule::create(['classroom_id' => $kelas7a->id, 'subject_id' => $this->subject()->id, 'teacher_id' => $this->guru->id, 'day_of_week' => 1, 'start_time' => '07:00', 'end_time' => '08:00']);
 
         $res = $this->actingAs($this->guru)->getJson('/api/guru/classrooms')->assertOk();
 
         $this->assertSame(['1A', '2B'], array_column($res->json('classrooms'), 'name'));
+    }
+
+    public function test_only_rooms_the_teacher_teaches_or_homerooms_are_listed(): void
+    {
+        $guruLain = User::create([
+            'name' => 'Guru Lain', 'email' => 'lain'.uniqid().'@yapinet.id', 'role' => 'guru',
+            'school_unit_id' => $this->sd->id, 'is_active' => true, 'activated_at' => now(),
+        ]);
+        $kelas3c = Classroom::create(['school_unit_id' => $this->sd->id, 'academic_year_id' => $this->year->id, 'tingkat' => 3, 'name' => '3C']);
+
+        ClassSchedule::create(['classroom_id' => $this->kelas1a->id, 'subject_id' => $this->subject()->id, 'teacher_id' => $this->guru->id, 'day_of_week' => 2, 'start_time' => '07:00', 'end_time' => '08:00']);
+        // 3C is a colleague's lesson only - not this teacher's class.
+        ClassSchedule::create(['classroom_id' => $kelas3c->id, 'subject_id' => $this->subject()->id, 'teacher_id' => $guruLain->id, 'day_of_week' => 2, 'start_time' => '07:00', 'end_time' => '08:00']);
+
+        $res = $this->actingAs($this->guru)->getJson('/api/guru/classrooms')->assertOk();
+
+        $this->assertSame(['1A', '2B'], array_column($res->json('classrooms'), 'name'));
+        $this->assertSame(['Matematika'], $res->json('classrooms.0.my_subjects'));
+        $this->assertTrue($res->json('classrooms.1.is_homeroom'));
+        $this->assertSame([], $res->json('classrooms.1.my_subjects'));
+
+        // The room is still reachable directly - the list narrowed, access did not.
+        $this->actingAs($this->guru)->getJson("/api/guru/classrooms/{$kelas3c->ulid}/students")->assertOk();
+    }
+
+    public function test_last_years_rooms_are_not_listed(): void
+    {
+        $prevYear = AcademicYear::create(['year' => '2025/2026', 'starts_on' => '2025-07-01', 'ends_on' => '2026-06-30']);
+        $oldRoom = Classroom::create(['school_unit_id' => $this->sd->id, 'academic_year_id' => $prevYear->id, 'tingkat' => 1, 'name' => '1A', 'homeroom_teacher_id' => $this->guru->id]);
+        ClassSchedule::create(['classroom_id' => $oldRoom->id, 'subject_id' => $this->subject()->id, 'teacher_id' => $this->guru->id, 'day_of_week' => 1, 'start_time' => '07:00', 'end_time' => '08:00']);
+
+        $res = $this->actingAs($this->guru)->getJson('/api/guru/classrooms')->assertOk();
+
+        $this->assertSame([$this->kelas2b->ulid], array_column($res->json('classrooms'), 'ulid'));
+        $this->assertSame([], $this->actingAs($this->guru)->getJson('/api/guru/my-subjects')->json('assignments'));
     }
 }

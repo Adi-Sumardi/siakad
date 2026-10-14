@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { API_BASE, api, ApiError } from "@/lib/api";
 import { tanggal, todayJakarta } from "@/lib/format";
-import type { PointRecord } from "@/lib/types/kesiswaan";
+import type { PointRecord, TeachingAssignment } from "@/lib/types/kesiswaan";
 
 type StudentRow = { ulid: string; nama_lengkap: string; nis: string | null; point_balance: number | null };
 type Rule = { ulid: string; code: string; name: string; type: "violation" | "merit"; category: string; points: number; requires_evidence: boolean };
@@ -556,6 +556,7 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
   const [bulkDescription, setBulkDescription] = useState("");
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [raporLoading, setRaporLoading] = useState<string | null>(null);
+  const [mySubjects, setMySubjects] = useState<TeachingAssignment["subject"][]>([]);
 
   /**
    * The report card exactly as the guardian will receive it, for the running
@@ -597,6 +598,11 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
   useEffect(() => {
     load();
     api.get<{ rules: Rule[] }>("/api/guru/point-rules").then((d) => setRules(d.rules));
+    // The subjects this teacher grades in THIS room - a one-tap way into the gradebook from the class.
+    api
+      .get<{ assignments: TeachingAssignment[] }>("/api/guru/my-subjects")
+      .then((d) => setMySubjects(d.assignments.filter((a) => a.classroom.ulid === ulid).map((a) => a.subject)))
+      .catch(() => setMySubjects([]));
   }, [ulid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleSelect(studentUlid: string) {
@@ -651,7 +657,7 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
   }
 
   return (
-    <div className="space-y-6 pb-28">
+    <div className="space-y-6">
       <div>
         <Link href="/guru" className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-4" />
@@ -674,6 +680,19 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
           )}
         </div>
       </div>
+
+      {mySubjects.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {mySubjects.map((s) => (
+            <Link key={s.ulid} href={`/guru/nilai/${ulid}/${s.ulid}`}>
+              <Button size="sm" variant="outline" className="gap-1.5 text-xs">
+                <ClipboardList className="size-3.5" />
+                Isi Nilai {s.name}
+              </Button>
+            </Link>
+          ))}
+        </div>
+      )}
 
       <TodaySchedulePanel classroomUlid={ulid} />
 
@@ -774,8 +793,8 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
 
       {/* Floating Bulk Action Bar */}
       {selected.size > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-md shadow-2xl">
-          <div className="mx-auto flex max-w-7xl 2xl:max-w-full flex-wrap items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 py-3.5">
+        <div className="sticky bottom-3 z-20 rounded-xl border border-border bg-card/95 p-3 shadow-sm backdrop-blur-md">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs font-bold text-foreground">
               {selected.size} Siswa Terpilih
             </p>

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Guru;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Guru\DateRangeRequest;
+use App\Models\AcademicYear;
 use App\Models\ClassSchedule;
 use App\Models\Classroom;
 use App\Models\DailyRecord;
@@ -16,17 +17,31 @@ use Illuminate\Support\Carbon;
 class ClassroomController extends Controller
 {
     /**
-     * Every classroom in the teacher's unit, not only the one they are
-     * homeroom of - Classroom::scopeVisibleTo() already draws that line
-     * (teachers teach across a unit, homeroom is just their own room), so this
-     * simply reads it rather than narrowing further.
+     * The classrooms this teacher actually works with: the ones they hold a
+     * lesson period in (ClassSchedule.teacher_id) plus the one they homeroom,
+     * in the running academic year only. Listing every room in the unit -
+     * last year's included - buried a teacher's own classes under rooms they
+     * never enter and showed each name twice (8-A of two years). Access is
+     * unchanged: the per-classroom endpoints below still follow
+     * Classroom::scopeVisibleTo(), so a colleague's room stays reachable.
      */
     public function index(Request $request): JsonResponse
     {
+        $user = $request->user();
+        $activeYearId = AcademicYear::current()?->id;
+
         $classrooms = Classroom::query()
-            ->visibleTo($request->user())
+            ->visibleTo($user)
             ->where('is_active', true)
-            ->with('homeroomTeacher')
+            ->when($activeYearId, fn ($q) => $q->where('academic_year_id', $activeYearId))
+            ->where(fn ($q) => $q
+                ->where('homeroom_teacher_id', $user->id)
+                ->orWhereHas('classSchedules', fn ($s) => $s->where('teacher_id', $user->id)))
+            ->with([
+                'homeroomTeacher',
+                'classSchedules' => fn ($s) => $s->where('teacher_id', $user->id)->with('subject'),
+            ])
+            ->withCount(['enrollments as active_students' => fn ($q) => $q->where('status', 'active')])
             ->orderBy('tingkat')->orderBy('name')
             ->get();
 
@@ -50,10 +65,13 @@ class ClassroomController extends Controller
                 'ulid' => $c->ulid,
                 'name' => $c->name,
                 'tingkat' => $c->tingkat,
-                'is_homeroom' => $c->homeroom_teacher_id === $request->user()->id,
+                'is_homeroom' => $c->homeroom_teacher_id === $user->id,
                 'homeroom_teacher' => $c->homeroomTeacher?->name,
-                'student_count' => $c->enrollments()->where('status', 'active')->count(),
-                'schedules_today' => $this->summarizeToday($todaySchedules->get($c->id), $request->user()->id),
+                'student_count' => (int) $c->active_students,
+                // What this teacher teaches in the room, so the card can say
+                // "Matematika · IPA" instead of leaving them to remember.
+                'my_subjects' => $c->classSchedules->pluck('subject.name')->filter()->unique()->sort()->values(),
+                'schedules_today' => $this->summarizeToday($todaySchedules->get($c->id), $user->id),
             ]),
         ]);
     }
@@ -78,6 +96,16 @@ class ClassroomController extends Controller
             'mine_upcoming' => $mine->filter(fn ($s) => $this->periodIs($s, 'upcoming'))->count(),
             'first_start' => $schedules->min('start_time'),
             'last_end' => $schedules->max('end_time'),
+            // The teacher's own window in this room - what "Jadwal Hari Ini"
+            // actually needs, not the whole class's day.
+            'mine_first_start' => $mine->min('start_time'),
+            'mine_last_end' => $mine->max('end_time'),
+            // Each own period - two separate lessons read "07:00–08:20,
+            // 13:00–14:20", not one misleading 07:00–14:20 span.
+            'mine_periods' => $mine->sortBy('start_time')->map(fn ($s) => [
+                'start' => substr((string) $s->start_time, 0, 5),
+                'end' => substr((string) $s->end_time, 0, 5),
+            ])->values()->all(),
         ];
     }
 

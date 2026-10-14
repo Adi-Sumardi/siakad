@@ -256,10 +256,13 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
   // --- Quick mode ---------------------------------------------------------
   // Blank rows start from the gate: hadir/terlambat -> hadir, sakit/izin/alpa
   // carried over. No gate mark means "not at school" only when the unit
-  // actually runs the daily layer; without it, assume present and let the
-  // teacher strike the absent.
-  const suggest = (s: AttendanceRosterEntry): AttendanceStatus =>
-    s.daily_status ?? (roster?.daily_enabled ? "alpa" : "hadir");
+  // actually runs the daily layer AND the gate has marked someone in this
+  // class today; a class with no gate marks at all means the gate data is
+  // simply not there (not run yet, or not used that day) - pre-filling the
+  // whole room alpa made the teacher tap every child back to hadir.
+  const gateHasData = students.some((s) => s.daily_status !== null);
+  const gateDriven = !!roster?.daily_enabled && gateHasData;
+  const suggest = (s: AttendanceRosterEntry): AttendanceStatus => s.daily_status ?? (gateDriven ? "alpa" : "hadir");
   const effective = (s: AttendanceRosterEntry): AttendanceStatus =>
     picks[s.ulid] ?? s.attendance_status ?? suggest(s);
   const pending = students.filter((s) => effective(s) !== s.attendance_status);
@@ -320,9 +323,11 @@ export default function AttendanceSessionPanel({ params }: { params: Promise<{ s
       {roster !== null && mode === "cepat" && (
         <>
           <Card className="p-3 text-xs text-muted-foreground">
-            {roster.daily_enabled
+            {gateDriven
               ? "Status awal diambil dari presensi gerbang pagi ini. Lihat ke kelas, ubah siswa yang tidak ada, lalu simpan."
-              : "Presensi harian unit ini belum aktif, jadi semua siswa diawali Hadir. Ubah siswa yang tidak ada, lalu simpan."}
+              : roster.daily_enabled
+                ? "Belum ada data presensi gerbang untuk kelas ini hari ini, jadi semua siswa diawali Hadir. Ubah siswa yang tidak ada, lalu simpan."
+                : "Presensi harian unit ini belum aktif, jadi semua siswa diawali Hadir. Ubah siswa yang tidak ada, lalu simpan."}
           </Card>
 
           <div className="flex flex-wrap gap-1.5 text-xs">

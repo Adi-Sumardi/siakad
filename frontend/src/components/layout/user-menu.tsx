@@ -13,11 +13,15 @@ import { useAuth } from "@/lib/auth/auth-context";
  * visual anchoring, same as PMB's own AppSidebar footer; the actions live
  * here, in the navbar, same as PMB's AppTopbar.
  */
+/** Each role's own profile page; a role without one gets no Profil link rather than a link that bounces it home. */
+const PROFILE_PATH: Partial<Record<string, string>> = { orangtua: "/profil", guru: "/guru/profil" };
+
 export function UserMenu({ subtitle }: { subtitle?: string }) {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const profilePath = user ? PROFILE_PATH[user.role] : undefined;
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -56,14 +60,16 @@ export function UserMenu({ subtitle }: { subtitle?: string }) {
             <p className="truncate text-sm font-semibold text-foreground">{user?.name}</p>
             {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
           </div>
-          <Link
-            href="/profil"
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-3.5 py-2.5 text-sm text-foreground hover:bg-accent transition-colors"
-          >
-            <UserIcon className="size-4" />
-            Profil
-          </Link>
+          {profilePath && (
+            <Link
+              href={profilePath}
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 px-3.5 py-2.5 text-sm text-foreground hover:bg-accent transition-colors"
+            >
+              <UserIcon className="size-4" />
+              Profil
+            </Link>
+          )}
           <button
             onClick={handleLogout}
             className="flex w-full items-center gap-2 px-3.5 py-2.5 text-sm text-destructive hover:bg-destructive/10 transition-colors"

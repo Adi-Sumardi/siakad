@@ -20,27 +20,27 @@ import { FeatureTour, type TourStep } from "@/components/feature-tour";
 const GURU_STEPS: TourStep[] = [
   {
     title: "Tur Singkat Portal Guru",
-    body: "Kenali fitur utama portal dalam ±1 menit. Bisa dilewati kapan saja - panduan ini selalu bisa dibuka ulang dari Beranda.",
+    body: "Kenali fitur utama portal dalam ±1 menit. Bisa dilewati kapan saja - panduan ini bisa dibuka lagi dari halaman Kelas saya.",
     icon: Sparkles,
   },
   {
     target: "jadwal-hari-ini",
     title: "Jadwal Hari Ini",
-    body: "Kelas di unit Anda yang memiliki jadwal hari ini, urut dari bel paling pagi. Ketuk kartunya untuk membuka daftar siswa dan mencatat poin kedisiplinan.",
+    body: "Kelas yang Anda ajar hari ini, urut dari jam pelajaran paling pagi. Ketuk kartunya untuk membuka presensi mapel, daftar siswa, dan pencatatan poin.",
     icon: CalendarCheck,
     placement: "below",
   },
   {
     target: "semua-kelas",
-    title: "Semua Kelas",
-    body: "Seluruh kelas aktif di unit Anda. Kartu berbintang adalah kelas yang Anda wali - dari sanalah presensi harian dicatat.",
+    title: "Kelas yang Anda Ajar",
+    body: "Semua kelas yang Anda ajar tahun ajaran ini. Kartu bertanda bintang \"Wali Kelas Anda\" adalah kelas tempat Anda menjadi wali kelas.",
     icon: School,
     placement: "below",
   },
   {
     target: "nav-presensi-harian",
     title: "Presensi Harian",
-    body: "Tandai kehadiran masuk & pulang siswa kelas yang Anda wali - sekali sehari, bukan per mapel.",
+    body: "Khusus wali kelas: catat kehadiran masuk & pulang siswa di kelas perwalian Anda, cukup sekali sehari (bukan per mata pelajaran).",
     icon: CalendarCheck2,
     placement: "right",
     nav: true,
@@ -48,7 +48,7 @@ const GURU_STEPS: TourStep[] = [
   {
     target: "nav-nilai",
     title: "Nilai",
-    body: "Kelas dan mata pelajaran yang Anda ampu, sesuai jadwal pelajaran. Input nilai akhir siswa langsung dari sini.",
+    body: "Mata pelajaran yang Anda ajar di tiap kelas. Buat kolom tugas sebanyak yang diperlukan (Tugas 1, Tugas 2, ...), lalu isi nilai tugas, UTS, dan UAS dalam satu lembar.",
     icon: ClipboardList,
     placement: "right",
     nav: true,
@@ -56,7 +56,7 @@ const GURU_STEPS: TourStep[] = [
   {
     target: "nav-prestasi",
     title: "Catat Prestasi",
-    body: "Ajukan prestasi siswa maupun prestasi pribadi Anda - diverifikasi wali kelas atau admin unit sebelum poin diberikan.",
+    body: "Catat prestasi siswa atau prestasi Anda sendiri. Prestasi siswa diperiksa wali kelasnya, prestasi guru diperiksa admin unit, sebelum poin diberikan.",
     icon: Award,
     placement: "right",
     nav: true,
@@ -64,7 +64,7 @@ const GURU_STEPS: TourStep[] = [
   {
     target: "nav-ekskul",
     title: "Ekskul Saya",
-    body: "Kegiatan yang Anda bina: kelola anggota dan pantau siswa yang terdaftar.",
+    body: "Khusus pembina ekskul: kelola anggota, presensi latihan, dan nilai ekskul untuk rapor.",
     icon: Trophy,
     placement: "right",
     nav: true,
@@ -72,7 +72,7 @@ const GURU_STEPS: TourStep[] = [
   {
     target: "tour-replay",
     title: "Selamat Mengajar",
-    body: "Panduan ini selalu tersedia lewat tombol Panduan Fitur di Beranda. Terima kasih, wassalamu'alaikum.",
+    body: "Panduan ini bisa dibuka lagi kapan saja lewat tombol Panduan Fitur di halaman Kelas saya. Terima kasih, wassalamu'alaikum.",
     icon: CircleHelp,
     placement: "below",
   },

@@ -20,6 +20,9 @@ type TodayInfo = {
   mine_upcoming: number;
   first_start: string | null;
   last_end: string | null;
+  mine_first_start: string | null;
+  mine_last_end: string | null;
+  mine_periods: { start: string; end: string }[];
 };
 type Classroom = {
   ulid: string;
@@ -28,13 +31,9 @@ type Classroom = {
   is_homeroom: boolean;
   homeroom_teacher: string | null;
   student_count: number;
+  my_subjects: string[];
   schedules_today: TodayInfo;
 };
-
-/** "07:00:00" -> "07:00"; null-safe so the time range can be composed inline. */
-function jam(t: string | null): string {
-  return t ? t.slice(0, 5) : "—";
-}
 
 const emptySubscribe = () => () => {};
 
@@ -118,21 +117,24 @@ function ClassroomCard({ classroom, today = false }: { classroom: Classroom; tod
               <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
                 <Clock className="size-3.5" />
                 <span>
-                  {c.schedules_today.total} sesi · {jam(c.schedules_today.first_start)}–{jam(c.schedules_today.last_end)}
+                  {c.schedules_today.mine_periods.map((p) => `${p.start}–${p.end}`).join(", ")}
                 </span>
                 <span>· {c.student_count} siswa</span>
               </p>
             ) : (
               <p className="text-xs text-muted-foreground mt-0.5">
-                {c.student_count} siswa terdaftar
-                {c.homeroom_teacher && !c.is_homeroom ? ` · Wali: ${c.homeroom_teacher}` : ""}
+                {c.student_count} siswa
+                {c.homeroom_teacher && !c.is_homeroom ? ` · Wali kelas: ${c.homeroom_teacher}` : ""}
               </p>
+            )}
+            {c.my_subjects.length > 0 && (
+              <p className="mt-1 text-xs font-medium text-foreground/80">Anda mengajar: {c.my_subjects.join(", ")}</p>
             )}
           </div>
         </div>
 
         <div className="mt-4 pt-3 border-t border-border/60 flex items-center justify-between text-xs font-semibold text-primary">
-          <span>Buka Rombel Siswa</span>
+          <span>Lihat Siswa & Presensi</span>
           <ChevronRight className="size-4 group-hover:translate-x-1 transition-transform" />
         </div>
       </Card>
@@ -184,11 +186,11 @@ export default function GuruClassroomsPage() {
     };
   }, []);
 
-  // Classes with at least one period today, the day's earliest bell first -
+  // Classes where this teacher has a period today, their own earliest bell first -
   // the order a teacher will actually walk through them.
   const withScheduleToday = (classrooms ?? [])
-    .filter((c) => c.schedules_today.total > 0)
-    .sort((a, b) => (a.schedules_today.first_start ?? "").localeCompare(b.schedules_today.first_start ?? ""));
+    .filter((c) => c.schedules_today.mine > 0)
+    .sort((a, b) => (a.schedules_today.mine_first_start ?? "").localeCompare(b.schedules_today.mine_first_start ?? ""));
 
   return (
     <div className="space-y-8">
@@ -218,7 +220,7 @@ export default function GuruClassroomsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Portal Guru & Wali Kelas</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Kelola kedisiplinan poin siswa, input apresiasi prestasi, dan pantau rekap kelas.
+            Buka kelas yang Anda ajar untuk mengambil presensi, mencatat poin, dan melihat rekap siswa.
           </p>
         </div>
 
@@ -255,7 +257,7 @@ export default function GuruClassroomsPage() {
 
       {classrooms?.length === 0 && (
         <Card className="p-8 text-center text-sm text-muted-foreground">
-          Belum ada kelas yang terdaftar di unit Anda.
+          Belum ada kelas yang Anda ajar tahun ajaran ini. Jika seharusnya ada, minta admin unit memasukkan Anda ke jadwal pelajaran atau menetapkan Anda sebagai wali kelas.
         </Card>
       )}
 
@@ -269,13 +271,13 @@ export default function GuruClassroomsPage() {
                 Jadwal Hari Ini{dayName ? ` — ${dayName}` : ""}
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Kelas di unit Anda yang memiliki jadwal pelajaran hari ini.
+                Kelas yang Anda ajar hari ini, urut dari jam pelajaran paling pagi.
               </p>
             </div>
 
             {withScheduleToday.length === 0 ? (
               <Card className="p-6 text-center text-sm text-muted-foreground">
-                Tidak ada kelas dengan jadwal pelajaran hari ini.
+                Hari ini Anda tidak memiliki jadwal mengajar.
               </Card>
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -291,9 +293,11 @@ export default function GuruClassroomsPage() {
             <div>
               <h2 className="flex items-center gap-1.5 text-base font-bold text-foreground">
                 <School className="size-4.5 text-primary" />
-                Semua Kelas
+                Kelas yang Anda Ajar
               </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Keseluruhan kelas aktif di unit Anda.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Semua kelas yang Anda ajar tahun ajaran ini, termasuk kelas yang Anda pegang sebagai wali kelas.
+              </p>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

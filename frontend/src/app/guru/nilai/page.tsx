@@ -24,7 +24,7 @@ export default function GuruNilaiPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Nilai</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Kelas dan mata pelajaran yang Anda ampu, sesuai jadwal pelajaran.
+          Mata pelajaran yang Anda ajar di tiap kelas, sesuai jadwal pelajaran. Pilih salah satu untuk mengisi nilai.
         </p>
       </div>
 

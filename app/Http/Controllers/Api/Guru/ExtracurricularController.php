@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Guru;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Guru\AssignExtracurricularMemberRequest;
+use App\Models\AcademicYear;
 use App\Models\Extracurricular;
 use App\Models\ExtracurricularAssessment;
 use App\Models\ExtracurricularAttendance;
@@ -28,7 +29,12 @@ class ExtracurricularController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $yearId = AcademicYear::current()?->id;
+
+        // Running year only - last year's activity rows keep the same name
+        // and pembina, so without this each card showed up once per year.
         $activities = Extracurricular::where('pembina_id', $request->user()->id)
+            ->when($yearId, fn ($q) => $q->where('academic_year_id', $yearId))
             ->withCount(['activeMembers as member_count'])
             ->orderBy('name')
             ->get();

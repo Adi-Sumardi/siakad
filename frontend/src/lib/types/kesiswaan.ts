@@ -142,15 +142,6 @@ export type TeachingAssignment = {
   subject: { ulid: string; name: string };
 };
 
-export type GradeRosterEntry = {
-  ulid: string;
-  nama_lengkap: string;
-  nis: string | null;
-  tugas: number | null;
-  uts: number | null;
-  uas: number | null;
-};
-
 export type SubjectGradeSummary = {
   subject: { ulid: string; name: string };
   tugas: number | null;

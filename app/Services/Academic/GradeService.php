@@ -7,6 +7,8 @@ use App\Models\Classroom;
 use App\Models\ClassSchedule;
 use App\Models\Enrollment;
 use App\Models\Grade;
+use App\Models\GradeAssignment;
+use App\Models\GradeAssignmentScore;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Term;
@@ -80,6 +82,163 @@ class GradeService
                 );
             });
         });
+    }
+
+    /** @return Collection<int, GradeAssignment> the gradebook's assignment columns, oldest first */
+    public function assignmentsFor(Classroom $classroom, Subject $subject, Term $term): Collection
+    {
+        return GradeAssignment::where('classroom_id', $classroom->id)
+            ->where('subject_id', $subject->id)
+            ->where('term_id', $term->id)
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
+     * Adds an assignment column. The FIRST one inherits whatever single
+     * "tugas" score a student already had (entered before tugas could be
+     * split), so switching to multiple assignments never silently drops a
+     * mark the teacher already gave.
+     */
+    public function createAssignment(Classroom $classroom, Subject $subject, Term $term, string $title, ?string $assignedOn, User $by): GradeAssignment
+    {
+        return DB::transaction(function () use ($classroom, $subject, $term, $title, $assignedOn, $by) {
+            $isFirst = $this->assignmentsFor($classroom, $subject, $term)->isEmpty();
+
+            $assignment = GradeAssignment::create([
+                'classroom_id' => $classroom->id,
+                'subject_id' => $subject->id,
+                'term_id' => $term->id,
+                'title' => $title,
+                'assigned_on' => $assignedOn,
+                'created_by' => $by->id,
+            ]);
+
+            if ($isFirst) {
+                Grade::where('classroom_id', $classroom->id)
+                    ->where('subject_id', $subject->id)
+                    ->where('term_id', $term->id)
+                    ->where('category', 'tugas')
+                    ->get()
+                    ->each(fn (Grade $g) => GradeAssignmentScore::create([
+                        'grade_assignment_id' => $assignment->id,
+                        'student_id' => $g->student_id,
+                        'score' => $g->score,
+                        'recorded_by' => $g->recorded_by,
+                    ]));
+            }
+
+            return $assignment;
+        });
+    }
+
+    /** Removes a column and its scores, then re-averages tugas for everyone who had one. */
+    public function deleteAssignment(GradeAssignment $assignment, User $by): void
+    {
+        DB::transaction(function () use ($assignment, $by) {
+            $studentIds = $assignment->scores()->pluck('student_id');
+            $classroom = $assignment->classroom;
+            $subject = $assignment->subject;
+            $term = $assignment->term;
+
+            $assignment->delete();
+
+            $this->recomputeTugas($classroom, $subject, $term, $studentIds, $by, force: true);
+        });
+    }
+
+    /**
+     * The whole gradebook sheet in one save: per student, any assignment
+     * scores, UTS and UAS that changed. A null value clears that cell; a
+     * key that is absent is left alone, so the client only sends what the
+     * teacher actually touched.
+     *
+     * tugas is keyed by grade_assignments.id.
+     *
+     * @param  Collection<int, array{student: Student, tugas?: array<int, ?float>, uts?: ?float, uas?: ?float}>  $entries
+     */
+    public function saveSheet(Classroom $classroom, Subject $subject, Term $term, Collection $entries, User $by): int
+    {
+        return DB::transaction(function () use ($classroom, $subject, $term, $entries, $by) {
+            $touched = 0;
+            $tugasStudents = collect();
+
+            foreach ($entries as $entry) {
+                $student = $entry['student'];
+
+                foreach ($entry['tugas'] ?? [] as $assignmentId => $score) {
+                    $key = ['grade_assignment_id' => $assignmentId, 'student_id' => $student->id];
+                    if ($score === null) {
+                        GradeAssignmentScore::where($key)->delete();
+                    } else {
+                        GradeAssignmentScore::updateOrCreate($key, ['score' => $score, 'recorded_by' => $by->id]);
+                    }
+                    $tugasStudents->push($student->id);
+                    $touched++;
+                }
+
+                foreach (['uts', 'uas'] as $category) {
+                    if (! array_key_exists($category, $entry)) {
+                        continue;
+                    }
+
+                    $key = ['student_id' => $student->id, 'subject_id' => $subject->id, 'term_id' => $term->id, 'category' => $category];
+                    if ($entry[$category] === null) {
+                        Grade::where($key)->delete();
+                    } else {
+                        Grade::updateOrCreate($key, [
+                            'classroom_id' => $classroom->id,
+                            'score' => $entry[$category],
+                            'recorded_by' => $by->id,
+                        ]);
+                    }
+                    $touched++;
+                }
+            }
+
+            $this->recomputeTugas($classroom, $subject, $term, $tugasStudents->unique(), $by);
+
+            return $touched;
+        });
+    }
+
+    /**
+     * Rewrites grades.tugas as the plain average of a student's assignment
+     * scores - the one number rapor, watchlist and weighting already read.
+     * An assignment the student has no score on yet is not counted as zero:
+     * it is simply not in the average until the teacher enters it. With no
+     * assignment columns at all the single directly-entered tugas stays the
+     * source (old flow), unless $force says the last column was just removed.
+     *
+     * @param  Collection<int, int>  $studentIds
+     */
+    public function recomputeTugas(Classroom $classroom, Subject $subject, Term $term, Collection $studentIds, User $by, bool $force = false): void
+    {
+        $assignmentIds = $this->assignmentsFor($classroom, $subject, $term)->pluck('id');
+
+        if ($assignmentIds->isEmpty() && ! $force) {
+            return;
+        }
+
+        $averages = GradeAssignmentScore::whereIn('grade_assignment_id', $assignmentIds)
+            ->whereIn('student_id', $studentIds)
+            ->get()
+            ->groupBy('student_id')
+            ->map(fn ($rows) => round($rows->avg(fn ($r) => (float) $r->score), 2));
+
+        foreach ($studentIds as $studentId) {
+            $key = ['student_id' => $studentId, 'subject_id' => $subject->id, 'term_id' => $term->id, 'category' => 'tugas'];
+
+            if ($averages->has($studentId)) {
+                Grade::updateOrCreate($key, [
+                    'classroom_id' => $classroom->id,
+                    'score' => $averages[$studentId],
+                    'recorded_by' => $by->id,
+                ]);
+            } else {
+                Grade::where($key)->delete();
+            }
+        }
     }
 
     /** Null when any of the three categories hasn't been entered yet - never a guess from a partial average. */
