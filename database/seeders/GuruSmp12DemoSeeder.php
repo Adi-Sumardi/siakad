@@ -27,6 +27,8 @@ use App\Models\Term;
 use App\Models\User;
 use App\Services\Academic\GradeService;
 use App\Services\Attendance\DailyAttendanceService;
+use App\Services\Points\PointApprovalService;
+use App\Services\Points\PointLedger;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -91,6 +93,7 @@ class GuruSmp12DemoSeeder extends Seeder
         $this->grades($rooms, $students, $subjects['Matematika'], $term, $guru);
         $this->homeroomExtras($unit, $students['7-A'], $term, $guru);
         $this->ekskul($unit, $year, $students, $guru);
+        $this->approvalLadder($unit, $students, $teachers, $term);
 
         $this->command?->info("Data uji SMP-12 siap: {$guru->email} (wali 7-A, Matematika 7-A/7-B/8-A/9-A).");
     }
@@ -467,6 +470,69 @@ class GuruSmp12DemoSeeder extends Seeder
                 ['status' => 'active', 'joined_on' => $year->starts_on, 'assigned_at' => now()],
             );
         }
+    }
+
+    /**
+     * The point approval ladder, with something waiting at every seat:
+     * waka kesiswaan + kepala sekolah accounts for SMP-12, a few unit rules
+     * graded sedang/berat, and teacher-written records parked at the wali
+     * kelas (guru 1, for 7-A), waka kesiswaan and kepala sekolah stages.
+     */
+    private function approvalLadder(SchoolUnit $unit, array $students, array $teachers, Term $term): void
+    {
+        $waka = User::updateOrCreate(
+            ['email' => 'waka.smp-12@yapinet.id'],
+            ['name' => 'Waka Kesiswaan SMPI Al Azhar 12', 'role' => 'waka_kesiswaan', 'school_unit_id' => $unit->id, 'is_active' => true, 'activated_at' => now(), 'email_verified_at' => now()],
+        );
+        $kepsek = User::updateOrCreate(
+            ['email' => 'kepsek.smp-12@yapinet.id'],
+            ['name' => 'Kepala SMPI Al Azhar 12', 'role' => 'kepala_sekolah', 'school_unit_id' => $unit->id, 'is_active' => true, 'activated_at' => now(), 'email_verified_at' => now()],
+        );
+        StaffProfile::updateOrCreate(['user_id' => $waka->id], ['jabatan' => 'Wakil Kepala Sekolah Bidang Kesiswaan']);
+        StaffProfile::updateOrCreate(['user_id' => $kepsek->id], ['jabatan' => 'Kepala Sekolah']);
+
+        $rule = fn (string $code, string $name, string $type, string $category, string $severity, int $points) => PointRule::updateOrCreate(
+            ['school_unit_id' => $unit->id, 'code' => $code],
+            ['name' => $name, 'type' => $type, 'category' => $category, 'severity' => $severity, 'points' => $points, 'is_active' => true, 'requires_evidence' => false, 'sort_order' => 0],
+        );
+        $bolos = $rule('SMP12-BOLOS', 'Bolos jam pelajaran', 'violation', 'Kedisiplinan', 'sedang', 20);
+        $hp = $rule('SMP12-HP', 'Bermain HP saat KBM', 'violation', 'Kedisiplinan', 'ringan', 10);
+        $kelahi = $rule('SMP12-KELAHI', 'Berkelahi di lingkungan sekolah', 'violation', 'Perilaku', 'berat', 50);
+        $rokok = $rule('SMP12-ROKOK', 'Merokok di lingkungan sekolah', 'violation', 'Perilaku', 'berat', 75);
+        $bantu = $rule('SMP12-BANTU', 'Membantu guru menyiapkan praktikum', 'merit', 'Kepribadian', 'ringan', 5);
+
+        $ledger = app(PointLedger::class);
+        $ladder = app(PointApprovalService::class);
+        $mtk = $teachers['mtk'];          // wali kelas 7-A
+        $ipa = $teachers['IPA'];          // teaches 7-A too, homerooms 8-A
+        $today = Carbon::now('Asia/Jakarta')->startOfDay();
+
+        // Re-seeding replaces only these demo entries.
+        $demoRules = [$bolos->id, $hp->id, $kelahi->id, $rokok->id, $bantu->id];
+        PointRecord::whereIn('point_rule_id', $demoRules)->where('term_id', $term->id)->delete();
+
+        $a7 = $students['7-A']->values();
+        $a8 = $students['8-A']->values();
+
+        // 1) Waiting for guru 1 as wali kelas 7-A - written by the IPA teacher.
+        $ledger->record($a7[7], $term, $hp, $ipa, $today->copy()->subDay(), 'Main game di HP saat praktikum IPA, sudah ditegur dua kali.');
+        $ledger->record($a7[8], $term, $bolos, $ipa, $today->copy()->subDays(2), 'Tidak masuk jam IPA ke-5, ditemukan di kantin.');
+        $ledger->record($a7[9], $term, $kelahi, $ipa, $today, 'Berkelahi dengan siswa kelas 8 saat istirahat, ada luka ringan.');
+        $ledger->record($a7[10], $term, $bantu, $ipa, $today, 'Membantu menyiapkan alat praktikum tanpa diminta.');
+
+        // 2) Waiting for the waka: guru 1 recording for their own class skips
+        //    their own seat; an 8-A record approved by its wali kelas (IPA).
+        //    The 8-A record left alone shows guru 1's own submission waiting
+        //    for a colleague's approval.
+        $ledger->record($a7[5], $term, $bolos, $mtk, $today->copy()->subDays(3), 'Meninggalkan kelas Matematika tanpa izin.');
+        $ledger->record($a8[2], $term, $hp, $mtk, $today->copy()->subDays(1), 'Bermain HP saat ulangan Matematika.');
+        $r = $ledger->record($a8[3], $term, $hp, $mtk, $today->copy()->subDays(1), 'Bermain HP saat penjelasan materi.');
+        $ladder->approve($r, $ipa, 'Benar, sudah saya konfirmasi ke siswanya.'); // IPA teacher = wali 8-A
+
+        // 3) A berat case cleared by wali kelas and waka, waiting for the kepala sekolah.
+        $r = $ledger->record($a8[4], $term, $rokok, $mtk, $today->copy()->subDays(2), 'Kedapatan merokok di belakang laboratorium, bersama 1 siswa kelas lain.');
+        $ladder->approve($r, $ipa, 'Orang tua sudah dihubungi.');
+        $ladder->approve(PointRecord::find($r->id), $waka, 'Diteruskan ke kepala sekolah untuk keputusan sanksi.');
     }
 
     /** Mostly hadir, a sprinkle of sakit/izin/alpa - deterministic so re-seeding gives the same picture. */

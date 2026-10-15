@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   ArrowUpCircle,
   Award,
@@ -9,6 +9,7 @@ import {
   Building2,
   CalendarCheck2,
   CalendarClock,
+  CheckSquare,
   ClipboardList,
   GraduationCap,
   History,
@@ -27,6 +28,7 @@ import {
 import { StaffShell, type StaffNavItem } from "@/components/layout/staff-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { homePathFor, useAuth } from "@/lib/auth/auth-context";
+import { usePendingApprovals } from "@/lib/use-pending-approvals";
 
 // Grouped by what the admin is doing, not by when each page was built -
 // the flat list had grown to 21 entries with finance, academics and system
@@ -43,6 +45,7 @@ const NAV: StaffNavItem[] = [
   { href: "/admin/nilai", label: "Nilai & Rapor", icon: ClipboardList, tour: "nilai", group: "Akademik" },
 
   { href: "/admin/ekstrakurikuler", label: "Ekstrakurikuler", icon: Trophy, tour: "ekstrakurikuler", group: "Kesiswaan" },
+  { href: "/admin/poin/persetujuan", label: "Persetujuan Poin", icon: CheckSquare, tour: "persetujuan-poin", group: "Kesiswaan" },
   { href: "/admin/poin", label: "Poin & Tata Tertib", icon: Sparkles, tour: "poin", group: "Kesiswaan" },
   { href: "/admin/prestasi", label: "Prestasi Siswa", icon: Award, tour: "prestasi", group: "Kesiswaan" },
   { href: "/admin/informasi", label: "Pengumuman", icon: Megaphone, tour: "informasi", group: "Kesiswaan" },
@@ -65,9 +68,21 @@ const NAV: StaffNavItem[] = [
   { href: "/admin/monitoring", label: "Monitoring", icon: Radar, centralOnly: true, tour: "monitoring", group: "Sistem" },
 ];
 
+/** What waka kesiswaan / kepala sekolah see in the sidebar. */
+const LEADER_NAV = ["/admin/poin/persetujuan", "/admin/poin"];
+
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+
+  const isAdmin = user?.role === "admin" || user?.role === "admin_unit";
+  const isLeader = user?.role === "waka_kesiswaan" || user?.role === "kepala_sekolah";
+  // Leadership only gets the point screens - the API refuses everything else.
+  const leaderAllowed = pathname === "/admin/poin" || pathname.startsWith("/admin/poin/");
+  const allowed = isAdmin || (isLeader && leaderAllowed);
+
+  const pendingApprovals = usePendingApprovals(isAdmin || isLeader ? "/api/admin" : null);
 
   useEffect(() => {
     if (loading) return;
@@ -75,12 +90,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       router.replace("/login");
       return;
     }
-    if (user.role !== "admin" && user.role !== "admin_unit") {
+    if (!allowed) {
       router.replace(homePathFor(user.role));
     }
-  }, [loading, user, router]);
+  }, [loading, user, router, allowed]);
 
-  if (loading || !user || (user.role !== "admin" && user.role !== "admin_unit")) {
+  if (loading || !user || !allowed) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-canvas p-6">
         <Skeleton className="h-10 w-48" />
@@ -88,8 +103,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
+  const nav = NAV.filter((item) => !isLeader || LEADER_NAV.includes(item.href)).map((item) =>
+    item.href === "/admin/poin/persetujuan" ? { ...item, badge: pendingApprovals } : item,
+  );
+
   return (
-    <StaffShell nav={NAV} unitLabel={user.school_unit?.label}>
+    <StaffShell nav={nav} unitLabel={user.school_unit?.label}>
       {children}
     </StaffShell>
   );

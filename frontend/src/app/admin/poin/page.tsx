@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, Award, ScrollText, Search, ShieldAlert, Sparkles } from "lucide-react";
+import { AlertCircle, Award, CheckSquare, ScrollText, Search, ShieldAlert, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth/auth-context";
 import { Badge } from "@/components/ui/badge";
@@ -119,7 +119,13 @@ export default function AdminPointsPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/admin/poin/persetujuan">
+            <Button size="sm" className="gap-1.5 shadow-2xs">
+              <CheckSquare className="size-4" />
+              <span>Persetujuan Poin</span>
+            </Button>
+          </Link>
           <Link href="/admin/poin/aturan">
             <Button variant="outline" size="sm" className="gap-1.5 shadow-2xs">
               <Sparkles className="size-4" />

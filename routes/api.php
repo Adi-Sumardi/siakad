@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\Admin\PointRuleController;
 use App\Http\Controllers\Api\Admin\PointThresholdController;
 use App\Http\Controllers\Api\Admin\PromotionController;
 use App\Http\Controllers\Api\Admin\ReferenceController;
+use App\Http\Controllers\Api\PointApprovalController;
 use App\Http\Controllers\Api\Admin\ReportController;
 use App\Http\Controllers\Api\Admin\ScheduleController;
 use App\Http\Controllers\Api\Admin\SchoolUnitController;
@@ -207,6 +208,13 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     Route::post('/leave-requests/{ulid}/reject', [LeaveRequestReviewController::class, 'reject']);
 
     Route::get('/point-rules', [GuruPointController::class, 'rules']);
+    // Wali kelas stage of the approval ladder: records written for the
+    // students of the room this teacher homerooms.
+    Route::get('/point-approvals', [PointApprovalController::class, 'index']);
+    Route::get('/point-approvals/count', [PointApprovalController::class, 'count']);
+    Route::post('/point-approvals/approve-many', [PointApprovalController::class, 'approveMany']);
+    Route::post('/point-approvals/{ulid}/approve', [PointApprovalController::class, 'approve']);
+    Route::post('/point-approvals/{ulid}/reject', [PointApprovalController::class, 'reject']);
     Route::get('/students/{ulid}/points', [GuruPointController::class, 'studentLedger']);
     Route::post('/points', [GuruPointController::class, 'store']);
     // One rule, many students - a whole line late to assembly recorded once.
@@ -386,17 +394,13 @@ Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin,admin_unit'])->
     // school-wide one - PointRuleController and PointThresholdController
     // enforce this internally, the same way BillingRunController forces a
     // unit rather than trusting the request.
-    Route::get('/point-rules', [PointRuleController::class, 'index']);
     Route::post('/point-rules', [PointRuleController::class, 'store']);
     Route::patch('/point-rules/{pointRule}', [PointRuleController::class, 'update']);
     Route::delete('/point-rules/{pointRule}', [PointRuleController::class, 'destroy']);
 
-    Route::get('/point-thresholds', [PointThresholdController::class, 'index']);
     Route::post('/point-thresholds', [PointThresholdController::class, 'store']);
     Route::patch('/point-thresholds/{pointThreshold}', [PointThresholdController::class, 'update']);
 
-    Route::get('/points', [AdminPointController::class, 'index']);
-    Route::get('/points/leaderboard', [AdminPointController::class, 'leaderboard']);
 
     // The finance office's transaction ledger (feature batch Poin 11A/B/C):
     // filterable payment history, the per-payment receipt PDF, and the
@@ -468,7 +472,6 @@ Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin,admin_unit'])->
 
     // Pickers every admin form needs - none of it sensitive, so one response
     // shape for both admin kinds.
-    Route::get('/school-units', [ReferenceController::class, 'schoolUnits']);
     Route::get('/academic-years', [ReferenceController::class, 'academicYears']);
     Route::get('/terms', [ReferenceController::class, 'terms']);
     Route::get('/classrooms', [ReferenceController::class, 'classrooms']);
@@ -598,6 +601,28 @@ if (app()->environment(['local', 'testing'])) {
     Route::middleware(['auth:sanctum', 'role:orangtua'])
         ->post('/wali/payments/{ulid}/simulate-settle', [WaliBillController::class, 'simulateSettle']);
 }
+
+/*
+ * Kesiswaan slice of the staff area, shared with the unit's leadership.
+ * Waka kesiswaan and kepala sekolah decide point approvals and read the
+ * point/tata-tertib screens; billing, accounts and settings stay admin-only.
+ * Writes to rules/thresholds remain in the admin group above.
+ */
+Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin,admin_unit,waka_kesiswaan,kepala_sekolah'])->prefix('admin')->group(function () {
+    Route::get('/point-rules', [PointRuleController::class, 'index']);
+    Route::get('/point-thresholds', [PointThresholdController::class, 'index']);
+    Route::get('/points', [AdminPointController::class, 'index']);
+    Route::get('/points/leaderboard', [AdminPointController::class, 'leaderboard']);
+    Route::get('/school-units', [ReferenceController::class, 'schoolUnits']);
+
+    // Waka kesiswaan / kepala sekolah stages (admin_unit sits in for a
+    // vacant seat - PointApprovalService decides who may act).
+    Route::get('/point-approvals', [PointApprovalController::class, 'index']);
+    Route::get('/point-approvals/count', [PointApprovalController::class, 'count']);
+    Route::post('/point-approvals/approve-many', [PointApprovalController::class, 'approveMany']);
+    Route::post('/point-approvals/{ulid}/approve', [PointApprovalController::class, 'approve']);
+    Route::post('/point-approvals/{ulid}/reject', [PointApprovalController::class, 'reject']);
+});
 
 // Ringkasan untuk portal Yapinet — dipanggil server-ke-server dengan API key.
 Route::middleware(['throttle:30,1', 'yapinet.auth'])->get('integrations/yapinet/summary', [YapinetSummaryController::class, 'summary']);

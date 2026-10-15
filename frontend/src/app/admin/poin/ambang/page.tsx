@@ -155,6 +155,8 @@ function EditThresholdForm({ threshold, onSaved, onCancel }: { threshold: Thresh
 export default function PointThresholdsPage() {
   const { user } = useAuth();
   const isCentral = user?.role === "admin";
+  // Waka kesiswaan / kepala sekolah read the thresholds; changing them stays with the admins.
+  const canEdit = user?.role === "admin" || user?.role === "admin_unit";
 
   const [thresholds, setThresholds] = useState<Threshold[] | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -192,7 +194,7 @@ export default function PointThresholdsPage() {
       </div>
 
       <Card className="p-5">
-        {thresholds === null ? <Skeleton className="h-10 w-full" /> : <NewThresholdForm units={units} isCentral={isCentral} onCreated={load} />}
+        {thresholds === null ? <Skeleton className="h-10 w-full" /> : canEdit ? <NewThresholdForm units={units} isCentral={isCentral} onCreated={load} /> : <p className="text-sm text-muted-foreground">Ambang batas diatur oleh admin unit.</p>}
       </Card>
 
       <div className="flex flex-col gap-2">
@@ -221,7 +223,7 @@ export default function PointThresholdsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant={(t.color as "good" | "warn" | "bad") ?? "default"}>{t.color ?? "default"}</Badge>
-                    {isCentral || t.school_unit !== null ? (
+                    {!canEdit ? null : isCentral || t.school_unit !== null ? (
                       <Button size="sm" variant="ghost" onClick={() => setEditingUlid(t.ulid)}>
                         <Pencil className="size-4" />
                       </Button>

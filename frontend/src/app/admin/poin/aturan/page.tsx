@@ -17,8 +17,30 @@ type Rule = {
   ulid: string; school_unit: string | null; code: string; name: string;
   type: "violation" | "merit"; category: string; points: number;
   requires_evidence: boolean; is_active: boolean;
+  severity: Severity;
 };
 type Unit = { ulid: string; code: string; label: string };
+type Severity = "ringan" | "sedang" | "berat";
+
+/** How far a violation climbs: each needs wali kelas + waka kesiswaan, berat also the kepala sekolah. */
+const SEVERITY_LABEL: Record<Severity, string> = { ringan: "Ringan", sedang: "Sedang", berat: "Berat" };
+
+function SeveritySelect({ value, onChange }: { value: Severity; onChange: (v: Severity) => void }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label>Tingkat</Label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as Severity)}
+        className="h-10 rounded-lg border border-input bg-card px-3 text-sm"
+      >
+        <option value="ringan">Ringan</option>
+        <option value="sedang">Sedang</option>
+        <option value="berat">Berat (sampai kepala sekolah)</option>
+      </select>
+    </div>
+  );
+}
 
 function NewRuleForm({ units, isCentral, onCreated }: { units: Unit[]; isCentral: boolean; onCreated: () => void }) {
   const [code, setCode] = useState("");
@@ -27,6 +49,7 @@ function NewRuleForm({ units, isCentral, onCreated }: { units: Unit[]; isCentral
   const [category, setCategory] = useState("");
   const [points, setPoints] = useState("10");
   const [requiresEvidence, setRequiresEvidence] = useState(false);
+  const [severity, setSeverity] = useState<Severity>("ringan");
   const [unitCode, setUnitCode] = useState(""); // "" = school-wide, central only
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,10 +63,11 @@ function NewRuleForm({ units, isCentral, onCreated }: { units: Unit[]; isCentral
       await api.post("/api/admin/point-rules", {
         code, name, type, category, points: Number(points),
         requires_evidence: requiresEvidence,
+        severity: type === "violation" ? severity : "ringan",
         school_unit_code: isCentral && unitCode ? unitCode : undefined,
       });
       toast.success("Aturan ditambahkan.");
-      setCode(""); setName(""); setCategory(""); setPoints("10"); setRequiresEvidence(false);
+      setCode(""); setName(""); setCategory(""); setPoints("10"); setRequiresEvidence(false); setSeverity("ringan");
       onCreated();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Gagal menyimpan aturan.");
@@ -77,6 +101,7 @@ function NewRuleForm({ units, isCentral, onCreated }: { units: Unit[]; isCentral
         <Label>Poin</Label>
         <Input value={points} onChange={(e) => setPoints(e.target.value)} type="number" min={1} required className="w-24" />
       </div>
+      {type === "violation" && <SeveritySelect value={severity} onChange={setSeverity} />}
       {isCentral && (
         <div className="flex flex-col gap-1.5">
           <Label>Cakupan</Label>
@@ -101,6 +126,7 @@ function EditRuleForm({ rule, onSaved, onCancel }: { rule: Rule; onSaved: () => 
   const [category, setCategory] = useState(rule.category);
   const [points, setPoints] = useState(String(rule.points));
   const [requiresEvidence, setRequiresEvidence] = useState(rule.requires_evidence);
+  const [severity, setSeverity] = useState<Severity>(rule.severity ?? "ringan");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -112,6 +138,7 @@ function EditRuleForm({ rule, onSaved, onCancel }: { rule: Rule; onSaved: () => 
     try {
       await api.patch(`/api/admin/point-rules/${rule.ulid}`, {
         name, category, points: Number(points), requires_evidence: requiresEvidence,
+        ...(rule.type === "violation" ? { severity } : {}),
       });
       toast.success("Aturan diperbarui.");
       onSaved();
@@ -149,6 +176,7 @@ function EditRuleForm({ rule, onSaved, onCancel }: { rule: Rule; onSaved: () => 
         <Label>Poin</Label>
         <Input value={points} onChange={(e) => setPoints(e.target.value)} type="number" min={1} max={200} required className="w-24" />
       </div>
+      {rule.type === "violation" && <SeveritySelect value={severity} onChange={setSeverity} />}
       <label className="flex items-center gap-2 pb-2.5 text-sm">
         <input type="checkbox" checked={requiresEvidence} onChange={(e) => setRequiresEvidence(e.target.checked)} />
         Wajib bukti
@@ -163,6 +191,8 @@ function EditRuleForm({ rule, onSaved, onCancel }: { rule: Rule; onSaved: () => 
 export default function PointRulesPage() {
   const { user } = useAuth();
   const isCentral = user?.role === "admin";
+  // Waka kesiswaan / kepala sekolah read the catalogue; changing it stays with the admins.
+  const canEdit = user?.role === "admin" || user?.role === "admin_unit";
 
   const [rules, setRules] = useState<Rule[] | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -216,9 +246,17 @@ export default function PointRulesPage() {
         <p className="mt-1 text-sm text-muted-foreground">Katalog yang dipakai guru saat mencatat poin.</p>
       </div>
 
-      <Card className="p-5">
-        {rules === null ? <Skeleton className="h-10 w-full" /> : <NewRuleForm units={units} isCentral={isCentral} onCreated={load} />}
+      <Card className="p-4 text-xs text-muted-foreground">
+        Setiap pelanggaran yang dicatat guru harus disetujui <strong>wali kelas</strong> lalu <strong>waka kesiswaan</strong> sebelum
+        masuk saldo siswa. Pelanggaran tingkat <strong>berat</strong> juga harus disetujui <strong>kepala sekolah</strong>. Poin
+        penghargaan cukup disetujui wali kelas.
       </Card>
+
+      {canEdit && (
+        <Card className="p-5">
+          {rules === null ? <Skeleton className="h-10 w-full" /> : <NewRuleForm units={units} isCentral={isCentral} onCreated={load} />}
+        </Card>
+      )}
 
       <div className="flex flex-col gap-2">
         {rules === null && <Skeleton className="h-40 w-full" />}
@@ -240,10 +278,15 @@ export default function PointRulesPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {rule.type === "violation" && (
+                    <Badge variant={rule.severity === "berat" ? "bad" : rule.severity === "sedang" ? "warn" : "default"}>
+                      {SEVERITY_LABEL[rule.severity ?? "ringan"]}
+                    </Badge>
+                  )}
                   <Badge variant={rule.type === "violation" ? "bad" : "good"}>
                     {rule.type === "violation" ? "−" : "+"}{rule.points}
                   </Badge>
-                  {isCentral || rule.school_unit !== null ? (
+                  {!canEdit ? null : isCentral || rule.school_unit !== null ? (
                     <>
                       <Button size="sm" variant="ghost" onClick={() => setEditingUlid(rule.ulid)}>
                         <Pencil className="size-4" />

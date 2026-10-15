@@ -33,6 +33,9 @@ class PointController extends Controller
 
         $records = $student->pointRecords()
             ->where('term_id', $term->id)
+            // Only decided rows: a record still climbing the approval ladder
+            // (or stopped on it) is the school's business, not yet the family's.
+            ->final()
             ->with(['pointRule', 'recordedBy'])
             ->orderByDesc('occurred_on')
             ->get();

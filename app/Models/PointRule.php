@@ -12,7 +12,7 @@ class PointRule extends Model
     use HasUlidKey;
 
     protected $fillable = [
-        'school_unit_id', 'code', 'name', 'type', 'category',
+        'school_unit_id', 'code', 'name', 'type', 'category', 'severity',
         'points', 'requires_evidence', 'is_active', 'sort_order',
     ];
 

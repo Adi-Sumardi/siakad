@@ -57,7 +57,7 @@ class LogAdminActivity
         $user = $request->user();
         $route = $request->route();
 
-        if (! $user instanceof User || ! in_array($user->role, ['admin', 'admin_unit'], true) || ! $route instanceof Route) {
+        if (! $user instanceof User || ! in_array($user->role, ['admin', 'admin_unit', 'waka_kesiswaan', 'kepala_sekolah'], true) || ! $route instanceof Route) {
             return null;
         }
 

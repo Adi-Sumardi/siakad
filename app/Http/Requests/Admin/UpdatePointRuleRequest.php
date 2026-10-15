@@ -23,6 +23,7 @@ class UpdatePointRuleRequest extends FormRequest
             'category' => 'sometimes|string|max:60',
             'points' => 'sometimes|integer|min:1|max:200',
             'requires_evidence' => 'boolean',
+            'severity' => 'sometimes|in:ringan,sedang,berat',
             'is_active' => 'boolean',
             'sort_order' => 'integer',
         ];

@@ -7,7 +7,19 @@ export type PointRecord = {
   evidence_path: boolean;
   rule: { code: string; name: string; category: string } | null;
   recorded_by: string | null;
-  status: "recorded" | "revoked";
+  /** pending = still climbing wali kelas -> waka -> kepsek; counts only once recorded. */
+  status: "pending" | "recorded" | "rejected" | "revoked";
+  severity?: "ringan" | "sedang" | "berat" | null;
+  approval_stage?: "wali_kelas" | "waka_kesiswaan" | "kepala_sekolah" | null;
+  approval_stage_label?: string | null;
+  approvals?: {
+    stage: string;
+    stage_label: string;
+    decision: "approved" | "rejected" | "skipped";
+    decided_by: string | null;
+    note: string | null;
+    at: string;
+  }[];
   /** Shared by every row of one bulk entry; null for single entries. */
   batch_id?: string | null;
   revoked_at: string | null;

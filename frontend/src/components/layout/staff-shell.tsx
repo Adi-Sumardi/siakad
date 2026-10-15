@@ -20,6 +20,8 @@ export type StaffNavItem = {
   group?: string;
   /** data-tour anchor ("nav-<tour>") for the feature tour's spotlight. */
   tour?: string;
+  /** A count pill (e.g. records waiting for approval); hidden when 0. */
+  badge?: number;
 };
 
 export function StaffShell({
@@ -175,6 +177,14 @@ function NavSections({
   onNavigate?: () => void;
 }) {
   const grouped = items.some((item) => item.group);
+
+  // The deepest matching link wins, so /admin/poin/persetujuan lights up its
+  // own entry and not "Poin & Tata Tertib" above it as well.
+  const activeHref = items
+    .filter(
+      (item) => pathname === item.href || (item.href !== "/admin" && item.href !== "/guru" && pathname.startsWith(`${item.href}/`)),
+    )
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
   const sections: Array<{ title: string | null; items: StaffNavItem[] }> = [];
 
   for (const item of items) {
@@ -193,7 +203,7 @@ function NavSections({
           )}
           <nav className="flex flex-col gap-0.5" aria-label={section.title ?? "Menu"}>
             {section.items.map((item) => {
-              const active = pathname === item.href || (item.href !== "/admin" && item.href !== "/guru" && pathname.startsWith(`${item.href}/`));
+              const active = item.href === activeHref;
               const Icon = item.icon;
 
               return (
@@ -211,6 +221,16 @@ function NavSections({
                 >
                   <Icon className="size-4.5 shrink-0" />
                   <span>{item.label}</span>
+                  {!!item.badge && (
+                    <span
+                      className={cn(
+                        "ml-auto min-w-5 rounded-full px-1.5 py-0.5 text-center text-[11px] font-bold tabular-nums",
+                        active ? "bg-primary-foreground text-primary" : "bg-primary text-primary-foreground",
+                      )}
+                    >
+                      {item.badge > 99 ? "99+" : item.badge}
+                    </span>
+                  )}
                 </Link>
               );
             })}

@@ -39,6 +39,7 @@ class PointRuleController extends Controller
                 'category' => $r->category,
                 'points' => $r->points,
                 'requires_evidence' => $r->requires_evidence,
+                'severity' => $r->severity,
                 'is_active' => $r->is_active,
             ]),
         ]);
@@ -71,6 +72,7 @@ class PointRuleController extends Controller
             'category' => $validated['category'],
             'points' => $validated['points'],
             'requires_evidence' => $validated['requires_evidence'] ?? false,
+            'severity' => $validated['severity'] ?? 'ringan',
             'sort_order' => $validated['sort_order'] ?? 0,
         ]);
 

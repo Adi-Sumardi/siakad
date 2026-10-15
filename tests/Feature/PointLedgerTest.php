@@ -77,6 +77,26 @@ class PointLedgerTest extends TestCase
         return app(PointLedger::class);
     }
 
+    /**
+     * Since 15 Okt 2026 a teacher's record is born pending and climbs the
+     * approval ladder (PointApprovalTest owns that). These ledger tests are
+     * about the arithmetic after it counts, so walk it to the top: these
+     * students have no class (wali kelas stage skipped) and the unit has no
+     * waka/kepsek, so its admin_unit sits in for each remaining stage.
+     */
+    private function settled(PointRecord $record): PointRecord
+    {
+        $unit = SchoolUnit::find($record->student->school_unit_id);
+        $approver = User::where('role', 'admin_unit')->where('school_unit_id', $unit->id)->first()
+            ?? $this->staff('admin_unit', $unit);
+
+        while ($record->isPending()) {
+            $record = app(\App\Services\Points\PointApprovalService::class)->approve($record, $approver);
+        }
+
+        return $record;
+    }
+
     public function test_recording_a_violation_writes_a_signed_negative_row(): void
     {
         $student = $this->studentIn($this->sd);
@@ -86,6 +106,11 @@ class PointLedgerTest extends TestCase
         $record = $this->ledger()->record($student, $this->term, $rule, $guru, now(), 'Terlambat 10 menit');
 
         $this->assertSame(-10, $record->points);
+        // Written, but not counted until the ladder approves it.
+        $this->assertSame('pending', $record->status);
+        $this->assertSame(0, $this->ledger()->balance($student, $this->term));
+
+        $record = $this->settled($record);
         $this->assertSame('recorded', $record->status);
         $this->assertSame(-10, $this->ledger()->balance($student, $this->term));
     }
@@ -109,9 +134,9 @@ class PointLedgerTest extends TestCase
         $violation = $this->rule(['points' => 10, 'type' => 'violation']);
         $merit = $this->rule(['points' => 15, 'type' => 'merit']);
 
-        $this->ledger()->record($student, $this->term, $violation, $guru, now(), 'A');
-        $this->ledger()->record($student, $this->term, $violation, $guru, now(), 'B');
-        $this->ledger()->record($student, $this->term, $merit, $guru, now(), 'C');
+        $this->settled($this->ledger()->record($student, $this->term, $violation, $guru, now(), 'A'));
+        $this->settled($this->ledger()->record($student, $this->term, $violation, $guru, now(), 'B'));
+        $this->settled($this->ledger()->record($student, $this->term, $merit, $guru, now(), 'C'));
 
         // -10 -10 +15 = -5, not a stored column anywhere - recomputed here.
         $this->assertSame(-5, $this->ledger()->balance($student, $this->term));
@@ -134,6 +159,7 @@ class PointLedgerTest extends TestCase
         $students = collect([$this->studentIn($this->sd, 'A'), $this->studentIn($this->sd, 'B'), $this->studentIn($this->sd, 'C')]);
 
         $records = $this->ledger()->recordBulk($students, $this->term, $rule, $guru, now(), 'Terlambat upacara');
+        $records->each(fn ($r) => $this->settled($r));
 
         $this->assertCount(3, $records);
         $students->each(fn ($s) => $this->assertSame(-5, $this->ledger()->balance($s, $this->term)));
@@ -146,10 +172,11 @@ class PointLedgerTest extends TestCase
         $students = collect([$this->studentIn($this->sd, 'A'), $this->studentIn($this->sd, 'B')]);
 
         $records = $this->ledger()->recordBulk($students, $this->term, $rule, $guru, now(), 'Salah aturan');
+        $records->each(fn ($r) => $this->settled($r));
         $batch = $records->first()->batch_id;
         $this->assertNotNull($batch);
         // Unrelated single entry stays untouched.
-        $this->ledger()->record($students[0], $this->term, $rule, $guru, now(), 'Entri tunggal');
+        $this->settled($this->ledger()->record($students[0], $this->term, $rule, $guru, now(), 'Entri tunggal'));
 
         $this->actingAs($this->staff('guru', $this->smp))->postJson("/api/guru/points/batches/{$batch}/revoke", ['reason' => 'Bukan unit saya'])
             ->assertStatus(422);
@@ -301,7 +328,9 @@ class PointLedgerTest extends TestCase
             'label' => 'Peringatan 1',
         ]);
 
-        $this->ledger()->record($student, $this->term, $this->rule(['points' => 10]), $guru, now(), 'X');
+        $this->settled($this->ledger()->record($student, $this->term, $this->rule(['points' => 10]), $guru, now(), 'X'));
+        // Still climbing the ladder: neither in the balance nor on the parent's screen.
+        $this->ledger()->record($student, $this->term, $this->rule(['points' => 50]), $guru, now(), 'Belum disetujui');
 
         $this->actingAs($user)->getJson("/api/wali/students/{$student->ulid}/points")
             ->assertOk()
@@ -314,7 +343,7 @@ class PointLedgerTest extends TestCase
     {
         $student = $this->studentIn($this->sd);
         $guru = $this->staff('guru', $this->sd);
-        $this->ledger()->record($student, $this->term, $this->rule(['points' => 10]), $guru, now(), 'Terlambat');
+        $this->settled($this->ledger()->record($student, $this->term, $this->rule(['points' => 10]), $guru, now(), 'Terlambat'));
 
         $this->actingAs($guru)->getJson("/api/guru/students/{$student->ulid}/points")
             ->assertOk()

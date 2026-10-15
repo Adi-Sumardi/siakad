@@ -38,7 +38,10 @@ class FileController extends Controller
 
     public function pointEvidence(Request $request, string $ulid): StreamedResponse
     {
-        $record = PointRecord::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+        $record = PointRecord::visibleTo($request->user())
+            // Same line as the guardian's ledger: undecided rows stay staff-only.
+            ->when($request->user()->isGuardian(), fn ($q) => $q->final())
+            ->where('ulid', $ulid)->firstOrFail();
 
         return $this->stream($record->evidence_path, $record->evidence_name);
     }

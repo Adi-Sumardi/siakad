@@ -48,20 +48,27 @@ class PointLedger
             throw new RuntimeException("Aturan '{$rule->name}' mewajibkan bukti.");
         }
 
-        return PointRecord::create([
-            'student_id' => $student->id,
-            'term_id' => $term->id,
-            'point_rule_id' => $rule->id,
-            'batch_id' => $batchId,
-            'type' => $rule->type,
-            'points' => $rule->signedPoints(),
-            'occurred_on' => $occurredOn,
-            'description' => $description,
-            'evidence_path' => $evidencePath,
-            'evidence_name' => $evidenceName,
-            'recorded_by' => $recordedBy->id,
-            'status' => 'recorded',
-        ]);
+        // Born pending: it counts only once the approval ladder clears it
+        // (wali kelas -> waka kesiswaan -> kepala sekolah for 'berat').
+        return DB::transaction(function () use ($student, $term, $rule, $recordedBy, $occurredOn, $description, $evidencePath, $evidenceName, $batchId) {
+            $record = PointRecord::create([
+                'student_id' => $student->id,
+                'term_id' => $term->id,
+                'point_rule_id' => $rule->id,
+                'batch_id' => $batchId,
+                'type' => $rule->type,
+                'points' => $rule->signedPoints(),
+                'severity' => $rule->type === 'violation' ? ($rule->severity ?? 'ringan') : null,
+                'occurred_on' => $occurredOn,
+                'description' => $description,
+                'evidence_path' => $evidencePath,
+                'evidence_name' => $evidenceName,
+                'recorded_by' => $recordedBy->id,
+                'status' => 'pending',
+            ]);
+
+            return app(PointApprovalService::class)->start($record, $recordedBy);
+        });
     }
 
     /**
@@ -106,7 +113,7 @@ class PointLedger
         return DB::transaction(function () use ($batchId, $revokedBy, $reason, $scope) {
             $rows = PointRecord::where('batch_id', $batchId)
                 ->when($scope, $scope)
-                ->active()
+                ->whereIn('status', ['recorded', 'pending'])
                 ->lockForUpdate()
                 ->get();
 
@@ -149,12 +156,15 @@ class PointLedger
      */
     public function revoke(PointRecord $record, User $revokedBy, string $reason): void
     {
-        if (! $record->isActive()) {
-            throw new RuntimeException('Catatan ini sudah dibatalkan sebelumnya.');
+        // A pending record can be withdrawn too (wrong student, wrong rule)
+        // before anyone up the ladder spends time on it.
+        if (! $record->isActive() && ! $record->isPending()) {
+            throw new RuntimeException('Catatan ini sudah dibatalkan atau ditolak sebelumnya.');
         }
 
         $record->forceFill([
             'status' => 'revoked',
+            'approval_stage' => null,
             'revoked_by' => $revokedBy->id,
             'revoked_at' => now(),
             'revoke_reason' => $reason,

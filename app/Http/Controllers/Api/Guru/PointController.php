@@ -8,10 +8,12 @@ use App\Http\Requests\Guru\StoreBulkPointRecordsRequest;
 use App\Http\Requests\Guru\StorePointRecordRequest;
 use App\Http\Resources\PointRecordResource;
 use App\Models\ActivityLog;
+use App\Models\PointApproval;
 use App\Models\PointRecord;
 use App\Models\PointRule;
 use App\Models\Student;
 use App\Models\Term;
+use App\Services\Points\PointApprovalService;
 use App\Services\Points\PointLedger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -37,7 +39,7 @@ class PointController extends Controller
 
         $records = $student->pointRecords()
             ->where('term_id', $term->id)
-            ->with(['pointRule', 'recordedBy'])
+            ->with(['pointRule', 'recordedBy', 'approvals.decidedBy'])
             ->orderByDesc('occurred_on')
             ->get();
 
@@ -67,6 +69,7 @@ class PointController extends Controller
                 'category' => $r->category,
                 'points' => $r->signedPoints(),
                 'requires_evidence' => $r->requires_evidence,
+                'severity' => $r->type === 'violation' ? $r->severity : null,
             ]),
         ]);
     }
@@ -138,7 +141,15 @@ class PointController extends Controller
             'rule' => $rule->code, 'student_count' => $records->count(),
         ]);
 
-        return response()->json(['recorded' => $records->count(), 'batch_id' => $records->first()?->batch_id], 201);
+        return response()->json([
+            'recorded' => $records->count(),
+            'batch_id' => $records->first()?->batch_id,
+            // How many already count (wali kelas recording a merit for their
+            // own class) vs still waiting - the toast tells the teacher which.
+            'active' => $records->where('status', 'recorded')->count(),
+            'pending' => $records->where('status', 'pending')->count(),
+            'approval_stage_label' => ($stage = $records->firstWhere('status', 'pending')?->approval_stage) ? PointApproval::STAGE_LABEL[$stage] : null,
+        ], 201);
     }
 
     /** Excludes the record from every balance from now on; the row and its reasoning stay on file. */
@@ -147,6 +158,16 @@ class PointController extends Controller
         $validated = $request->validated();
 
         $record = PointRecord::visibleTo($request->user())->where('ulid', $ulid)->firstOrFail();
+
+        // Since records are approved up a ladder, "any teacher in the unit
+        // may revoke" would let one click undo a waka/kepsek decision. Only
+        // the teacher who wrote it, or the student's wali kelas, may.
+        $user = $request->user();
+        abort_unless(
+            $record->recorded_by === $user->id || app(PointApprovalService::class)->homeroomTeacherId($record) === $user->id,
+            403,
+            'Hanya guru pencatat atau wali kelas siswa yang dapat membatalkan catatan ini.',
+        );
 
         try {
             $ledger->revoke($record, $request->user(), $validated['reason']);
@@ -173,7 +194,8 @@ class PointController extends Controller
             $batchId,
             $user,
             $validated['reason'],
-            fn ($q) => $q->visibleTo($user),
+            // A bulk entry is withdrawn by the teacher who made it.
+            fn ($q) => $q->visibleTo($user)->where('recorded_by', $user->id),
         );
 
         if ($count === 0) {

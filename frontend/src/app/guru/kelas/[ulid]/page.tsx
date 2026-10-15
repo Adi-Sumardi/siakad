@@ -409,8 +409,12 @@ function SingleRecordForm({
     form.set("description", description);
 
     try {
-      await api.post("/api/guru/points", form);
-      toast.success("Poin berhasil dicatat.");
+      const { record } = await api.post<{ record: PointRecord }>("/api/guru/points", form);
+      toast.success(
+        record.status === "pending"
+          ? `Poin diajukan - menunggu persetujuan ${record.approval_stage_label}. Belum masuk saldo siswa.`
+          : "Poin dicatat dan langsung berlaku.",
+      );
       onDone();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Gagal mencatat poin.");
@@ -505,11 +509,31 @@ function LedgerPanel({ student }: { student: StudentRow }) {
       {records.map((r) => (
         <div
           key={r.ulid}
-          className={`flex items-start justify-between gap-3 text-xs p-2 rounded-lg bg-muted/30 ${r.status === "revoked" ? "opacity-50" : ""}`}
+          className={`flex items-start justify-between gap-3 text-xs p-2 rounded-lg bg-muted/30 ${
+            r.status === "revoked" || r.status === "rejected" ? "opacity-60" : ""
+          }`}
         >
           <div>
-            <p className="font-semibold text-foreground">{r.description} {r.status === "revoked" && <span className="text-[10px] text-muted-foreground">(dibatalkan)</span>}</p>
+            <p className="font-semibold text-foreground">
+              {r.description}{" "}
+              {r.status === "revoked" && <span className="text-[10px] text-muted-foreground">(dibatalkan)</span>}
+              {r.status === "pending" && (
+                <span className="rounded-full bg-warn-soft px-1.5 py-0.5 text-[10px] font-semibold text-warn">
+                  menunggu {r.approval_stage_label}
+                </span>
+              )}
+              {r.status === "rejected" && (
+                <span className="rounded-full bg-bad-soft px-1.5 py-0.5 text-[10px] font-semibold text-bad">ditolak</span>
+              )}
+            </p>
             <p className="text-[11px] text-muted-foreground mt-0.5">{tanggal(r.occurred_on)} · {r.recorded_by}</p>
+            {r.status === "rejected" && (
+              <p className="mt-0.5 text-[11px] text-bad">
+                Alasan: {r.approvals?.find((a) => a.decision === "rejected")?.note ?? "—"}
+                {r.approvals?.find((a) => a.decision === "rejected")?.decided_by &&
+                  ` (${r.approvals.find((a) => a.decision === "rejected")?.stage_label})`}
+              </p>
+            )}
             {revoking === r.ulid && (
               <div className="mt-1.5 flex flex-col gap-1">
                 <div className="flex gap-1.5">
@@ -529,7 +553,7 @@ function LedgerPanel({ student }: { student: StudentRow }) {
             <span className={`tabular font-bold ${r.points > 0 ? "text-good" : "text-bad"}`}>
               {r.points > 0 ? `+${r.points}` : r.points}
             </span>
-            {r.status === "recorded" && revoking !== r.ulid && (
+            {(r.status === "recorded" || r.status === "pending") && revoking !== r.ulid && (
               <button onClick={() => setRevoking(r.ulid)} className="text-[11px] text-muted-foreground hover:text-destructive underline">
                 Batalkan
               </button>
@@ -626,13 +650,17 @@ export default function GuruClassroomPage({ params }: { params: Promise<{ ulid: 
   async function submitBulk() {
     setBulkSubmitting(true);
     try {
-      const { recorded } = await api.post<{ recorded: number }>("/api/guru/points/bulk", {
+      const res = await api.post<{ recorded: number; pending: number; approval_stage_label: string | null }>("/api/guru/points/bulk", {
         student_ulids: [...selected],
         point_rule_ulid: bulkRule,
         occurred_on: bulkDate,
         description: bulkDescription,
       });
-      toast.success(`Poin berhasil dicatat untuk ${recorded} siswa.`);
+      toast.success(
+        res.pending > 0
+          ? `Poin diajukan untuk ${res.recorded} siswa - menunggu persetujuan ${res.approval_stage_label}.`
+          : `Poin dicatat dan langsung berlaku untuk ${res.recorded} siswa.`,
+      );
       setSelected(new Set());
       setBulkRule("");
       setBulkDescription("");

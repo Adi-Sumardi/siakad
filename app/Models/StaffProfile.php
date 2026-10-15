@@ -33,7 +33,7 @@ class StaffProfile extends Model
      */
     public static function mirrorUserPhone(User $user): ?self
     {
-        if (! in_array($user->role, ['admin', 'admin_unit', 'guru'], true)) {
+        if (! in_array($user->role, ['admin', 'admin_unit', 'guru', 'waka_kesiswaan', 'kepala_sekolah'], true)) {
             return null;
         }
 

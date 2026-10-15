@@ -25,6 +25,7 @@ class StorePointRuleRequest extends FormRequest
             'category' => 'required|string|max:60',
             'points' => 'required|integer|min:1|max:200',
             'requires_evidence' => 'boolean',
+            'severity' => 'sometimes|in:ringan,sedang,berat',
             'sort_order' => 'integer',
         ];
     }

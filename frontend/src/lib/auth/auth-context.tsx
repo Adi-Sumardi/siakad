@@ -8,7 +8,7 @@ export type User = {
   name: string;
   email: string | null;
   phone?: string | null;
-  role: "admin" | "admin_unit" | "guru" | "orangtua";
+  role: "admin" | "admin_unit" | "guru" | "orangtua" | "waka_kesiswaan" | "kepala_sekolah";
   is_active: boolean;
   /** Null until the welcome splash has been seen once (per account). */
   welcomed_at?: string | null;
@@ -27,6 +27,8 @@ export type User = {
 export function homePathFor(role: User["role"]): string {
   if (role === "admin" || role === "admin_unit") return "/admin";
   if (role === "guru") return "/guru";
+  // Unit leadership lands on what only they can do: decide point approvals.
+  if (role === "waka_kesiswaan" || role === "kepala_sekolah") return "/admin/poin/persetujuan";
 
   return "/dashboard";
 }

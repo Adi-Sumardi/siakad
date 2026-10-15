@@ -90,6 +90,18 @@ class User extends Authenticatable
         return $this->hasMany(Classroom::class, 'homeroom_teacher_id');
     }
 
+    public const ROLE_LABELS = [
+        'admin' => 'Administrator Pusat',
+        'admin_unit' => 'Tata Usaha / Admin Unit',
+        'guru' => 'Guru',
+        'orangtua' => 'Wali Murid',
+        'waka_kesiswaan' => 'Waka Kesiswaan',
+        'kepala_sekolah' => 'Kepala Sekolah',
+    ];
+
+    /** The accounts a unit's own admin may create and see for their unit. */
+    public const UNIT_ADMIN_MANAGED_ROLES = ['guru', 'orangtua', 'waka_kesiswaan', 'kepala_sekolah'];
+
     /** True for both admin kinds - what differs between them is scope, not entry. */
     public function isAdmin(): bool
     {
@@ -108,7 +120,17 @@ class User extends Authenticatable
      */
     public function isUnitScoped(): bool
     {
-        return in_array($this->role, ['admin_unit', 'guru'], true);
+        return in_array($this->role, ['admin_unit', 'guru', 'waka_kesiswaan', 'kepala_sekolah'], true);
+    }
+
+    /**
+     * Waka kesiswaan / kepala sekolah: unit leadership with a kesiswaan-only
+     * slice of the admin portal - they decide point approvals, they do not
+     * run the unit's billing or accounts.
+     */
+    public function isUnitLeader(): bool
+    {
+        return in_array($this->role, ['waka_kesiswaan', 'kepala_sekolah'], true);
     }
 
     public function isGuardian(): bool

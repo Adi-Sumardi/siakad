@@ -21,7 +21,7 @@ class UpdateUserRequest extends FormRequest
             'name' => 'sometimes|string|max:120',
             'email' => ['nullable', 'email', 'max:120', Rule::unique('users', 'email')->ignore($user->id)],
             'phone' => 'nullable|string|max:32',
-            'role' => 'sometimes|in:admin,admin_unit,guru,orangtua',
+            'role' => 'sometimes|in:admin,admin_unit,guru,orangtua,waka_kesiswaan,kepala_sekolah',
             'school_unit_ulid' => 'nullable|exists:school_units,ulid',
             'is_active' => 'boolean',
         ];

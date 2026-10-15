@@ -37,7 +37,7 @@ type UserItem = {
   name: string;
   email: string | null;
   phone: string | null;
-  role: "admin" | "admin_unit" | "guru" | "orangtua";
+  role: "admin" | "admin_unit" | "guru" | "orangtua" | "waka_kesiswaan" | "kepala_sekolah";
   role_label: string;
   school_unit: { ulid: string; code: string; label: string } | null;
   is_active: boolean;
@@ -47,6 +47,11 @@ type UserItem = {
 };
 
 type SchoolUnit = { ulid: string; code: string; label: string };
+
+/** Roles that belong to exactly one unit (the unit picker shows for these). */
+function needsUnit(role: UserItem["role"]): boolean {
+  return role === "admin_unit" || role === "guru" || role === "waka_kesiswaan" || role === "kepala_sekolah";
+}
 
 export default function UserManagementPage() {
   const { user } = useAuth();
@@ -85,7 +90,7 @@ export default function UserManagementPage() {
   const [formName, setFormName] = useState("");
   const [formEmail, setFormEmail] = useState("");
   const [formPhone, setFormPhone] = useState("");
-  const [formRole, setFormRole] = useState<"admin" | "admin_unit" | "guru" | "orangtua">("admin_unit");
+  const [formRole, setFormRole] = useState<UserItem["role"]>("admin_unit");
   const [formUnitUlid, setFormUnitUlid] = useState("");
   const [formIsActive, setFormIsActive] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -215,7 +220,7 @@ export default function UserManagementPage() {
         email: formEmail || null,
         phone: formPhone || null,
         role: formRole,
-        school_unit_ulid: (formRole === "admin_unit" || formRole === "guru")
+        school_unit_ulid: needsUnit(formRole)
           ? (isUnitAdmin ? (user?.school_unit?.ulid ?? null) : formUnitUlid)
           : null,
         is_active: formIsActive,
@@ -240,7 +245,7 @@ export default function UserManagementPage() {
         email: formEmail || null,
         phone: formPhone || null,
         role: formRole,
-        school_unit_ulid: (formRole === "admin_unit" || formRole === "guru") ? formUnitUlid : null,
+        school_unit_ulid: needsUnit(formRole) ? formUnitUlid : null,
         is_active: formIsActive,
       });
       toast.success("Data pengguna berhasil diperbarui.");
@@ -284,6 +289,10 @@ export default function UserManagementPage() {
         return <Badge variant="good" className="gap-1 font-bold"><Shield className="size-3" /> Guru</Badge>;
       case "orangtua":
         return <Badge variant="default" className="gap-1 font-bold"><Users className="size-3" /> Wali Murid</Badge>;
+      case "waka_kesiswaan":
+        return <Badge variant="warn" className="gap-1 font-bold"><ShieldCheck className="size-3" /> Waka Kesiswaan</Badge>;
+      case "kepala_sekolah":
+        return <Badge variant="warn" className="gap-1 font-bold"><ShieldCheck className="size-3" /> Kepala Sekolah</Badge>;
     }
   }
 
@@ -413,6 +422,8 @@ export default function UserManagementPage() {
                 <>
                   <option value="guru">Guru</option>
                   <option value="orangtua">Wali Murid</option>
+                  <option value="waka_kesiswaan">Waka Kesiswaan</option>
+                  <option value="kepala_sekolah">Kepala Sekolah</option>
                 </>
               ) : (
                 <>
@@ -420,6 +431,8 @@ export default function UserManagementPage() {
                   <option value="admin_unit">Tata Usaha / Admin Unit</option>
                   <option value="guru">Guru</option>
                   <option value="orangtua">Wali Murid</option>
+                  <option value="waka_kesiswaan">Waka Kesiswaan</option>
+                  <option value="kepala_sekolah">Kepala Sekolah</option>
                 </>
               )}
             </select>
@@ -552,7 +565,7 @@ export default function UserManagementPage() {
                       {/* hidden rather than left to 403 on click. */}
                       {!isUnitAdmin && (
                         <div className="flex items-center justify-end gap-1.5">
-                          {(u.role === "orangtua" || u.role === "guru") && (
+                          {u.role !== "admin" && u.role !== "admin_unit" && (
                             <Button
                               size="sm"
                               variant="outline"
@@ -662,6 +675,8 @@ export default function UserManagementPage() {
                     >
                       <option value="guru">Guru</option>
                       <option value="orangtua">Wali Murid</option>
+                      <option value="waka_kesiswaan">Waka Kesiswaan</option>
+                      <option value="kepala_sekolah">Kepala Sekolah</option>
                     </select>
                     <p className="text-[11px] text-muted-foreground">
                       Akun otomatis terpasang di unit {user?.school_unit?.label ?? "Anda"}. Guru mengajar
@@ -678,11 +693,13 @@ export default function UserManagementPage() {
                     <option value="admin_unit">Tata Usaha / Admin Unit (Akses 1 Unit)</option>
                     <option value="guru">Guru (mengajar sesuai jadwal; catat poin &amp; prestasi)</option>
                     <option value="orangtua">Wali Murid</option>
+                    <option value="waka_kesiswaan">Waka Kesiswaan (setujui poin pelanggaran)</option>
+                    <option value="kepala_sekolah">Kepala Sekolah (putuskan pelanggaran berat)</option>
                   </select>
                 )}
               </div>
 
-              {(formRole === "admin_unit" || formRole === "guru") && !isUnitAdmin && (
+              {needsUnit(formRole) && !isUnitAdmin && (
                 <div>
                   <Label className="text-xs">Unit Sekolah Penugasan</Label>
                   <select
@@ -782,10 +799,12 @@ export default function UserManagementPage() {
                   <option value="admin_unit">Tata Usaha / Admin Unit</option>
                   <option value="guru">Guru</option>
                   <option value="orangtua">Wali Murid</option>
+                  <option value="waka_kesiswaan">Waka Kesiswaan</option>
+                  <option value="kepala_sekolah">Kepala Sekolah</option>
                 </select>
               </div>
 
-              {(formRole === "admin_unit" || formRole === "guru") && (
+              {needsUnit(formRole) && (
                 <div>
                   <Label className="text-xs">Unit Sekolah Penugasan</Label>
                   <select

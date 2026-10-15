@@ -41,7 +41,7 @@ class UserController extends Controller
             ->when($caller->isUnitScoped(), function ($q) use ($caller) {
                 $q->where(function ($sq) use ($caller) {
                     $sq->where(function ($uq) use ($caller) {
-                        $uq->whereIn('role', ['guru', 'orangtua'])
+                        $uq->whereIn('role', User::UNIT_ADMIN_MANAGED_ROLES)
                             ->where('school_unit_id', $caller->school_unit_id);
                     })->orWhere(function ($pq) use ($caller) {
                         $pq->where('role', 'orangtua')
@@ -70,13 +70,7 @@ class UserController extends Controller
                     'email' => $u->email,
                     'phone' => $u->phone,
                     'role' => $u->role,
-                    'role_label' => match ($u->role) {
-                        'admin' => 'Administrator Pusat',
-                        'admin_unit' => 'Tata Usaha / Admin Unit',
-                        'guru' => 'Guru',
-                        'orangtua' => 'Wali Murid',
-                        default => $u->role,
-                    },
+                    'role_label' => User::ROLE_LABELS[$u->role] ?? $u->role,
                     'school_unit' => $u->schoolUnit ? [
                         'ulid' => $u->schoolUnit->ulid,
                         'code' => $u->schoolUnit->code,
@@ -158,11 +152,17 @@ class UserController extends Controller
         // nothing else - the controller forces the unit rather than trusting
         // the parameter, the same line BillingRunController draws.
         if ($request->user()->isUnitScoped()) {
-            if (! in_array($validated['role'], ['guru', 'orangtua'], true)) {
-                return response()->json(['message' => 'Admin unit hanya dapat membuat akun guru atau wali murid untuk unitnya sendiri.'], 422);
+            if (! in_array($validated['role'], User::UNIT_ADMIN_MANAGED_ROLES, true)) {
+                return response()->json(['message' => 'Admin unit hanya dapat membuat akun guru, wali murid, waka kesiswaan, atau kepala sekolah untuk unitnya sendiri.'], 422);
             }
 
             $validated['school_unit_ulid'] = $request->user()->schoolUnit->ulid;
+        }
+
+        // Leadership seats belong to one unit - an unanchored waka/kepsek
+        // would see nothing and decide nothing.
+        if (in_array($validated['role'], ['waka_kesiswaan', 'kepala_sekolah'], true) && empty($validated['school_unit_ulid'])) {
+            return response()->json(['message' => 'Waka kesiswaan dan kepala sekolah wajib terikat pada satu unit.'], 422);
         }
 
         if (empty($validated['email']) && empty($validated['phone'])) {
@@ -375,7 +375,7 @@ class UserController extends Controller
      */
     public function resetAccess(ResetUserAccessRequest $request, User $user, AccountInvitationSender $invitations): JsonResponse
     {
-        if (! in_array($user->role, ['orangtua', 'guru'], true)) {
+        if (! in_array($user->role, ['orangtua', 'guru', 'waka_kesiswaan', 'kepala_sekolah'], true)) {
             return response()->json([
                 'message' => 'Jalur reset hanya untuk akun wali murid dan guru - akun admin dikelola lewat jalur lain.',
             ], 422);
