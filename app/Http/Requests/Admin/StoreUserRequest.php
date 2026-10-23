@@ -24,7 +24,7 @@ class StoreUserRequest extends FormRequest
             'name' => 'required|string|max:120',
             'email' => 'nullable|email|max:120|unique:users,email',
             'phone' => 'nullable|string|max:32',
-            'role' => 'required|in:admin,admin_unit,guru,orangtua,waka_kesiswaan,kepala_sekolah',
+            'role' => 'required|in:admin,admin_unit,guru,orangtua,waka_kesiswaan,kepala_sekolah,direktur_pendidikan,bph',
             'school_unit_ulid' => 'nullable|exists:school_units,ulid',
             'is_active' => 'boolean',
         ];

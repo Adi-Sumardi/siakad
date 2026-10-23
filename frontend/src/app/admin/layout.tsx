@@ -13,6 +13,7 @@ import {
   ClipboardList,
   GraduationCap,
   History,
+  Landmark,
   LayoutDashboard,
   Megaphone,
   Radar,
@@ -35,6 +36,8 @@ import { usePendingApprovals } from "@/lib/use-pending-approvals";
 // tools interleaved.
 const NAV: StaffNavItem[] = [
   { href: "/admin", label: "Ringkasan", icon: LayoutDashboard, tour: "ringkasan" },
+  // Preview of what Direktur Pendidikan / BPH see (their own page, outside /admin).
+  { href: "/eksekutif", label: "Dashboard Yayasan", icon: Landmark, centralOnly: true },
 
   { href: "/admin/siswa", label: "Data Siswa & SPP", icon: GraduationCap, tour: "siswa", group: "Siswa & Kelas" },
   { href: "/admin/kelas", label: "Data Kelas", icon: School, tour: "kelas", group: "Siswa & Kelas" },

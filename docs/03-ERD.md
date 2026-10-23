@@ -52,8 +52,8 @@ erDiagram
 |---|---|---|
 | id, ulid | bigint PK, string unique | |
 | name, email (unique) | string | email nullable — wali boleh hanya punya no HP; kolom password pernah ada lalu sengaja di-dropped (D2 di 01-ARSITEKTUR, migration `2026_08_17_000024`) |
-| role | enum(admin, admin_unit, guru, orangtua) | |
-| school_unit_id | FK → school_units, nullable | wajib untuk `admin_unit` dan `guru` |
+| role | enum(admin, admin_unit, guru, orangtua, waka_kesiswaan, kepala_sekolah, direktur_pendidikan, bph) | `direktur_pendidikan` & `bph` (Badan Pengawas Harian) = yayasan, baca-saja dashboard eksekutif (migration `2026_10_23_000001`) |
+| school_unit_id | FK → school_units, nullable | wajib untuk `admin_unit`, `guru`, `waka_kesiswaan`, `kepala_sekolah`; selalu null untuk `direktur_pendidikan` & `bph` |
 | phone, phone_hash | string enc / string(64) index | login alternatif untuk wali tanpa email |
 | is_active | boolean default true | |
 | activated_at | timestamp nullable | terisi saat undangan dipakai |

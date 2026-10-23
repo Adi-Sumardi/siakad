@@ -97,10 +97,15 @@ class User extends Authenticatable
         'orangtua' => 'Wali Murid',
         'waka_kesiswaan' => 'Waka Kesiswaan',
         'kepala_sekolah' => 'Kepala Sekolah',
+        'direktur_pendidikan' => 'Direktur Pendidikan',
+        'bph' => 'Badan Pengawas Harian',
     ];
 
     /** The accounts a unit's own admin may create and see for their unit. */
     public const UNIT_ADMIN_MANAGED_ROLES = ['guru', 'orangtua', 'waka_kesiswaan', 'kepala_sekolah'];
+
+    /** Yayasan-level, read-only roles: every unit, aggregates only. */
+    public const EXECUTIVE_ROLES = ['direktur_pendidikan', 'bph'];
 
     /** True for both admin kinds - what differs between them is scope, not entry. */
     public function isAdmin(): bool
@@ -131,6 +136,16 @@ class User extends Authenticatable
     public function isUnitLeader(): bool
     {
         return in_array($this->role, ['waka_kesiswaan', 'kepala_sekolah'], true);
+    }
+
+    /**
+     * Direktur Pendidikan / BPH: they read the executive dashboard and
+     * nothing else. Not unit-scoped (the dashboard spans every unit), but they
+     * never reach a route that lists students or money row by row.
+     */
+    public function isExecutive(): bool
+    {
+        return in_array($this->role, self::EXECUTIVE_ROLES, true);
     }
 
     public function isGuardian(): bool

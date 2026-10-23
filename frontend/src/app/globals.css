@@ -163,3 +163,21 @@ body {
     animation: none;
   }
 }
+
+/* Cetak (dashboard yayasan): tanpa header & tombol, kartu tidak terpotong. */
+@media print {
+  @page {
+    margin: 12mm;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-avoid-break {
+    break-inside: avoid;
+  }
+  body {
+    background: #ffffff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

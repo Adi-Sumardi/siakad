@@ -8,7 +8,7 @@ export type User = {
   name: string;
   email: string | null;
   phone?: string | null;
-  role: "admin" | "admin_unit" | "guru" | "orangtua" | "waka_kesiswaan" | "kepala_sekolah";
+  role: "admin" | "admin_unit" | "guru" | "orangtua" | "waka_kesiswaan" | "kepala_sekolah" | "direktur_pendidikan" | "bph";
   is_active: boolean;
   /** Null until the welcome splash has been seen once (per account). */
   welcomed_at?: string | null;
@@ -29,6 +29,8 @@ export function homePathFor(role: User["role"]): string {
   if (role === "guru") return "/guru";
   // Unit leadership lands on what only they can do: decide point approvals.
   if (role === "waka_kesiswaan" || role === "kepala_sekolah") return "/admin/poin/persetujuan";
+  // Yayasan (Direktur Pendidikan / BPH): one read-only dashboard, nothing else.
+  if (role === "direktur_pendidikan" || role === "bph") return "/eksekutif";
 
   return "/dashboard";
 }

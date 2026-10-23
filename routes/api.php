@@ -2,7 +2,6 @@
 
 use App\Http\Controllers\Api\Admin\AcademicPolicyController;
 use App\Http\Controllers\Api\Admin\AchievementController as AdminAchievementController;
-use App\Http\Controllers\Api\YapinetSummaryController;
 use App\Http\Controllers\Api\Admin\ActivityLogController;
 use App\Http\Controllers\Api\Admin\AnnouncementController as AdminAnnouncementController;
 use App\Http\Controllers\Api\Admin\AttendanceReportController;
@@ -29,7 +28,6 @@ use App\Http\Controllers\Api\Admin\PointRuleController;
 use App\Http\Controllers\Api\Admin\PointThresholdController;
 use App\Http\Controllers\Api\Admin\PromotionController;
 use App\Http\Controllers\Api\Admin\ReferenceController;
-use App\Http\Controllers\Api\PointApprovalController;
 use App\Http\Controllers\Api\Admin\ReportController;
 use App\Http\Controllers\Api\Admin\ScheduleController;
 use App\Http\Controllers\Api\Admin\SchoolUnitController;
@@ -40,18 +38,21 @@ use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\Auth\InvitationController;
 use App\Http\Controllers\Api\Auth\OtpController;
 use App\Http\Controllers\Api\Auth\SessionController;
+use App\Http\Controllers\Api\Executive\SummaryController as ExecutiveSummaryController;
 use App\Http\Controllers\Api\FileController;
-use App\Http\Controllers\Api\LeaveRequestReviewController;
-use App\Http\Controllers\Api\StudentDocumentController;
 use App\Http\Controllers\Api\Guru\AchievementController as GuruAchievementController;
 use App\Http\Controllers\Api\Guru\AttendanceSessionController as GuruAttendanceSessionController;
 use App\Http\Controllers\Api\Guru\ClassroomController as GuruClassroomController;
 use App\Http\Controllers\Api\Guru\DailyAttendanceController as GuruDailyAttendanceController;
 use App\Http\Controllers\Api\Guru\GradeController as GuruGradeController;
 use App\Http\Controllers\Api\Guru\PointController as GuruPointController;
+use App\Http\Controllers\Api\Guru\ProfileController;
+use App\Http\Controllers\Api\LeaveRequestReviewController;
+use App\Http\Controllers\Api\PointApprovalController;
 use App\Http\Controllers\Api\Public\AttendancePresensiController;
 use App\Http\Controllers\Api\Public\DailyGateController;
 use App\Http\Controllers\Api\Public\ReceiptController;
+use App\Http\Controllers\Api\StudentDocumentController;
 use App\Http\Controllers\Api\Wali\AchievementController as WaliAchievementController;
 use App\Http\Controllers\Api\Wali\AnnouncementController as WaliAnnouncementController;
 use App\Http\Controllers\Api\Wali\AttendanceController as WaliAttendanceController;
@@ -63,6 +64,7 @@ use App\Http\Controllers\Api\Wali\GradeController as WaliGradeController;
 use App\Http\Controllers\Api\Wali\LeaveRequestController as WaliLeaveRequestController;
 use App\Http\Controllers\Api\Wali\PointController as WaliPointController;
 use App\Http\Controllers\Api\Webhooks\PmbHandoffController;
+use App\Http\Controllers\Api\YapinetSummaryController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -187,8 +189,8 @@ Route::middleware(['auth:sanctum', 'role:orangtua'])->prefix('wali')->group(func
  * in their unit, not only their own homeroom, because they teach across it.
  */
 Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function () {
-    Route::get('/profile', [App\Http\Controllers\Api\Guru\ProfileController::class, 'show']);
-    Route::patch('/profile', [App\Http\Controllers\Api\Guru\ProfileController::class, 'update']);
+    Route::get('/profile', [ProfileController::class, 'show']);
+    Route::patch('/profile', [ProfileController::class, 'update']);
 
     Route::get('/classrooms', [GuruClassroomController::class, 'index']);
     Route::get('/classrooms/{ulid}/students', [GuruClassroomController::class, 'students']);
@@ -400,7 +402,6 @@ Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin,admin_unit'])->
 
     Route::post('/point-thresholds', [PointThresholdController::class, 'store']);
     Route::patch('/point-thresholds/{pointThreshold}', [PointThresholdController::class, 'update']);
-
 
     // The finance office's transaction ledger (feature batch Poin 11A/B/C):
     // filterable payment history, the per-payment receipt PDF, and the
@@ -622,6 +623,15 @@ Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin,admin_unit,waka
     Route::post('/point-approvals/approve-many', [PointApprovalController::class, 'approveMany']);
     Route::post('/point-approvals/{ulid}/approve', [PointApprovalController::class, 'approve']);
     Route::post('/point-approvals/{ulid}/reject', [PointApprovalController::class, 'reject']);
+});
+
+/*
+ * Dashboard eksekutif yayasan: Direktur Pendidikan dan BPH. Hanya membaca,
+ * hanya angka per unit - kedua role ini tidak punya route lain. Admin pusat
+ * ikut supaya bisa pratinjau (?as=direktur_pendidikan|bph).
+ */
+Route::middleware(['auth:sanctum', 'active', 'role:direktur_pendidikan,bph,admin', 'throttle:60,1'])->prefix('eksekutif')->group(function () {
+    Route::get('/ringkasan', [ExecutiveSummaryController::class, 'show']);
 });
 
 // Ringkasan untuk portal Yapinet — dipanggil server-ke-server dengan API key.

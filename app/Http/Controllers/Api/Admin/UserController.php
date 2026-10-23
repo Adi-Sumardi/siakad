@@ -15,6 +15,7 @@ use App\Models\StaffProfile;
 use App\Models\User;
 use App\Services\Handoff\AccountInvitationSender;
 use App\Services\Notification\PhoneNumberFormatter;
+use App\Support\PerPage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -60,7 +61,7 @@ class UserController extends Controller
             ->when($request->has('is_active') && $request->input('is_active') !== '', fn ($q) => $q->where('is_active', $request->boolean('is_active')))
             ->orderBy('role')
             ->orderBy('name')
-            ->paginate(\App\Support\PerPage::clamp($request, 20));
+            ->paginate(PerPage::clamp($request, 20));
 
         return response()->json([
             'users' => [
@@ -122,14 +123,14 @@ class UserController extends Controller
         // the census).
         $student = $user->guardian?->students()->first();
 
-        $result = app(\App\Services\Handoff\AccountInvitationSender::class)->send($user, [
+        $result = app(AccountInvitationSender::class)->send($user, [
             'student_name' => $student?->nama_lengkap ?? $user->name,
             'nama_panggilan' => $student?->nama_panggilan ?: ($student?->nama_lengkap ?? $user->name),
             'unit_label' => $student?->schoolUnit?->label ?? $user->schoolUnit?->label ?? '-',
             'academic_year' => '-',
         ], $request->user());
 
-        \App\Models\ActivityLog::record($request->user(), 'user.invitation_resent', $user, [
+        ActivityLog::record($request->user(), 'user.invitation_resent', $user, [
             'user' => $user->name,
             'delivered' => $result->success,
         ]);
@@ -163,6 +164,12 @@ class UserController extends Controller
         // would see nothing and decide nothing.
         if (in_array($validated['role'], ['waka_kesiswaan', 'kepala_sekolah'], true) && empty($validated['school_unit_ulid'])) {
             return response()->json(['message' => 'Waka kesiswaan dan kepala sekolah wajib terikat pada satu unit.'], 422);
+        }
+
+        // Direktur Pendidikan / BPH look at the whole yayasan: never tied to
+        // one unit, whatever the form sent.
+        if (in_array($validated['role'], User::EXECUTIVE_ROLES, true)) {
+            $validated['school_unit_ulid'] = null;
         }
 
         if (empty($validated['email']) && empty($validated['phone'])) {
@@ -274,6 +281,10 @@ class UserController extends Controller
 
         $user->fill(collect($validated)->except(['school_unit_ulid'])->all());
 
+        if ($user->isExecutive()) {
+            $user->school_unit_id = null;
+        }
+
         // Clearing the phone must also drop its blind index (audit
         // 2026-09-28): setAttribute() skips hash-sync on null, so the stale
         // phone_hash kept resolving OTP logins for a number the admin just
@@ -375,7 +386,7 @@ class UserController extends Controller
      */
     public function resetAccess(ResetUserAccessRequest $request, User $user, AccountInvitationSender $invitations): JsonResponse
     {
-        if (! in_array($user->role, ['orangtua', 'guru', 'waka_kesiswaan', 'kepala_sekolah'], true)) {
+        if (! in_array($user->role, ['orangtua', 'guru', 'waka_kesiswaan', 'kepala_sekolah', ...User::EXECUTIVE_ROLES], true)) {
             return response()->json([
                 'message' => 'Jalur reset hanya untuk akun wali murid dan guru - akun admin dikelola lewat jalur lain.',
             ], 422);

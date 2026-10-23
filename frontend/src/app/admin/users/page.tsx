@@ -7,6 +7,7 @@ import {
   Edit2,
   FileUp,
   KeyRound,
+  Eye,
   Mail,
   Phone,
   RefreshCw,
@@ -37,7 +38,7 @@ type UserItem = {
   name: string;
   email: string | null;
   phone: string | null;
-  role: "admin" | "admin_unit" | "guru" | "orangtua" | "waka_kesiswaan" | "kepala_sekolah";
+  role: "admin" | "admin_unit" | "guru" | "orangtua" | "waka_kesiswaan" | "kepala_sekolah" | "direktur_pendidikan" | "bph";
   role_label: string;
   school_unit: { ulid: string; code: string; label: string } | null;
   is_active: boolean;
@@ -293,6 +294,10 @@ export default function UserManagementPage() {
         return <Badge variant="warn" className="gap-1 font-bold"><ShieldCheck className="size-3" /> Waka Kesiswaan</Badge>;
       case "kepala_sekolah":
         return <Badge variant="warn" className="gap-1 font-bold"><ShieldCheck className="size-3" /> Kepala Sekolah</Badge>;
+      case "direktur_pendidikan":
+        return <Badge variant="primary" className="gap-1 font-bold"><Eye className="size-3" /> Direktur Pendidikan</Badge>;
+      case "bph":
+        return <Badge variant="primary" className="gap-1 font-bold"><Eye className="size-3" /> BPH</Badge>;
     }
   }
 
@@ -433,6 +438,8 @@ export default function UserManagementPage() {
                   <option value="orangtua">Wali Murid</option>
                   <option value="waka_kesiswaan">Waka Kesiswaan</option>
                   <option value="kepala_sekolah">Kepala Sekolah</option>
+                  <option value="direktur_pendidikan">Direktur Pendidikan</option>
+                  <option value="bph">Badan Pengawas Harian</option>
                 </>
               )}
             </select>
@@ -695,6 +702,8 @@ export default function UserManagementPage() {
                     <option value="orangtua">Wali Murid</option>
                     <option value="waka_kesiswaan">Waka Kesiswaan (setujui poin pelanggaran)</option>
                     <option value="kepala_sekolah">Kepala Sekolah (putuskan pelanggaran berat)</option>
+                    <option value="direktur_pendidikan">Direktur Pendidikan (lihat ringkasan semua unit)</option>
+                    <option value="bph">Badan Pengawas Harian (lihat ringkasan semua unit)</option>
                   </select>
                 )}
               </div>
@@ -801,6 +810,8 @@ export default function UserManagementPage() {
                   <option value="orangtua">Wali Murid</option>
                   <option value="waka_kesiswaan">Waka Kesiswaan</option>
                   <option value="kepala_sekolah">Kepala Sekolah</option>
+                  <option value="direktur_pendidikan">Direktur Pendidikan</option>
+                  <option value="bph">Badan Pengawas Harian</option>
                 </select>
               </div>
 

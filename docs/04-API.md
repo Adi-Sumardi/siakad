@@ -175,6 +175,18 @@ Ringkasan permukaan yang tidak lain di atas (detail di `routes/api.php`):
   /api/admin/students/dapodik-export` (CSV Dapodik), `GET
   /api/guru/my-subjects` (penugasan mengajar guru dari `class_schedules`).
 
+## Dashboard eksekutif (`role: direktur_pendidikan`, `bph`)
+
+Hanya membaca, hanya angka per unit (tanpa nama/NIS/ULID siswa). Spesifikasi:
+`docs/08-DASHBOARD-EKSEKUTIF.md`. Admin pusat boleh membuka untuk pratinjau.
+
+| Method | Path | Keterangan |
+|---|---|---|
+| GET | `/api/eksekutif/ringkasan` | `?unit=SD-13` mempersempit ke satu unit (kode tak dikenal → 404); admin pusat: `?as=direktur_pendidikan\|bph` (bawaan `bph`). Isi: `alerts` (maks 4, kritis dulu), `pendidikan` (tile, per unit, tren kehadiran 6 bulan), `enrollment_trend` (3 TA), dan untuk BPH saja `keuangan` (tile, umur tunggakan 0–30/31–60/61–90/>90 hari semua TA, uang masuk 6 bulan). Cache 120 detik; ambang di `config/eksekutif.php`. |
+
+Angka dasarnya dari `DashboardSummaryController` (sama dengan dashboard admin);
+total umur tunggakan = `kpi.billing.overdue_amount` pada `billing_period=all`.
+
 ## File privat
 
 Satu controller untuk keempatnya — gerbangnya sama: siapa pun yang meminta
