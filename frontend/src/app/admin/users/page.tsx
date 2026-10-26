@@ -869,9 +869,9 @@ export default function UserManagementPage() {
                 <span>Reset Akses — {resettingUser.name}</span>
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Untuk wali/guru yang kehilangan email DAN nomor HP sekaligus. Tautan pembaruan kontak dikirim ke kontak
-                baru di bawah (kumpulkan langsung dari yang bersangkutan setelah memastikan identitasnya). Kontak baru
-                aktif setelah tautan dibuka; tautan berlaku 7 hari.
+                Untuk wali/guru yang kehilangan email DAN nomor HP sekaligus. Tautan pembaruan dikirim ke email baru
+                di bawah (kumpulkan langsung dari yang bersangkutan setelah memastikan identitasnya). Email baru aktif
+                setelah tautan dibuka; tautan berlaku 7 hari. Undangan dan reset hanya dikirim lewat email.
               </p>
             </div>
 
@@ -886,7 +886,7 @@ export default function UserManagementPage() {
                   }>(`/api/admin/users/${resettingUser.ulid}/reset-access`, { contact: resetContact });
 
                   toast.success(
-                    `Tautan reset dikirim ke ${res.invitation.sent_to} via ${res.invitation.channel === "email" ? "email" : "WhatsApp"}. Kontak baru aktif setelah tautan dibuka.`,
+                    `Tautan reset dikirim ke email ${res.invitation.sent_to}. Email baru aktif setelah tautan dibuka.`,
                   );
                   setResettingUser(null);
                   setResetContact("");
@@ -899,22 +899,16 @@ export default function UserManagementPage() {
               className="space-y-3.5 text-xs"
             >
               <div>
-                <Label className="text-xs">Kontak baru (email atau No. HP/WhatsApp)</Label>
+                <Label className="text-xs">Email baru</Label>
                 <Input
+                  type="email"
                   value={resetContact}
                   onChange={(e) => setResetContact(e.target.value)}
-                  placeholder="mis. wali@email.com atau 081234567890"
+                  placeholder="mis. wali@email.com"
                   required
                   className="mt-1"
                   autoFocus
                 />
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {resetContact.includes("@")
-                    ? "Terkirim via Email."
-                    : /^[\d+\-\s()]{9,}$/.test(resetContact)
-                      ? "Terkirim via WhatsApp."
-                      : "Kanal terdeteksi otomatis dari bentuk isian."}
-                </p>
               </div>
 
               <div className="flex justify-end gap-2 border-t border-border pt-4">

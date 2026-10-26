@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Models\NotificationLog;
 use App\Services\Notification\QontakWhatsAppGateway;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -26,16 +25,9 @@ class SendQontakTemplateMessage implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    // $tries=0 + retryUntil (audit T42-a), same reason as the other WhatsApp
-    // jobs: rate-limit releases must not burn the job's attempts.
-    public int $tries = 0;
+    public int $tries = 3;
 
-    public array $backoff = [10, 30, 60, 120];
-
-    public function retryUntil(): \DateTimeInterface
-    {
-        return now()->addHour();
-    }
+    public array $backoff = [10, 30];
 
     /**
      * @param  string[]  $bodyValues
@@ -47,12 +39,9 @@ class SendQontakTemplateMessage implements ShouldQueue
         public string $templateId,
         public array $bodyValues,
         public array $buttonValues = [],
-        /**
-         * The NotificationLog row the caller created for this send (audit
-         * T43): without it the row stayed 'queued' forever on every outcome
-         * - success included - invisible to the retry sweep, the manual
-         * resend lane and the failure dashboard alike.
-         */
+        // When the caller logged this send (account invitations do, so
+        // Monitoring shows the real outcome), its status is set here once
+        // the send is attempted - same contract as SendWhatsAppMessage.
         public ?string $notificationLogUlid = null,
     ) {}
 
@@ -63,51 +52,24 @@ class SendQontakTemplateMessage implements ShouldQueue
 
     public function handle(QontakWhatsAppGateway $gateway): void
     {
-        // Atomic claim (audit T64-b) - see SendWhatsAppMessage::handle().
-        if (! NotificationLog::claimDelivery($this->notificationLogUlid)) {
-            return;
-        }
-
         $result = $gateway->sendTemplate($this->phone, $this->toName, $this->templateId, $this->bodyValues, $this->buttonValues);
 
         if ($this->notificationLogUlid) {
-            NotificationLog::where('ulid', $this->notificationLogUlid)->update([
+            \App\Models\NotificationLog::where('ulid', $this->notificationLogUlid)->update([
                 'status' => $result->success ? 'sent' : 'failed',
-                'error' => $result->success
-                    ? ((($result->raw['mode'] ?? null) === 'log-only')
-                        ? 'Mode log-only: kredensial gateway kosong - pesan TIDAK benar-benar terkirim.'
-                        : null)
-                    : $result->message,
+                'error' => $result->message,
                 'sent_at' => $result->success ? now() : null,
-                // The outcome releases the delivery claim (audit T64-b).
-                'claimed_at' => null,
-                // See SendWhatsAppMessage::handle(): retries only (audit T44).
-                ...(($this->attempts ?? 1) > 1 ? ['attempts' => NotificationLog::rawAttemptIncrement()] : []),
             ]);
         }
 
         if (! $result->success) {
             Log::warning('[SendQontakTemplateMessage] Send failed', [
-                // Masked (audit 2026-10-05).
-                'phone' => NotificationLog::maskRecipient($this->phone),
+                'phone' => $this->phone,
                 'template_id' => $this->templateId,
                 'error' => $result->message,
             ]);
 
             throw new RuntimeException($result->message ?? 'Gagal mengirim pesan template WhatsApp.');
-        }
-    }
-
-    /** See SendWhatsAppMessage::failed() - the 'queued'-forever row is the failure nobody sees. */
-    public function failed(?\Throwable $e): void
-    {
-        if ($this->notificationLogUlid) {
-            NotificationLog::where('ulid', $this->notificationLogUlid)->update([
-                'status' => 'failed',
-                'error' => $e?->getMessage() ?? 'Pengiriman gagal setelah seluruh percobaan.',
-                'sent_at' => null,
-                'claimed_at' => null,
-            ]);
         }
     }
 }

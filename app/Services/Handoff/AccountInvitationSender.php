@@ -2,13 +2,11 @@
 
 namespace App\Services\Handoff;
 
-use App\Jobs\SendWhatsAppMessage;
 use App\Models\AccountInvitation;
 use App\Models\NotificationLog;
 use App\Models\User;
 use App\Services\Notification\MailGateway;
 use App\Services\Notification\NotificationResult;
-use App\Services\Notification\WhatsAppGateway;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -18,9 +16,10 @@ use Illuminate\Support\Facades\DB;
  */
 class AccountInvitationSender
 {
+    public const NO_EMAIL = 'Akun wali ini belum punya email. Undangan hanya dikirim lewat email - tambahkan email wali, lalu kirim ulang undangan.';
+
     public function __construct(
         private MailGateway $mail,
-        private WhatsAppGateway $whatsapp,
     ) {}
 
     /**
@@ -34,9 +33,13 @@ class AccountInvitationSender
      */
     public function send(User $user, array $context, ?User $actor = null): NotificationResult
     {
-        // WhatsApp only when there is no email: an address that exists is
-        // the channel that carries a clickable link reliably.
-        [$invitation, $plainToken] = $this->issue($user, 'activation', $user->email ?: (string) $user->phone, $actor);
+        // Email only (2026-10-14): no invitation is issued for an account
+        // without one - the admin adds an email and sends again.
+        if (blank($user->email)) {
+            return NotificationResult::fail(self::NO_EMAIL);
+        }
+
+        [$invitation, $plainToken] = $this->issue($user, 'activation', $user->email, $actor);
 
         $data = array_merge($context, [
             'activation_url' => $this->url($plainToken),
@@ -108,9 +111,13 @@ class AccountInvitationSender
             'guardian_name' => $invitation->user?->name ?? (string) ($log->payload['guardian_name'] ?? ''),
         ]);
 
-        return $log->channel === 'email'
-            ? $this->mail->send($log->recipient, $template, $data)
-            : $this->whatsapp->sendMessage($log->recipient, $this->renderWhatsAppMessage($data, $invitation->purpose));
+        if ($log->channel === 'email') {
+            return $this->mail->send($log->recipient, $template, $data);
+        }
+
+        // Invitations go by email only (2026-10-14); an old WhatsApp row is
+        // not delivered again over a channel the school no longer uses.
+        return NotificationResult::fail('Undangan lewat WhatsApp tidak dipakai lagi - kirim undangan baru lewat email.');
     }
 
     /**
@@ -162,7 +169,7 @@ class AccountInvitationSender
     private function deliver(AccountInvitation $invitation, string $template, array $data): NotificationResult
     {
         if ($invitation->channel !== 'email') {
-            return $this->deliverWhatsApp($invitation, $template, $data);
+            return NotificationResult::fail(self::NO_EMAIL);
         }
 
         $result = $this->mail->send($invitation->sent_to, $template, $data);
@@ -170,64 +177,6 @@ class AccountInvitationSender
         $this->log($invitation, 'email', $template, $data, $result);
 
         return $result;
-    }
-
-    /**
-     * Queued rather than sent inline - see App\Jobs\SendWhatsAppMessage for
-     * why. Logs itself (as 'queued', updated to sent/failed by the job, which
-     * is what the retry sweep then picks up) instead of going through log(),
-     * which can only record an outcome it already knows.
-     */
-    private function deliverWhatsApp(AccountInvitation $invitation, string $template, array $data): NotificationResult
-    {
-        $log = NotificationLog::create([
-            'channel' => 'whatsapp',
-            'template' => $template,
-            'recipient' => $invitation->sent_to,
-            // The activation URL carries a working credential, so it never
-            // reaches the log table.
-            'payload' => collect($data)->except('activation_url')->all(),
-            'status' => 'queued',
-            'notifiable_type' => AccountInvitation::class,
-            'notifiable_id' => $invitation->id,
-        ]);
-
-        // The rendered body carries the activation URL - a working
-        // credential for up to 7 days - so it travels by reference, not by
-        // value (audit T51-a): the job holds a key, QueueSecret holds the
-        // encrypted body expiring with the invitation itself.
-        \App\Services\Security\QueueSecret::stash(
-            'invite:'.$invitation->ulid,
-            $this->renderWhatsAppMessage($data, $invitation->purpose),
-            $invitation->expires_at,
-        );
-
-        SendWhatsAppMessage::dispatch(
-            $invitation->sent_to,
-            '',
-            $log->ulid,
-            secretKey: 'invite:'.$invitation->ulid,
-        );
-
-        return NotificationResult::ok(['mode' => 'queued']);
-    }
-
-    /** @param array<string, mixed> $data */
-    private function renderWhatsAppMessage(array $data, ?string $purpose = 'activation'): string
-    {
-        if ($purpose === 'reset') {
-            return "Assalamu'alaikum {$data['guardian_name']},\n\n"
-                ."Kami menerima permintaan memperbarui kontak akun aplikasi sekolah Anda "
-                ."({$data['login_identifier']}).\n\n"
-                ."Buka tautan berikut untuk mengaktifkan kontak baru:\n{$data['activation_url']}\n\n"
-                ."Setelah tautan dibuka, kontak baru tersebut menjadi satu-satunya cara masuk akun Anda.\n"
-                ."Tautan berlaku sampai {$data['expires_at']}. Abaikan pesan ini bila Anda tidak meminta perubahan.";
-        }
-
-        return "Assalamu'alaikum {$data['guardian_name']},\n\n"
-            ."Uang pangkal {$data['student_name']} sudah lunas dan akun aplikasi sekolah sudah kami buatkan.\n\n"
-            ."Aktifkan akun Anda di tautan berikut (tanpa kata sandi - masuk berikutnya cukup dengan kode sekali pakai):\n{$data['activation_url']}\n\n"
-            ."Tautan berlaku sampai {$data['expires_at']}.";
     }
 
     /**
