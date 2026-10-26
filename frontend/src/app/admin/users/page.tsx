@@ -439,7 +439,7 @@ export default function UserManagementPage() {
                   <option value="waka_kesiswaan">Waka Kesiswaan</option>
                   <option value="kepala_sekolah">Kepala Sekolah</option>
                   <option value="direktur_pendidikan">Direktur Pendidikan</option>
-                  <option value="bph">Badan Pengawas Harian</option>
+                  <option value="bph">Badan Pengurus Harian</option>
                 </>
               )}
             </select>
@@ -703,7 +703,7 @@ export default function UserManagementPage() {
                     <option value="waka_kesiswaan">Waka Kesiswaan (setujui poin pelanggaran)</option>
                     <option value="kepala_sekolah">Kepala Sekolah (putuskan pelanggaran berat)</option>
                     <option value="direktur_pendidikan">Direktur Pendidikan (lihat ringkasan semua unit)</option>
-                    <option value="bph">Badan Pengawas Harian (lihat ringkasan semua unit)</option>
+                    <option value="bph">Badan Pengurus Harian (lihat ringkasan semua unit)</option>
                   </select>
                 )}
               </div>
@@ -811,7 +811,7 @@ export default function UserManagementPage() {
                   <option value="waka_kesiswaan">Waka Kesiswaan</option>
                   <option value="kepala_sekolah">Kepala Sekolah</option>
                   <option value="direktur_pendidikan">Direktur Pendidikan</option>
-                  <option value="bph">Badan Pengawas Harian</option>
+                  <option value="bph">Badan Pengurus Harian</option>
                 </select>
               </div>
 

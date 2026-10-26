@@ -112,7 +112,7 @@ export default function EksekutifPage() {
         <div className="no-print rounded-2xl border border-primary/30 bg-accent p-4">
           <p className="mb-2 text-sm font-semibold text-accent-foreground">Pratinjau Admin Pusat. Lihat sebagai:</p>
           <div className="flex flex-wrap gap-2">
-            <UnitButton active={previewAs === "bph"} onClick={() => { setLoading(true); setPreviewAs("bph"); }}>Badan Pengawas Harian</UnitButton>
+            <UnitButton active={previewAs === "bph"} onClick={() => { setLoading(true); setPreviewAs("bph"); }}>Badan Pengurus Harian</UnitButton>
             <UnitButton active={previewAs === "direktur_pendidikan"} onClick={() => { setLoading(true); setPreviewAs("direktur_pendidikan"); }}>Direktur Pendidikan</UnitButton>
           </div>
         </div>

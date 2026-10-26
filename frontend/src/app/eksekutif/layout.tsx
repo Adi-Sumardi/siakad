@@ -10,7 +10,7 @@ import { homePathFor, useAuth } from "@/lib/auth/auth-context";
 
 const ROLE_LABEL: Record<string, string> = {
   direktur_pendidikan: "Direktur Pendidikan",
-  bph: "Badan Pengawas Harian",
+  bph: "Badan Pengurus Harian",
   admin: "Admin Pusat (pratinjau)",
 };
 

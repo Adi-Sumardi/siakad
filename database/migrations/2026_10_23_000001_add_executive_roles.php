@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Dua role yayasan yang hanya membaca: Direktur Pendidikan dan Badan Pengawas
+ * Dua role yayasan yang hanya membaca: Direktur Pendidikan dan Badan Pengurus
  * Harian (BPH). Keduanya lintas unit (school_unit_id kosong) dan hanya melihat
  * dashboard eksekutif - angka per unit, tanpa data siswa perorangan.
  */

@@ -98,7 +98,7 @@ class User extends Authenticatable
         'waka_kesiswaan' => 'Waka Kesiswaan',
         'kepala_sekolah' => 'Kepala Sekolah',
         'direktur_pendidikan' => 'Direktur Pendidikan',
-        'bph' => 'Badan Pengawas Harian',
+        'bph' => 'Badan Pengurus Harian',
     ];
 
     /** The accounts a unit's own admin may create and see for their unit. */

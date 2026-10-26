@@ -110,7 +110,7 @@ class ExecutiveDashboardTest extends TestCase
 
         $bph = $this->actingAs($this->user('bph'))->getJson('/api/eksekutif/ringkasan')->assertOk()->json();
         $this->assertArrayHasKey('keuangan', $bph);
-        $this->assertSame('Badan Pengawas Harian', $bph['viewer']['role_label']);
+        $this->assertSame('Badan Pengurus Harian', $bph['viewer']['role_label']);
         // BPH's education rows are the brief version.
         $this->assertArrayNotHasKey('violation_students', $bph['pendidikan']['per_unit'][0]);
     }
