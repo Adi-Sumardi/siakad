@@ -572,6 +572,8 @@ export default function JadwalPage() {
   const [jenjangFilter, setJenjangFilter] = useState("");
   const [unitOptions, setUnitOptions] = useState<{ code: string; label: string }[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  // Admin pusat: katalog dibagi per unit (label unit, atau "__umum" untuk mapel seluruh sekolah).
+  const [catalogUnit, setCatalogUnit] = useState("");
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   // Every visible period, tagged with the unit filter it was fetched for;
   // the single-class view is a client-side slice of it.
@@ -629,9 +631,16 @@ export default function JadwalPage() {
       });
   }
 
+  // Admin pusat: jadwal selalu tampil per unit (tanpa "Semua Unit"), default unit pertama.
   useEffect(() => {
+    if (isCentral && !unitFilter && unitOptions.length > 0) setUnitFilter(unitOptions[0].code);
+  }, [isCentral, unitFilter, unitOptions]);
+
+  useEffect(() => {
+    // Admin pusat menunggu unit terpilih supaya tidak memuat jadwal semua unit.
+    if (isCentral && !unitFilter) return;
     loadSchedules(unitFilter);
-  }, [unitFilter]);
+  }, [unitFilter, isCentral]);
 
   // The cascade's map (bug batch Poin 3): derived from the SAME classrooms
   // the Kelas picker lists, so Jenjang offers exactly the ladder that runs
@@ -665,6 +674,12 @@ export default function JadwalPage() {
     }
   }
 
+  // Default ke unit pertama, jadi katalog tidak pernah tampil semua sekaligus.
+  const activeCatalogUnit = catalogUnit || unitOptions[0]?.label || "__umum";
+  const catalogSubjects = !isCentral
+    ? subjects
+    : subjects.filter((s) => (activeCatalogUnit === "__umum" ? s.school_unit === null : s.school_unit === activeCatalogUnit));
+
   const visibleIds = new Set(visibleClassrooms.map((c) => c.ulid));
   const loadedRows = schedules !== null && schedules.unit === unitFilter
     ? schedules.rows.filter((s) => (selectedClassroom ? s.classroom.ulid === selectedClassroom : visibleIds.has(s.classroom.ulid)))
@@ -687,8 +702,27 @@ export default function JadwalPage() {
       <Card className="p-5">
         <h2 className="mb-3 text-sm font-semibold">Katalog mata pelajaran</h2>
         <NewSubjectForm tingkatOptions={tingkatOptions} onCreated={loadSubjects} />
-        {subjects.length > 0 && (
-          <SubjectCatalog subjects={subjects} tingkatOptions={tingkatOptions} isCentral={isCentral} reload={loadSubjects} />
+        {isCentral && subjects.length > 0 && (
+          <div className="mt-4 flex flex-col gap-1.5">
+            <Label className="text-xs">Unit</Label>
+            <select
+              value={activeCatalogUnit}
+              onChange={(e) => setCatalogUnit(e.target.value)}
+              className="h-10 w-60 rounded-lg border border-input bg-card px-3 text-sm"
+            >
+              {unitOptions.map((u) => (
+                <option key={u.code} value={u.label}>{u.label}</option>
+              ))}
+              <option value="__umum">Seluruh sekolah (umum)</option>
+            </select>
+          </div>
+        )}
+        {catalogSubjects.length > 0 ? (
+          <SubjectCatalog subjects={catalogSubjects} tingkatOptions={tingkatOptions} isCentral={isCentral} reload={loadSubjects} />
+        ) : (
+          isCentral && subjects.length > 0 && (
+            <p className="mt-3 text-sm text-muted-foreground">Belum ada mata pelajaran untuk unit ini.</p>
+          )
         )}
       </Card>
 
@@ -713,7 +747,7 @@ export default function JadwalPage() {
                 }}
                 className="h-10 w-52 rounded-lg border border-input bg-card px-3 text-sm"
               >
-                <option value="">Semua Unit</option>
+                {unitOptions.length === 0 && <option value="">Memuat unit…</option>}
                 {unitOptions.map((u) => (
                   <option key={u.code} value={u.code}>{u.label}</option>
                 ))}
@@ -769,6 +803,12 @@ export default function JadwalPage() {
           onCreated={() => loadSchedules(unitFilter)}
         />
       </Card>
+
+      {isCentral && unitFilter && (
+        <h2 className="-mb-2 text-sm font-semibold">
+          Jadwal unit {unitOptions.find((u) => u.code === unitFilter)?.label ?? unitFilter}
+        </h2>
+      )}
 
       {loadedRows === null && <Skeleton className="h-40 w-full" />}
 
