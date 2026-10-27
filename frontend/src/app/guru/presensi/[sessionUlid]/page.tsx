@@ -187,7 +187,7 @@ const QUICK_OPTIONS: AttendanceStatus[] = ["hadir", "sakit", "izin", "alpa"];
 const QUICK_ACTIVE: Record<AttendanceStatus, string> = {
   hadir: "bg-good text-white hover:bg-good/90",
   sakit: "bg-warn text-white hover:bg-warn/90",
-  izin: "bg-info text-white hover:bg-info/90",
+  izin: "bg-primary text-white hover:bg-primary/90",
   alpa: "bg-bad text-white hover:bg-bad/90",
 };
 
