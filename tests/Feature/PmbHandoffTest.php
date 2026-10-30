@@ -413,6 +413,55 @@ class PmbHandoffTest extends TestCase
         $this->assertSame('ibu.punya@example.com', $this->sentMail[0]['to']);
     }
 
+    public function test_contacts_from_pmb_are_normalised_so_a_sibling_finds_the_same_parent(): void
+    {
+        // The merge of 2026-10-26 once dropped this (audit T52) without a
+        // single test noticing: PMB sends the form as typed, and a raw
+        // "+62…" or mixed-case email misses the blind-index lookup.
+        $first = $this->payload();
+        $first['guardians'] = [
+            ['nama' => 'Budi Ramadhani', 'hubungan' => 'ayah', 'email' => 'Budi@Example.COM', 'no_hp' => '+62 812-3456-7890', 'is_primary' => true],
+        ];
+        $this->postHandoff($first)->assertStatus(202);
+
+        $second = $this->payload([
+            'event_id' => '01JCEVENT0000000000000010',
+            'student' => ['pmb_ulid' => '01JCSTUDENT000000000000010', 'no_pendaftaran' => 'PMB-2026-00310', 'nama_lengkap' => 'Adik Aisyah', 'nisn' => '0123456710', 'nik' => '3273010101140010'],
+        ]);
+        $second['guardians'] = [
+            ['nama' => 'Budi Ramadhani', 'hubungan' => 'ayah', 'email' => 'budi@example.com', 'no_hp' => '081234567890', 'is_primary' => true],
+        ];
+        $this->postHandoff($second)->assertStatus(202);
+
+        $this->assertSame(1, Guardian::count());
+        $this->assertSame(1, User::where('role', 'orangtua')->count());
+
+        $guardian = Guardian::first();
+        $this->assertSame('081234567890', $guardian->no_hp);
+        $this->assertSame('budi@example.com', User::find($guardian->user_id)->email);
+        $this->assertCount(2, $guardian->students);
+    }
+
+    public function test_a_cancelled_registration_consumes_the_parents_live_invitation(): void
+    {
+        // Audit T53-a, also dropped by the 2026-10-26 merge: the account is
+        // disabled, and the link still sitting in the parent's inbox must
+        // not sign it back in for the rest of its 7 days.
+        $this->postHandoff($this->payload())->assertStatus(202);
+        $user = User::where('email', 'budi@example.com')->first();
+        $this->assertSame(1, AccountInvitation::where('user_id', $user->id)->whereNull('used_at')->count());
+
+        $this->postHandoff($this->payload([
+            'event' => 'student.cancelled',
+            'event_id' => '01JCEVENT0000000000000011',
+            'reason' => 'Uang pangkal dikembalikan',
+        ]))->assertStatus(202);
+
+        $this->assertFalse($user->fresh()->is_active);
+        $this->assertSame('dropped_out', Student::first()->status);
+        $this->assertSame(0, AccountInvitation::where('user_id', $user->id)->whereNull('used_at')->count());
+    }
+
     private function tokenFromLastMail(): string
     {
         $url = $this->sentMail[array_key_last($this->sentMail)]['data']['activation_url'];

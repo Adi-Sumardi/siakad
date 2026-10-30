@@ -8,6 +8,7 @@ use App\Models\IntegrationEvent;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Models\User;
+use App\Services\Notification\PhoneNumberFormatter;
 use App\Services\Security\FieldEncrypter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -159,11 +160,25 @@ class PmbHandoffProcessor
         // Nobody with email: the primary keeps it, to be invited once an
         // admin adds one.
         $list = collect($guardians)->values();
-        $holder = $list->search(fn ($g) => ($g['is_primary'] ?? false) && ! empty($g['email']));
-        $holder = $holder !== false ? $holder : $list->search(fn ($g) => ! empty($g['email']));
+        $holder = $list->search(fn ($g) => ($g['is_primary'] ?? false) && filled($g['email'] ?? null));
+        $holder = $holder !== false ? $holder : $list->search(fn ($g) => filled($g['email'] ?? null));
         $holder = $holder !== false ? $holder : $list->search(fn ($g) => ($g['is_primary'] ?? false));
 
         foreach ($list as $index => $data) {
+            // Normalised once, at the door (audit T52): PMB sends whatever
+            // the registration form captured - "+62…", "62…", mixed-case
+            // email. Every lookup below rides the blind-index hash of the
+            // normalised form, so a raw value missed the existing
+            // guardian/user and minted duplicates (then died on
+            // guardians.user_id), and reminders later dialled "6262812…".
+            if (! empty($data['no_hp'])) {
+                $data['no_hp'] = PhoneNumberFormatter::toWhatsAppFormat($data['no_hp']) ?? $data['no_hp'];
+            }
+
+            if (! empty($data['email'])) {
+                $data['email'] = mb_strtolower(trim($data['email']));
+            }
+
             $guardian = $this->findGuardian($data) ?? new Guardian;
 
             $guardian->fill([
@@ -194,13 +209,32 @@ class PmbHandoffProcessor
 
             $guardian->save();
 
+            $isBilling = $isPrimary && ! $billingAssigned;
+
+            if ($isBilling) {
+                // Demote first (audit 2026-10-05): $billingAssigned only
+                // tracks THIS event, so a redelivered or re-enrolled handoff
+                // whose primary differs from the first event's used to leave
+                // TWO is_billing_contact=true pivots - and every reader
+                // (billingContact(), reminders, receipts, refunds, Dapodik)
+                // picks firstWhere(is_billing_contact), which can be the
+                // wrong parent. Same demote-before-sync ImportController
+                // has always done.
+                $student->guardians()
+                    ->wherePivot('is_billing_contact', true)
+                    ->whereKeyNot($guardian->id)
+                    ->get()
+                    ->each(fn (Guardian $existing) => $student->guardians()
+                        ->updateExistingPivot($existing->id, ['is_billing_contact' => false]));
+            }
+
             $student->guardians()->syncWithoutDetaching([
                 $guardian->id => [
                     'relationship' => $data['hubungan'],
                     'is_primary' => $isPrimary,
                     // Exactly one billing contact per student: the first primary
                     // guardian wins, the rest are contacts only.
-                    'is_billing_contact' => $isPrimary && ! $billingAssigned,
+                    'is_billing_contact' => $isBilling,
                 ],
             ]);
 
@@ -243,6 +277,20 @@ class PmbHandoffProcessor
         }
 
         if ($existing) {
+            // Only a parent account is ever reused as a parent account
+            // (audit T53-b): staff registering their own child through PMB
+            // used to get the STAFF account attached as guardian - the wali
+            // portal then showed a staff-scoped login its students, and the
+            // actual parent never received an invitation of their own. Fail
+            // the event loudly for manual pairing instead of guessing; the
+            // same contact cannot simply mint a second account (unique
+            // email/phone), so this is a human decision by design.
+            if ($existing->role !== 'orangtua') {
+                throw new RuntimeException(
+                    'Kontak wali ('.($data['email'] ?? $data['no_hp'] ?? '-').") sudah dipakai akun staf ({$existing->role}) - pasangkan wali ini secara manual."
+                );
+            }
+
             return $existing;
         }
 
@@ -373,6 +421,14 @@ class PmbHandoffProcessor
 
                 if (! $stillEnrolled && $guardian->user) {
                     $guardian->user->forceFill(['is_active' => false])->save();
+
+                    // The deactivation eats any live invitation too (audit
+                    // T53-a): a link still in flight must not be able to
+                    // sign the now-disabled account back in for its TTL.
+                    \App\Models\AccountInvitation::query()
+                        ->where('user_id', $guardian->user->id)
+                        ->whereNull('used_at')
+                        ->update(['used_at' => now()]);
                 }
             }
         });
