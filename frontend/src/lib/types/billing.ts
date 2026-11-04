@@ -4,7 +4,7 @@ export type Bill = {
   ulid: string;
   bill_number: string;
   description: string;
-  fee_type?: { code: string; name: string };
+  fee_type?: { code: string; name: string; recurrence?: "monthly" | "per_term" | "once" };
   feeType?: { code: string; name: string };
   student?: {
     ulid: string;

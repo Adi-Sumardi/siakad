@@ -485,6 +485,44 @@ class BillingTest extends TestCase
         app(CheckoutService::class)->start($user, [$bill->ulid], 'virtual_account', [$bill->ulid => 200000]);
     }
 
+    public function test_only_uang_pangkal_may_be_paid_in_installments(): void
+    {
+        // Sekolah: hanya uang pangkal yang bisa dicicil, SPP dan lainnya tidak.
+        $this->spp->forceFill(['allow_installment' => true])->save();
+        $this->assertFalse($this->spp->fresh()->allow_installment);
+
+        $seragam = FeeType::create(['code' => 'seragam_x', 'name' => 'Seragam', 'recurrence' => 'once', 'allow_installment' => true]);
+        $this->assertFalse($seragam->allow_installment);
+
+        $pangkal = FeeType::create(['code' => 'uang_pangkal_x', 'name' => 'Uang Pangkal', 'recurrence' => 'once']);
+        $this->assertTrue($pangkal->allow_installment);
+
+        $this->rate();
+        $this->student();
+        $this->generator()->run($this->spp, $this->year, $this->unit, 8);
+        $this->assertFalse(Bill::first()->allow_installment);
+    }
+
+    public function test_several_spp_months_are_paid_in_one_checkout(): void
+    {
+        // Wali yang menunggak bisa melunasi beberapa bulan SPP sekaligus.
+        $this->rate();
+        $student = $this->student();
+        $user = $this->guardianFor($student);
+        foreach ([7, 8, 9, 10, 11, 12] as $month) {
+            $this->generator()->run($this->spp, $this->year, $this->unit, $month);
+        }
+
+        $bills = Bill::open()->get();
+        $this->assertCount(6, $bills);
+
+        $payment = app(CheckoutService::class)->start($user, $bills->pluck('ulid')->all(), 'virtual_account');
+        $this->assertEquals(3900000.0, (float) $payment->amount);
+
+        app(PaymentAllocator::class)->settle($payment);
+        $this->assertSame(0, Bill::open()->count());
+    }
+
     public function test_the_late_fee_is_charged_once_after_the_grace_window(): void
     {
         // The school's denda config finally has a reader (audit 2026-10-05):

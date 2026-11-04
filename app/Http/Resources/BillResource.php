@@ -17,6 +17,7 @@ class BillResource extends JsonResource
             'fee_type' => $this->whenLoaded('feeType', fn () => [
                 'code' => $this->feeType->code,
                 'name' => $this->feeType->name,
+                'recurrence' => $this->feeType->recurrence,
             ]),
             'student' => $this->whenLoaded('student', fn () => [
                 'ulid' => $this->student->ulid,

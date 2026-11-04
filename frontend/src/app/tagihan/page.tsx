@@ -28,6 +28,26 @@ import { dueLabel, rupiah } from "@/lib/format";
 import { isOpen, type Bill, type BillSummary, type FeeSelectionEntry, type Payment } from "@/lib/types/billing";
 import { cn } from "@/lib/utils";
 
+function feeCode(bill: Bill): string | null {
+  return bill.fee_type?.code ?? bill.feeType?.code ?? null;
+}
+
+function Checkbox({ checked, label }: { checked: boolean; label: string }) {
+  return (
+    <span
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={label}
+      className={cn(
+        "grid size-5.5 shrink-0 place-items-center rounded-lg border transition-all",
+        checked ? "border-primary bg-primary text-primary-foreground shadow-xs" : "border-input bg-card",
+      )}
+    >
+      {checked && <Check className="size-3.5" strokeWidth={3} />}
+    </span>
+  );
+}
+
 function statusBadge(bill: Bill) {
   if (bill.status === "paid") return <Badge variant="good">Lunas</Badge>;
   if (bill.status === "waived") return <Badge>Dibebaskan</Badge>;
@@ -112,6 +132,70 @@ export default function BillsPage() {
   const selectedTotal = selectedBills.reduce((sum, bill) => sum + bill.remaining_amount, 0);
 
   const childrenInCart = new Set(selectedBills.map((b) => b.student?.ulid)).size;
+
+  // Biaya bulanan (SPP, jamiyyah) tampil sebagai satu kartu per anak per
+  // jenis biaya; diklik baru muncul daftar bulan yang belum lunas. Biaya
+  // lain tetap satu kartu per tagihan. Urutan mengikuti tagihan pertama.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const openGroups = useMemo(() => {
+    const groups: { key: string; monthly: boolean; bills: Bill[] }[] = [];
+    const byKey = new Map<string, { key: string; monthly: boolean; bills: Bill[] }>();
+    for (const bill of openBills) {
+      if (bill.fee_type?.recurrence !== "monthly") {
+        groups.push({ key: bill.ulid, monthly: false, bills: [bill] });
+        continue;
+      }
+      const key = `${bill.student?.ulid}:${feeCode(bill)}`;
+      let group = byKey.get(key);
+      if (!group) {
+        group = { key, monthly: true, bills: [] };
+        byKey.set(key, group);
+        groups.push(group);
+      }
+      group.bills.push(bill);
+    }
+    for (const group of byKey.values()) {
+      group.bills.sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""));
+    }
+    return groups;
+  }, [openBills]);
+
+  function toggleExpanded(key: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  /** Pilih / lepas semua bulan dalam satu kartu SPP. */
+  function toggleGroup(groupBills: Bill[]) {
+    const allChosen = groupBills.every((b) => selected.has(b.ulid));
+    if (allChosen) {
+      setSelected((current) => {
+        const next = new Set(current);
+        groupBills.forEach((b) => next.delete(b.ulid));
+        return next;
+      });
+      return;
+    }
+
+    const first = groupBills[0];
+    const other = selectedBills.find(
+      (b) => b.student?.ulid !== first.student?.ulid || feeCode(b) !== feeCode(first),
+    );
+    if (other) {
+      toast.error("Virtual Account khusus per anak dan per jenis biaya. Selesaikan atau batalkan pilihan sebelumnya dulu.");
+      return;
+    }
+
+    setSelected((current) => {
+      const next = new Set(current);
+      groupBills.forEach((b) => next.add(b.ulid));
+      return next;
+    });
+  }
 
   function toggle(ulid: string) {
     const bill = openBills.find((b) => b.ulid === ulid);
@@ -315,7 +399,96 @@ export default function BillsPage() {
           )}
 
           <div className="grid grid-cols-1 gap-3.5">
-            {openBills.map((bill) => {
+            {openGroups.map((group) => {
+              if (group.monthly) {
+                const first = group.bills[0];
+                const isOpenCard = expanded.has(group.key);
+                const chosen = group.bills.filter((b) => selected.has(b.ulid)).length;
+                const allChosen = chosen === group.bills.length;
+                const groupTotal = group.bills.reduce((sum, b) => sum + b.remaining_amount, 0);
+                const anyOverdue = group.bills.some((b) => b.status === "overdue");
+
+                return (
+                  <Card
+                    key={group.key}
+                    className={cn(
+                      "border-border/80 transition-all duration-200",
+                      chosen > 0 && "border-primary ring-1 ring-primary",
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleExpanded(group.key)}
+                      aria-expanded={isOpenCard}
+                      className="flex w-full items-start gap-4 p-5 text-left cursor-pointer"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-foreground text-base">
+                          {first.fee_type?.name ?? "SPP"} · {first.student?.nama_lengkap}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {group.bills.length} bulan belum lunas
+                          {chosen > 0 && <> · <strong className="text-primary">{chosen} dipilih</strong></>}
+                        </p>
+                        {anyOverdue && <Badge variant="bad" className="mt-2">Ada yang lewat jatuh tempo</Badge>}
+                      </div>
+                      <div className="text-right">
+                        <p className="tabular font-black text-lg text-primary">{rupiah(groupTotal)}</p>
+                        <p className="text-xs font-semibold text-primary inline-flex items-center gap-1">
+                          {isOpenCard ? "Tutup" : "Lihat bulan"}
+                          <ChevronRight className={cn("size-3.5 transition-transform", isOpenCard && "rotate-90")} />
+                        </p>
+                      </div>
+                    </button>
+
+                    {isOpenCard && (
+                      <div className="border-t border-border/60 px-5 pb-4 pt-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-muted-foreground">Centang bulan yang ingin dibayar sekarang</span>
+                          <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" onClick={() => toggleGroup(group.bills)}>
+                            {allChosen ? "Batalkan semua" : `Pilih semua (${group.bills.length} bulan)`}
+                          </Button>
+                        </div>
+                        {group.bills.map((bill) => {
+                          const checked = selected.has(bill.ulid);
+                          return (
+                            <div
+                              key={bill.ulid}
+                              onClick={() => toggle(bill.ulid)}
+                              className={cn(
+                                "flex items-center gap-3 rounded-xl border p-3 cursor-pointer transition-colors hover:border-primary/60",
+                                checked ? "border-primary bg-primary/5" : "border-border/70",
+                              )}
+                            >
+                              <Checkbox checked={checked} label={`Pilih ${bill.description}`} />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold text-foreground truncate">{bill.description}</p>
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                  {statusBadge(bill)}
+                                  {bill.discount_amount > 0 && <Badge variant="primary">Diskon {rupiah(bill.discount_amount)}</Badge>}
+                                  {bill.late_fee > 0 && <Badge variant="bad">Denda {rupiah(bill.late_fee)}</Badge>}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className="tabular font-bold text-sm text-foreground">{rupiah(bill.remaining_amount)}</p>
+                                <Link
+                                  href={`/tagihan/${bill.ulid}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[11px] text-primary font-semibold hover:underline"
+                                >
+                                  Rincian
+                                </Link>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </Card>
+                );
+              }
+
+              const bill = group.bills[0];
               const checked = selected.has(bill.ulid);
 
               return (
@@ -329,18 +502,8 @@ export default function BillsPage() {
                 >
                   <div className="flex items-start gap-4">
                     {/* Checkbox */}
-                    <span
-                      role="checkbox"
-                      aria-checked={checked}
-                      aria-label={`Pilih ${bill.description}`}
-                      className={cn(
-                        "mt-1 grid size-5.5 shrink-0 place-items-center rounded-lg border transition-all",
-                        checked
-                          ? "border-primary bg-primary text-primary-foreground shadow-xs"
-                          : "border-input bg-card",
-                      )}
-                    >
-                      {checked && <Check className="size-3.5" strokeWidth={3} />}
+                    <span className="mt-1">
+                      <Checkbox checked={checked} label={`Pilih ${bill.description}`} />
                     </span>
 
                     <div className="min-w-0 flex-1 space-y-2">
@@ -356,7 +519,7 @@ export default function BillsPage() {
                           <p className="tabular font-black text-lg text-primary">{rupiah(bill.remaining_amount)}</p>
                           {bill.paid_amount > 0 && (
                             <p className="tabular text-xs text-muted-foreground">
-                              sudah dicicil {rupiah(bill.paid_amount)} dari {rupiah(bill.total_amount)}
+                              sudah dibayar {rupiah(bill.paid_amount)} dari {rupiah(bill.total_amount)}
                             </p>
                           )}
                         </div>

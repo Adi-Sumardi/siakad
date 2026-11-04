@@ -41,6 +41,17 @@ class Bill extends Model
     /** Statuses that still owe money - the definition every "outstanding" query shares. */
     public const OPEN_STATUSES = ['unpaid', 'partial', 'overdue'];
 
+    /** Sama dengan FeeType: hanya tagihan uang pangkal yang boleh dibayar sebagian. */
+    protected static function booted(): void
+    {
+        static::creating(function (Bill $bill) {
+            if ($bill->allow_installment) {
+                $type = $bill->feeType ?? FeeType::find($bill->fee_type_id);
+                $bill->allow_installment = $type !== null && FeeType::isUangPangkal($type->code, $type->name);
+            }
+        });
+    }
+
     public function student(): BelongsTo
     {
         return $this->belongsTo(Student::class);

@@ -23,6 +23,23 @@ class FeeType extends Model
         'sort_order' => 'integer',
     ];
 
+    /**
+     * Hanya uang pangkal yang boleh dicicil - SPP dan biaya lain dibayar
+     * penuh per tagihan. Dipaksa saat simpan supaya form admin, seeder dan
+     * impor tidak bisa menyalakannya untuk jenis biaya lain.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (FeeType $type) {
+            $type->allow_installment = static::isUangPangkal($type->code, $type->name);
+        });
+    }
+
+    public static function isUangPangkal(?string $code, ?string $name = null): bool
+    {
+        return str_contains(mb_strtolower(($code ?? '').' '.($name ?? '')), 'pangkal');
+    }
+
     public function rates(): HasMany
     {
         return $this->hasMany(FeeRate::class);
