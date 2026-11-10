@@ -103,7 +103,7 @@ function ClassroomCard({ classroom, today = false }: { classroom: Classroom; tod
               {c.is_homeroom && (
                 <Badge variant="default" className="gap-1 text-[10px] font-bold">
                   <Star className="size-3 fill-current" />
-                  <span>Wali Kelas Anda</span>
+                  <span>Anda Sebagai Wali Kelas</span>
                 </Badge>
               )}
             </div>

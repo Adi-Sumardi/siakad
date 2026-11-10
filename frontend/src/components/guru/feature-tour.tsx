@@ -34,7 +34,7 @@ const GURU_STEPS: TourStep[] = [
   {
     target: "semua-kelas",
     title: "Kelas yang Anda Ajar",
-    body: "Semua kelas yang Anda ajar tahun ajaran ini. Kartu bertanda bintang \"Wali Kelas Anda\" adalah kelas tempat Anda menjadi wali kelas.",
+    body: "Semua kelas yang Anda ajar tahun ajaran ini. Kartu bertanda bintang \"Anda Sebagai Wali Kelas\" adalah kelas tempat Anda menjadi wali kelas.",
     icon: School,
     placement: "below",
   },
