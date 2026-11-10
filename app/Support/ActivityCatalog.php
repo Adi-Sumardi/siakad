@@ -38,6 +38,7 @@ final class ActivityCatalog
         'grade.recorded_bulk' => ['Mengisi nilai', 'Akademik'],
         'attendance.session_opened' => ['Membuka sesi presensi', 'Presensi'],
         'attendance.session_completed' => ['Menutup sesi presensi', 'Presensi'],
+        'student_face.reset' => ['Menghapus wajah terdaftar siswa', 'Presensi'],
         'attendance.session_record_revoked' => ['Membatalkan catatan presensi', 'Presensi'],
         'extracurricular.created' => ['Membuat ekstrakurikuler', 'Ekskul'],
         'extracurricular.updated' => ['Mengubah ekstrakurikuler', 'Ekskul'],

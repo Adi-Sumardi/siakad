@@ -227,4 +227,12 @@ return [
         'api_key' => env('YAPINET_API_KEY'),
     ],
 
+    // Gate check-in by face (docs/09). Euclidean distance between two
+    // face-api descriptors: below this counts as the same person. 0.6 is the
+    // library's loose default; 0.5 is stricter against look-alike friends.
+    'face' => [
+        'max_distance' => (float) env('FACE_MAX_DISTANCE', 0.5),
+        'photo_retention_days' => (int) env('FACE_PHOTO_RETENTION_DAYS', 30),
+    ],
+
 ];

@@ -22,12 +22,6 @@ class RotatingQrService
 {
     public const WINDOW_SECONDS = 30;
 
-    /** The scope of a daily gate session's rotating code. */
-    public static function dailyScope(string $sessionUlid): string
-    {
-        return 'daily:'.$sessionUlid;
-    }
-
     /** The scope of a per-lesson roll-call session's rotating code. */
     public static function lessonScope(string $sessionUlid): string
     {

@@ -32,7 +32,7 @@ class DailyAttendanceSetting extends Model
         'pulang_enabled', 'pulang_opens_at', 'pulang_closes_at',
         'intake_mode',
         'geo_required', 'gate_lat', 'gate_lng', 'geo_radius_m',
-        'qr_required', 'public_slug',
+        'face_required', 'public_slug',
         'notify_masuk', 'notify_pulang', 'notify_absent',
     ];
 
@@ -42,7 +42,7 @@ class DailyAttendanceSetting extends Model
         'pulang_enabled' => 'boolean',
         'intake_mode' => 'string',
         'geo_required' => 'boolean',
-        'qr_required' => 'boolean',
+        'face_required' => 'boolean',
         'notify_masuk' => 'boolean',
         'notify_pulang' => 'boolean',
         'notify_absent' => 'boolean',

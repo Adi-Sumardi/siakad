@@ -63,7 +63,7 @@ class UpdateDailyAttendanceSettingRequest extends FormRequest
                 'nullable', 'integer', 'min:30', 'max:2000',
             ],
 
-            'qr_required' => ['boolean'],
+            'face_required' => ['boolean'],
             'notify_masuk' => ['boolean'],
             'notify_pulang' => ['boolean'],
             'notify_absent' => ['boolean'],

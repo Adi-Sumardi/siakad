@@ -14,6 +14,7 @@ use App\Models\Holiday;
 use App\Models\LeaveRequest;
 use App\Models\SchoolUnit;
 use App\Models\Student;
+use App\Models\StudentFace;
 use App\Models\Term;
 use App\Models\User;
 use Illuminate\Database\QueryException;
@@ -56,7 +57,7 @@ class DailyAttendanceService
      */
     public const CORRECTION_WINDOW_DAYS = 60;
 
-    public function __construct(private RotatingQrService $qr) {}
+    public function __construct(private FaceMatcher $faces) {}
 
     /** First-or-create the unit's settings row, pre-filled with the jenjang's default mode and sane bells. */
     public function ensureSettings(SchoolUnit $unit): DailyAttendanceSetting
@@ -388,6 +389,8 @@ class DailyAttendanceService
             ->whereIn('student_id', $students->pluck('id'))
             ->pluck('type', 'student_id');
 
+        $enrolled = StudentFace::whereIn('student_id', $students->pluck('id'))->pluck('student_id');
+
         return $students->map(fn (Student $s) => [
             'leave' => $leaves->get($s->id),
             'ulid' => $s->ulid,
@@ -399,6 +402,11 @@ class DailyAttendanceService
             'is_late' => $records->get($s->id)?->is_late ?? false,
             'source' => $records->get($s->id)?->source,
             'marked_at' => $records->get($s->id)?->checked_in_at ?: $records->get($s->id)?->created_at,
+            // Gate check-in by face (docs/09): whether a reference face is
+            // registered, and whether this mark carries a snapshot to look at.
+            'face_enrolled' => $enrolled->contains($s->id),
+            'has_photo' => (bool) $records->get($s->id)?->photo_path,
+            'face_distance' => $records->get($s->id)?->face_distance,
         ]);
     }
 
@@ -495,12 +503,16 @@ class DailyAttendanceService
     /**
      * A student's own gate check-in (mode gerbang, §5D). Every layer of the
      * anti-fraud stack is re-checked here, never trusted from the client:
-     * rotating QR freshness, GPS radius, device-once, and the one-live-mark
-     * rule - with the database's partial unique indexes as the final guard
-     * under a session row lock, so two scans racing each other cannot both
-     * pass the pre-checks.
+     * GPS radius, the face match (docs/09) or - for a unit without faces -
+     * device-once, and the one-live-mark rule, with the database's partial
+     * unique indexes as the final guard under a session row lock, so two
+     * check-ins racing each other cannot both pass the pre-checks.
      *
-     * @param  array{device_id:?string, ip:?string, lat:?float, lng:?float, accuracy:?float, qr_code:?string}  $input
+     * With faces on, identity is the face, not the device: one class iPad or
+     * a borrowed phone may check in many students, each with their own face.
+     * A student's first face check-in enrolls that face as their reference.
+     *
+     * @param  array{device_id:?string, ip:?string, lat:?float, lng:?float, accuracy:?float, descriptor?:mixed, photo?:?string}  $input
      */
     public function selfCheckIn(DailySession $session, Student $student, array $input): DailyRecord
     {
@@ -518,16 +530,6 @@ class DailyAttendanceService
 
         if (! $term) {
             throw new RuntimeException('Tidak ada semester aktif - presensi tidak bisa dicatat saat ini.');
-        }
-
-        if ($setting->qr_required) {
-            if (empty($input['qr_code'])) {
-                throw new RuntimeException('Kode QR wajib - scan QR yang tampil di gerbang.');
-            }
-
-            if (! $this->qr->verify(RotatingQrService::dailyScope($session->ulid), (string) $input['qr_code'])) {
-                throw new RuntimeException('Kode QR tidak dikenali atau sudah kedaluwarsa - scan ulang.');
-            }
         }
 
         if ($setting->geo_required) {
@@ -555,10 +557,40 @@ class DailyAttendanceService
             }
         }
 
+        $faceRequired = (bool) $setting->face_required;
+        $descriptor = null;
+        $faceDistance = null;
+        $photoPath = null;
+
+        if ($faceRequired) {
+            if (empty($input['descriptor']) || empty($input['photo'])) {
+                throw new RuntimeException('Verifikasi wajah wajib - hadapkan wajah ke kamera dan berkedip.');
+            }
+
+            $descriptor = $this->faces->descriptor($input['descriptor']);
+            $reference = $student->face;
+
+            if ($reference) {
+                $faceDistance = $this->faces->distance($descriptor, $reference->descriptor);
+
+                if (! $this->faces->matches($faceDistance)) {
+                    throw new RuntimeException('Wajah tidak cocok dengan NIS ini. Coba lagi dengan cahaya cukup, atau minta wali kelas mencatat absenmu.');
+                }
+            }
+
+            // Written last among the pre-checks and removed again below if
+            // the write itself fails, so a refused check-in leaves no file.
+            $photoPath = $this->faces->storePhoto((string) $input['photo'], 'absen-wajah/'.$session->date->toDateString());
+        }
+
         $at = Carbon::now('Asia/Jakarta');
         $isLate = $session->late_after !== null && $at->format('H:i:s') > $session->late_after->format('H:i:s');
 
-        $deviceHash = ! empty($input['device_id']) ? hash('sha256', (string) $input['device_id']) : null;
+        // With faces on, the device proves nothing about who is checking in
+        // and is deliberately shared (class iPad, borrowed phone), so it is
+        // not recorded: a stored hash would also trip the lesson lane's own
+        // one-device-one-student rule for the next student on that iPad.
+        $deviceHash = ! $faceRequired && ! empty($input['device_id']) ? hash('sha256', (string) $input['device_id']) : null;
         $ipHash = ! empty($input['ip']) ? hash('sha256', (string) $input['ip']) : null;
 
         // Cross-layer device mutex (audit T46-c): this lane locks its OWN
@@ -581,7 +613,7 @@ class DailyAttendanceService
         }
 
         try {
-            $record = DB::transaction(function () use ($session, $student, $term, $at, $isLate, $deviceHash, $ipHash) {
+            $record = DB::transaction(function () use ($session, $student, $term, $at, $isLate, $deviceHash, $ipHash, $descriptor, $faceDistance, $photoPath) {
                 // Serialise concurrent scans for this session the same way
                 // AttendanceLedger::checkIn does: lock the window, then look.
                 $fresh = DailySession::whereKey($session->id)->lockForUpdate()->first();
@@ -620,7 +652,7 @@ class DailyAttendanceService
                         ->exists();
 
                     if (! $hasMasuk) {
-                        throw new RuntimeException('Belum ada catatan absen masuk hari ini - hubungi Tata Usaha untuk dicatat manual.');
+                        throw new RuntimeException('Belum ada catatan absen masuk hari ini - minta wali kelas mencatat absen masukmu dulu.');
                     }
                 }
 
@@ -653,6 +685,18 @@ class DailyAttendanceService
                     throw new RuntimeException('Perangkat ini sudah dipakai presensi siswa lain hari ini.');
                 }
 
+                // First face check-in: this face becomes the student's
+                // reference. Its photo is a separate copy - the evidence
+                // photo is pruned after a month, the reference is not.
+                if ($descriptor !== null && ! StudentFace::where('student_id', $student->id)->exists()) {
+                    StudentFace::create([
+                        'student_id' => $student->id,
+                        'descriptor' => $descriptor,
+                        'photo_path' => $this->faces->copyPhoto($photoPath, 'wajah-siswa'),
+                        'enrolled_at' => $at,
+                    ]);
+                }
+
                 return DailyRecord::create([
                     'daily_session_id' => $session->id,
                     'student_id' => $student->id,
@@ -665,10 +709,19 @@ class DailyAttendanceService
                     'checked_in_at' => $at,
                     'device_hash' => $deviceHash,
                     'ip_hash' => $ipHash,
+                    'face_distance' => $faceDistance,
+                    'photo_path' => $photoPath,
                     'record_status' => 'recorded',
                 ]);
             });
-        } catch (QueryException) {
+        } catch (\Throwable $e) {
+            // Nothing was written, so the snapshot is not evidence of anything.
+            $this->faces->deletePhoto($photoPath);
+
+            if (! $e instanceof QueryException) {
+                throw $e;
+            }
+
             // One of the partial uniques won a race the pre-checks missed.
             // Which one tripped decides the message the student sees.
             if (DailyRecord::where('daily_session_id', $session->id)

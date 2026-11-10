@@ -119,7 +119,7 @@ class DailyAttendanceSettingController extends Controller
                 'gate_lng' => $setting->gate_lng,
                 'radius_m' => $setting->geo_radius_m,
             ],
-            'qr_required' => $setting->qr_required,
+            'face_required' => $setting->face_required,
             'notifications' => [
                 'masuk' => $setting->notify_masuk,
                 'pulang' => $setting->notify_pulang,

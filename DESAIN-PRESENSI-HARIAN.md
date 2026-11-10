@@ -118,6 +118,10 @@ Tidak ada QR, tidak ada HP siswa. Wali kelas lupa mengisi? → §5E menutup cela
 
 ### D. Mode Gerbang (SMP/SMA) — TANPA TV
 
+> **Diperbarui 10-11-2026:** QR berputar dan aturan "satu HP = satu NIS" diganti
+> **NIS + wajah (berkedip)**, termasuk lewat iPad kelas atau HP teman. Lihat
+> `docs/09-ABSEN-WAJAH-GERBANG.md`. Alur QR di bawah ini tinggal sebagai riwayat.
+
 Poin penting desain ini: **sekolah tidak membeli/ menyediakan layar TV.**
 Layar QR-nya adalah HP/laptop TU sendiri; siswa masuk lewat link publik.
 

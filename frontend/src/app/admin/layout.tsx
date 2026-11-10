@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   Megaphone,
   Radar,
+  ScanFace,
   Receipt,
   School,
   ScrollText,
@@ -42,6 +43,7 @@ const NAV: StaffNavItem[] = [
 
   { href: "/admin/jadwal", label: "Jadwal Pelajaran", icon: CalendarClock, tour: "jadwal", group: "Akademik" },
   { href: "/admin/presensi-harian", label: "Presensi Harian", icon: CalendarCheck2, tour: "presensi-harian", group: "Akademik" },
+  { href: "/admin/wajah-absen", label: "Wajah Absen Siswa", icon: ScanFace, group: "Akademik" },
   { href: "/admin/nilai", label: "Nilai & Rapor", icon: ClipboardList, tour: "nilai", group: "Akademik" },
 
   { href: "/admin/ekstrakurikuler", label: "Ekstrakurikuler", icon: Trophy, tour: "ekstrakurikuler", group: "Kesiswaan" },
@@ -69,7 +71,7 @@ const NAV: StaffNavItem[] = [
 ];
 
 /** What waka kesiswaan / kepala sekolah see in the sidebar. */
-const LEADER_NAV = ["/admin/poin/persetujuan", "/admin/poin"];
+const LEADER_NAV = ["/admin/poin/persetujuan", "/admin/poin", "/admin/wajah-absen"];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -78,8 +80,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const isAdmin = user?.role === "admin" || user?.role === "admin_unit";
   const isLeader = user?.role === "waka_kesiswaan" || user?.role === "kepala_sekolah";
-  // Leadership only gets the point screens - the API refuses everything else.
-  const leaderAllowed = pathname === "/admin/poin" || pathname.startsWith("/admin/poin/");
+  // Leadership only gets the point screens and the face-absen page - the API refuses everything else.
+  const leaderAllowed =
+    pathname === "/admin/poin" || pathname.startsWith("/admin/poin/") || pathname === "/admin/wajah-absen";
   const allowed = isAdmin || (isLeader && leaderAllowed);
 
   const pendingApprovals = usePendingApprovals(isAdmin || isLeader ? "/api/admin" : null);

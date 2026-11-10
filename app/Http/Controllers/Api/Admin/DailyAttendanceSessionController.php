@@ -8,7 +8,6 @@ use App\Models\DailySession;
 use App\Models\SchoolUnit;
 use App\Models\Student;
 use App\Services\Attendance\DailyAttendanceService;
-use App\Services\Attendance\RotatingQrService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -73,22 +72,6 @@ class DailyAttendanceSessionController extends Controller
                     ? $service->lessonDiscrepancy($session)
                     : ['available' => false, 'no_lesson' => [], 'no_gate' => []],
             ]),
-        ]);
-    }
-
-    /** The code the TU's "layar QR" renders right now, plus how long until it goes stale - the screen polls back after exactly that long. */
-    public function gateQr(Request $request, string $ulid, RotatingQrService $qr): JsonResponse
-    {
-        $session = $this->ownSession($request, $ulid);
-
-        if (! $session->isOpen()) {
-            return response()->json(['message' => 'Sesi ini sudah ditutup.'], 410);
-        }
-
-        return response()->json([
-            'code' => $qr->code(RotatingQrService::dailyScope($session->ulid)),
-            'rotates_in' => $qr->secondsUntilRotation(),
-            'window_seconds' => RotatingQrService::WINDOW_SECONDS,
         ]);
     }
 

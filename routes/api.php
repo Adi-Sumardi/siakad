@@ -40,6 +40,7 @@ use App\Http\Controllers\Api\Auth\OtpController;
 use App\Http\Controllers\Api\Auth\SessionController;
 use App\Http\Controllers\Api\Executive\SummaryController as ExecutiveSummaryController;
 use App\Http\Controllers\Api\FileController;
+use App\Http\Controllers\Api\StudentFaceController;
 use App\Http\Controllers\Api\Guru\AchievementController as GuruAchievementController;
 use App\Http\Controllers\Api\Guru\AttendanceSessionController as GuruAttendanceSessionController;
 use App\Http\Controllers\Api\Guru\ClassroomController as GuruClassroomController;
@@ -204,6 +205,10 @@ Route::middleware(['auth:sanctum', 'role:guru'])->prefix('guru')->group(function
     Route::get('/daily-attendance/today', [GuruDailyAttendanceController::class, 'today']);
     Route::post('/daily-attendance/sessions/{ulid}/records', [GuruDailyAttendanceController::class, 'mark']);
     Route::post('/daily-attendance/sessions/{ulid}/mark-all', [GuruDailyAttendanceController::class, 'markAll']);
+    // Gate check-in by face (docs/09): the unit's public link to share with
+    // the class, and resetting a homeroom student's wrongly registered face.
+    Route::get('/daily-attendance/public-link', [StudentFaceController::class, 'publicLink']);
+    Route::delete('/students/{ulid}/face', [StudentFaceController::class, 'destroy']);
     // Guardians' izin/sakit notices for the teacher's own homeroom students.
     Route::get('/leave-requests', [LeaveRequestReviewController::class, 'index']);
     Route::post('/leave-requests/{ulid}/approve', [LeaveRequestReviewController::class, 'approve']);
@@ -291,6 +296,10 @@ Route::middleware(['auth:sanctum', 'active'])->prefix('files')->group(function (
     Route::get('/announcements/{ulid}/file', [FileController::class, 'announcementFile']);
     Route::get('/leave-requests/{ulid}/attachment', [LeaveRequestReviewController::class, 'attachment']);
     Route::get('/student-documents/{ulid}', [StudentDocumentController::class, 'file']);
+    // Gate check-in by face (docs/09): a student's registered face and one
+    // check-in's snapshot - staff who can see the student, never guardians.
+    Route::get('/student-faces/{ulid}', [StudentFaceController::class, 'photo']);
+    Route::get('/daily-records/{ulid}/photo', [StudentFaceController::class, 'recordPhoto']);
 });
 
 /*
@@ -494,14 +503,13 @@ Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin,admin_unit'])->
     Route::patch('/daily-attendance/settings', [DailyAttendanceSettingController::class, 'update']);
     Route::get('/daily-attendance/today', [DailyAttendanceSessionController::class, 'today']);
     // Gate mode: the unit's public check-in link (issue once, rotate on a
-    // leak), the rotating QR the TU screen polls, and the manual mark lane.
+    // leak) and the manual mark lane.
     // Throttled (audit 2026-10-05 r2): these mint and rotate the unit's
     // public check-in credential - same weight as reset-access above.
     Route::post('/daily-attendance/public-link', [DailyAttendanceSettingController::class, 'issuePublicLink'])
         ->middleware('throttle:20,1');
     Route::post('/daily-attendance/public-link/reset', [DailyAttendanceSettingController::class, 'resetPublicLink'])
         ->middleware('throttle:20,1');
-    Route::get('/daily-attendance/sessions/{ulid}/gate-qr', [DailyAttendanceSessionController::class, 'gateQr']);
     Route::post('/daily-attendance/sessions/{ulid}/records', [DailyAttendanceSessionController::class, 'mark']);
     // TU review of guardians' izin/sakit notices (unit-scoped for admin_unit).
     Route::get('/leave-requests', [LeaveRequestReviewController::class, 'index']);
@@ -623,6 +631,12 @@ Route::middleware(['auth:sanctum', 'admin.activity', 'role:admin,admin_unit,waka
     Route::post('/point-approvals/approve-many', [PointApprovalController::class, 'approveMany']);
     Route::post('/point-approvals/{ulid}/approve', [PointApprovalController::class, 'approve']);
     Route::post('/point-approvals/{ulid}/reject', [PointApprovalController::class, 'reject']);
+
+    // Gate check-in by face (docs/09): sharing the unit's public link and
+    // looking after registered faces is kesiswaan work too.
+    Route::get('/daily-attendance/public-link', [StudentFaceController::class, 'publicLink']);
+    Route::get('/student-faces', [StudentFaceController::class, 'index']);
+    Route::delete('/students/{ulid}/face', [StudentFaceController::class, 'destroy']);
 });
 
 /*

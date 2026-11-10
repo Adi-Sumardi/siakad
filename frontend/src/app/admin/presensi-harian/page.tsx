@@ -5,6 +5,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { Calendar, CalendarCheck2, Copy, Download, Link2, RefreshCw, ShieldAlert, Split, Users } from "lucide-react";
 import { toast } from "sonner";
 import { CorrectionCell } from "@/components/attendance-correction";
+import { FacePhotoButton } from "@/components/face-photo";
 import { LeaveReviewPanel } from "@/components/leave-review-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,7 @@ type Settings = {
   pulang: { enabled: boolean; opens_at: string | null; closes_at: string | null };
   intake_mode: "wali_kelas" | "gerbang";
   geo: { required: boolean; gate_lat: number | null; gate_lng: number | null; radius_m: number | null };
-  qr_required: boolean;
+  face_required: boolean;
   notifications: { masuk: boolean; pulang: boolean; absent: boolean };
   public_slug: string | null;
   public_path: string | null;
@@ -41,6 +42,9 @@ type RosterRow = {
   source: string | null;
   marked_at: string | null;
   leave: "sakit" | "izin" | null;
+  record_ulid: string | null;
+  face_enrolled: boolean;
+  has_photo: boolean;
 };
 
 type TodaySession = {
@@ -175,7 +179,7 @@ export default function AdminDailyAttendancePage() {
         gate_lat: settings.geo.gate_lat,
         gate_lng: settings.geo.gate_lng,
         geo_radius_m: settings.geo.radius_m,
-        qr_required: settings.qr_required,
+        face_required: settings.face_required,
       };
       const updated = await api.patch<Settings>(`/api/admin/daily-attendance/settings${query}`, body);
       setSettings(updated);
@@ -266,7 +270,7 @@ export default function AdminDailyAttendancePage() {
                     className="mt-1.5 h-9 w-full rounded-lg border border-input bg-card px-2 text-sm"
                   >
                     <option value="wali_kelas">Wali kelas menandai di kelas (PG/RA/TK/SD)</option>
-                    <option value="gerbang">Gerbang — QR + radius (SMP/SMA)</option>
+                    <option value="gerbang">Absen mandiri siswa — NIS + wajah (SMP/SMA)</option>
                   </select>
                 </div>
 
@@ -276,11 +280,11 @@ export default function AdminDailyAttendancePage() {
                       <label className="flex items-center gap-2 text-sm">
                         <input
                           type="checkbox"
-                          checked={settings.qr_required}
-                          onChange={(e) => patchSettings({ qr_required: e.target.checked })}
+                          checked={settings.face_required}
+                          onChange={(e) => patchSettings({ face_required: e.target.checked })}
                           className="size-4 accent-primary"
                         />
-                        QR gerbang wajib
+                        Verifikasi wajah + kedip wajib
                       </label>
                       <label className="flex items-center gap-2 text-sm">
                         <input
@@ -334,13 +338,20 @@ export default function AdminDailyAttendancePage() {
                     )}
                     <p className="text-xs text-muted-foreground">
                       Radius minimal 30 m — GPS ponsel meleset ±10–50 m; radius terlalu kecil menolak siswa jujur.
+                      iPad tanpa SIM membaca lokasi dari WiFi, jadi beri radius lebih longgar (±150 m).
                     </p>
 
-                    {!settings.geo.required && (
+                    {settings.face_required && (
+                      <p className="text-xs text-muted-foreground">
+                        Wajah siswa terdaftar otomatis saat absen wajah pertamanya. Satu perangkat (iPad kelas, HP
+                        teman) boleh dipakai banyak siswa — yang dicocokkan wajahnya, bukan perangkatnya.
+                      </p>
+                    )}
+
+                    {!settings.geo.required && !settings.face_required && (
                       <p className="rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">
-                        Tanpa radius GPS, satu-satunya penjaga adalah QR yang harus terlihat di gerbang — foto QR
-                        yang dikirim lewat <em>video call</em> masih bisa lolos. Sangat disarankan menyalakan radius
-                        GPS untuk unit gerbang.
+                        Tanpa radius GPS dan tanpa wajah, siapa pun yang tahu NIS bisa absen dari mana saja.
+                        Nyalakan minimal salah satu.
                       </p>
                     )}
                   </div>
@@ -546,8 +557,7 @@ export default function AdminDailyAttendancePage() {
                 </div>
 
                 {isToday && settings.intake_mode === "gerbang" && session.type === "masuk" && session.status === "open" && (
-                  <div className="mt-3 grid gap-4 lg:grid-cols-2">
-                    <GateQrPanel sessionUlid={session.ulid} query={query} />
+                  <div className="mt-3 max-w-md">
                     <ManualMark session={session} query={query} onDone={() => loadBoard()} />
                   </div>
                 )}
@@ -660,6 +670,17 @@ export default function AdminDailyAttendancePage() {
                                 : row.source === "tu"
                                   ? "otomatis/TU"
                                   : "—"}
+                            {row.has_photo && row.record_ulid && (
+                              <span className="ml-2">
+                                <FacePhotoButton
+                                  path={`/api/files/daily-records/${row.record_ulid}/photo`}
+                                  title={`${row.nama_lengkap} · saat absen`}
+                                />
+                              </span>
+                            )}
+                            {settings.face_required && !row.face_enrolled && (
+                              <span className="ml-2 text-muted-foreground/70">· wajah belum terdaftar</span>
+                            )}
                           </td>
                           <td className="py-1.5">
                             <CorrectionCell
@@ -1075,7 +1096,7 @@ function PublicLinkCard({ slug, query, onChanged }: { slug: string | null; query
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              QR di samping juga berisi link — tampilkan/scan untuk membagikan tanpa mengetik.
+              QR di samping hanya berisi link ini — scan dengan kamera iPad/HP untuk membukanya tanpa mengetik. Bukan QR absen.
             </p>
             <Button
               variant="outline"
@@ -1097,72 +1118,7 @@ function PublicLinkCard({ slug, query, onChanged }: { slug: string | null; query
 }
 
 /**
- * The "layar QR" a TU holds up at the gate (§5D) - no TV needed, this page on
- * any phone/laptop IS the screen. Polls the rotating code and refreshes
- * itself right when the server says the current one goes stale.
- */
-function GateQrPanel({ sessionUlid, query }: { sessionUlid: string; query: string }) {
-  const [qr, setQr] = useState<{ code: string; rotates_in: number } | null>(null);
-  const [closed, setClosed] = useState(false);
-
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let cancelled = false;
-
-    const tick = () => {
-      api
-        .get<{ code: string; rotates_in: number }>(`/api/admin/daily-attendance/sessions/${sessionUlid}/gate-qr${query}`)
-        .then((d) => {
-          if (cancelled) return;
-          setQr(d);
-          timer = setTimeout(tick, Math.max(3, d.rotates_in) * 1000);
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          if (err instanceof ApiError && err.status === 410) {
-            setClosed(true);
-            return;
-          }
-          timer = setTimeout(tick, 15000);
-        });
-    };
-
-    tick();
-
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [sessionUlid, query]);
-
-  if (closed) {
-    return (
-      <div className="flex items-center justify-center rounded-lg border border-border p-6 text-sm text-muted-foreground">
-        Sesi sudah ditutup — QR tidak lagi diterbitkan.
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col items-center gap-2 rounded-lg border border-border p-4">
-      <p className="text-xs font-medium text-muted-foreground">Mode Layar QR — letakkan di meja gerbang</p>
-      {qr ? (
-        <>
-          <QRCodeSVG value={qr.code} size={208} className="rounded-lg bg-white p-2" />
-          <p className="font-mono text-lg font-bold tracking-[0.25em]">{qr.code}</p>
-          <p className="text-xs text-muted-foreground">
-            Berganti otomatis tiap ±{qr.rotates_in} detik — biarkan halaman ini terbuka.
-          </p>
-        </>
-      ) : (
-        <Skeleton className="h-52 w-52" />
-      )}
-    </div>
-  );
-}
-
-/**
- * The quick lane for a student whose scan keeps failing: TU types the NIS,
+ * The quick lane for a student whose face check-in keeps failing: TU types the NIS,
  * the row lands as a hadir mark with source 'tu' - a human witnessed it.
  */
 function ManualMark({ session, query, onDone }: { session: TodaySession; query: string; onDone: () => void }) {
@@ -1200,7 +1156,7 @@ function ManualMark({ session, query, onDone }: { session: TodaySession; query: 
 
   return (
     <div className="flex flex-col justify-center gap-3 rounded-lg border border-border p-4">
-      <p className="text-xs font-medium text-muted-foreground">Input Manual (scan gagal / tanpa HP)</p>
+      <p className="text-xs font-medium text-muted-foreground">Input Manual (wajah gagal / tanpa perangkat)</p>
       <form
         onSubmit={(e) => {
           e.preventDefault();

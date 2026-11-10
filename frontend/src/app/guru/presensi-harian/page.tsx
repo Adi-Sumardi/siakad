@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { CalendarCheck2 } from "lucide-react";
 import { toast } from "sonner";
 import { CorrectionCell } from "@/components/attendance-correction";
+import { AbsenLinkCard } from "@/components/absen-link-card";
+import { FacePhotoButton } from "@/components/face-photo";
 import { LeaveReviewPanel } from "@/components/leave-review-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,9 @@ type RosterEntry = {
   is_late: boolean;
   source: "self" | "wali_kelas" | "tu" | null;
   leave: "sakit" | "izin" | null;
+  record_ulid: string | null;
+  face_enrolled: boolean;
+  has_photo: boolean;
 };
 
 type DailySession = {
@@ -148,6 +153,8 @@ export default function GuruDailyAttendancePage() {
     <div className="flex flex-col gap-5">
       <Header />
 
+      {today?.intake_mode === "gerbang" && <AbsenLinkCard endpoint="/api/guru/daily-attendance/public-link" />}
+
       <LeaveReviewPanel endpoint="/api/guru/leave-requests" onChanged={load} />
 
       <Card className="flex flex-wrap items-center gap-2 p-3">
@@ -254,6 +261,9 @@ export default function GuruDailyAttendancePage() {
                         <span className="text-info"> · {student.leave === "sakit" ? "Sakit" : "Izin"} (pengajuan wali disetujui)</span>
                       )}
                     </p>
+                    {today.intake_mode === "gerbang" && (
+                      <FaceActions student={student} onChanged={load} />
+                    )}
                   </div>
                   {!isToday ? (
                     <CorrectionCell
@@ -309,6 +319,58 @@ const STATUS_LABEL: Record<string, string> = {
   izin: "Izin",
   alpa: "Alpa",
 };
+
+/**
+ * Face status of one student (docs/09): the photo from this check-in, the
+ * registered face, and "Hapus wajah" when the face on file is wrong (a
+ * friend registered it, or the student changed a lot) - the next face
+ * check-in then registers again.
+ */
+function FaceActions({ student, onChanged }: { student: RosterEntry; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+
+  async function reset() {
+    if (!window.confirm(`Hapus wajah terdaftar ${student.nama_lengkap}? Absen wajah berikutnya akan mendaftarkan wajah baru.`)) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.delete(`/api/guru/students/${student.ulid}/face`);
+      toast.success("Wajah dihapus. Siswa mendaftar ulang saat absen berikutnya.");
+      onChanged();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Gagal menghapus wajah.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-3 text-xs">
+      {student.has_photo && student.record_ulid && (
+        <FacePhotoButton
+          path={`/api/files/daily-records/${student.record_ulid}/photo`}
+          label="Foto saat absen"
+          title={`${student.nama_lengkap} · saat absen`}
+        />
+      )}
+      {student.face_enrolled ? (
+        <>
+          <FacePhotoButton
+            path={`/api/files/student-faces/${student.ulid}`}
+            label="Wajah terdaftar"
+            title={`${student.nama_lengkap} · wajah terdaftar`}
+          />
+          <button type="button" className="text-bad hover:underline" onClick={reset} disabled={busy}>
+            {busy ? "Menghapus…" : "Hapus wajah"}
+          </button>
+        </>
+      ) : (
+        <span className="text-muted-foreground">Wajah belum terdaftar</span>
+      )}
+    </div>
+  );
+}
 
 function Header() {
   return (

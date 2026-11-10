@@ -20,6 +20,7 @@ class DailyRecord extends Model
     protected $fillable = [
         'daily_session_id', 'student_id', 'classroom_id', 'term_id', 'date',
         'attendance_status', 'is_late', 'source', 'checked_in_at', 'device_hash', 'ip_hash',
+        'face_distance', 'photo_path',
         'recorded_by', 'description',
         'record_status', 'revoked_by', 'revoked_at', 'revoke_reason',
     ];
@@ -27,6 +28,7 @@ class DailyRecord extends Model
     protected $casts = [
         'date' => 'date',
         'is_late' => 'boolean',
+        'face_distance' => 'float',
         'checked_in_at' => 'datetime',
         'revoked_at' => 'datetime',
     ];

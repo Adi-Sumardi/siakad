@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Student extends Model
@@ -132,6 +133,12 @@ class Student extends Model
     public function dailyRecords(): HasMany
     {
         return $this->hasMany(DailyRecord::class);
+    }
+
+    /** The reference face for gate check-in, enrolled on the first face check-in (docs/09). */
+    public function face(): HasOne
+    {
+        return $this->hasOne(StudentFace::class);
     }
 
     public function extracurricularMemberships(): HasMany

@@ -132,3 +132,11 @@ Schedule::command('notifications:retry-failed')
     ->withoutOverlapping(30)
     ->description('Coba ulang notifikasi email/WhatsApp yang gagal terkirim');
 
+
+// Gate check-in snapshot photos (docs/09-ABSEN-WAJAH-GERBANG.md) are evidence
+// for a few weeks of disputes, not an archive. Reference faces stay.
+Schedule::command('attendance:prune-face-photos')
+    ->dailyAt('03:45')
+    ->name('prune-face-photos')
+    ->withoutOverlapping(10)
+    ->description('Hapus foto bukti absen wajah yang lebih dari 30 hari');

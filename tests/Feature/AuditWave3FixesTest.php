@@ -78,7 +78,7 @@ class AuditWave3FixesTest extends TestCase
             'enabled' => true,
             'days' => [1, 2, 3, 4, 5],
             'intake_mode' => 'gerbang',
-            'qr_required' => true,
+            'face_required' => false,
             'geo_required' => true,
             'gate_lat' => -6.2000000,
             'gate_lng' => 106.8000000,
@@ -130,7 +130,6 @@ class AuditWave3FixesTest extends TestCase
     {
         return [
             'nis' => $nis,
-            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100,
             'device_id' => $device,
         ];
@@ -175,7 +174,7 @@ class AuditWave3FixesTest extends TestCase
         // while the screen celebrated.
         $this->postJson('/api/absen/publik-smp/check-in', $this->gatePayload($pulang, '30002', 'device-pulang'))
             ->assertStatus(400)
-            ->assertJsonPath('message', 'Belum ada catatan absen masuk hari ini - hubungi Tata Usaha untuk dicatat manual.');
+            ->assertJsonPath('message', 'Belum ada catatan absen masuk hari ini - minta wali kelas mencatat absen masukmu dulu.');
 
         // The TU lane puts the morning mark on file; pulang then serves.
         \App\Models\DailyRecord::create([
@@ -220,7 +219,6 @@ class AuditWave3FixesTest extends TestCase
 
         app(DailyAttendanceService::class)->selfCheckIn($masuk->fresh(), $student, [
             'device_id' => 'device-late',
-            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($masuk->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100,
         ]);
     }
@@ -317,7 +315,6 @@ class AuditWave3FixesTest extends TestCase
         try {
             app(DailyAttendanceService::class)->selfCheckIn($pulang, $gateStudent, [
                 'device_id' => 'device-Y',
-                'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($pulang->ulid)),
                 'lat' => -6.2000100, 'lng' => 106.8000100,
             ]);
             $this->fail('HP yang dipakai siswa lain di pelajaran seharusnya ditolak di gerbang.');

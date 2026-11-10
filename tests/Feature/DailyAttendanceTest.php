@@ -16,7 +16,6 @@ use App\Models\Student;
 use App\Models\Term;
 use App\Models\User;
 use App\Services\Attendance\DailyAttendanceService;
-use App\Services\Attendance\RotatingQrService;
 use App\Services\Notification\NotificationResult;
 use App\Services\Notification\WhatsAppGateway;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -479,7 +478,7 @@ class DailyAttendanceTest extends TestCase
     {
         return $this->enabledSetting($this->smp, array_merge([
             'intake_mode' => 'gerbang',
-            'qr_required' => true,
+            'face_required' => false,
             'geo_required' => true,
             'gate_lat' => -6.2000000,
             'gate_lng' => 106.8000000,
@@ -515,7 +514,7 @@ class DailyAttendanceTest extends TestCase
             ->assertStatus(200)
             ->assertJsonPath('state', 'open')
             ->assertJsonPath('unit_label', 'SMPI Al Azhar 12')
-            ->assertJsonPath('qr_required', true)
+            ->assertJsonPath('face_required', false)
             ->assertJsonPath('geo.required', true);
 
         $this->getJson('/api/absen/tidak-ada')->assertStatus(404);
@@ -531,7 +530,6 @@ class DailyAttendanceTest extends TestCase
 
         $this->postJson('/api/absen/publik-smp/check-in', [
             'nis' => '20020',
-            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100, // ~1.5 m from the gate
             'device_id' => 'device-A',
         ])
@@ -562,7 +560,6 @@ class DailyAttendanceTest extends TestCase
 
         $this->postJson('/api/absen/publik-smp/check-in', [
             'nis' => '20021',
-            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100,
             'device_id' => 'device-B',
         ])
@@ -573,23 +570,19 @@ class DailyAttendanceTest extends TestCase
         $this->assertEmpty($this->sentWa);
     }
 
-    public function test_stale_qr_codes_and_far_away_positions_are_rejected(): void
+    public function test_far_away_and_missing_positions_are_rejected(): void
     {
         $this->gateSetting();
         $classroom = $this->classroomIn($this->smp);
         $student = $this->studentIn($classroom, '20022');
-        $session = $this->masukSessionFor($this->smp);
-
-        $qr = app(RotatingQrService::class);
-        $stale = $qr->code(RotatingQrService::dailyScope($session->ulid), Carbon::now('Asia/Jakarta')->copy()->subSeconds(120));
+        $this->masukSessionFor($this->smp);
 
         $this->postJson('/api/absen/publik-smp/check-in', [
-            'nis' => '20022', 'qr_code' => $stale,
-            'lat' => -6.2000100, 'lng' => 106.8000100, 'device_id' => 'device-C',
+            'nis' => '20022', 'device_id' => 'device-C',
         ])->assertStatus(422);
 
         $this->postJson('/api/absen/publik-smp/check-in', [
-            'nis' => '20022', 'qr_code' => $qr->code(RotatingQrService::dailyScope($session->ulid)),
+            'nis' => '20022',
             'lat' => -6.2100000, 'lng' => 106.8000000, // ~1.1 km away
             'device_id' => 'device-C',
         ])->assertStatus(422);
@@ -606,7 +599,6 @@ class DailyAttendanceTest extends TestCase
 
         $payload = fn (float $accuracy) => [
             'nis' => '20035',
-            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100, // ~1.5 m from the gate
             'accuracy' => $accuracy,
             'device_id' => 'device-G',
@@ -630,10 +622,9 @@ class DailyAttendanceTest extends TestCase
         $first = $this->studentIn($classroom, '20023');
         $second = $this->studentIn($classroom, '20024');
         $session = $this->masukSessionFor($this->smp);
-        $code = app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid));
 
         $payload = fn (string $nis, string $device) => [
-            'nis' => $nis, 'qr_code' => $code,
+            'nis' => $nis,
             'lat' => -6.2000100, 'lng' => 106.8000100, 'device_id' => $device,
         ];
 
@@ -691,7 +682,6 @@ class DailyAttendanceTest extends TestCase
         ]);
 
         $input = [
-            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($masuk->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100,
             'device_id' => 'siti-phone', 'ip' => '10.0.0.9',
         ];
@@ -726,7 +716,7 @@ class DailyAttendanceTest extends TestCase
         $this->assertDatabaseMissing('daily_records', ['device_hash' => hash('sha256', 'device-D')]);
     }
 
-    public function test_tu_gets_the_rotating_qr_and_can_mark_manually(): void
+    public function test_tu_can_mark_a_gate_student_manually(): void
     {
         $this->gateSetting();
         $classroom = $this->classroomIn($this->smp);
@@ -736,15 +726,12 @@ class DailyAttendanceTest extends TestCase
 
         $tu = $this->staff('admin_unit', $this->smp);
 
-        // The QR endpoint hands the TU screen today's code, same one a scan would verify.
-        $qr = $this->actingAs($tu)->getJson("/api/admin/daily-attendance/sessions/{$session->ulid}/gate-qr")
-            ->assertStatus(200);
-        $this->assertSame(app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid)), $qr->json('code'));
-        $this->assertGreaterThan(0, $qr->json('rotates_in'));
-
         // Another unit's TU gets a 404, never a 403.
         $this->actingAs($this->staff('admin_unit', $this->sd))
-            ->getJson("/api/admin/daily-attendance/sessions/{$session->ulid}/gate-qr")
+            ->postJson("/api/admin/daily-attendance/sessions/{$session->ulid}/records", [
+                'student_ulid' => $student->ulid,
+                'status' => 'hadir',
+            ])
             ->assertStatus(404);
 
         // The manual quick lane: a failed scan becomes a TU mark, source 'tu'.
@@ -766,10 +753,9 @@ class DailyAttendanceTest extends TestCase
         $b = $this->studentIn($classroom, '20028'); // default 127.0.0.1
         $c = $this->studentIn($classroom, '20029');
         $session = $this->masukSessionFor($this->smp);
-        $code = app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid));
 
         $payload = fn (string $nis, string $device) => [
-            'nis' => $nis, 'qr_code' => $code,
+            'nis' => $nis,
             'lat' => -6.2000100, 'lng' => 106.8000100, 'device_id' => $device,
         ];
 
@@ -833,7 +819,6 @@ class DailyAttendanceTest extends TestCase
 
         $this->postJson('/api/absen/publik-smp/check-in', [
             'nis' => '20033',
-            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($session->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100, 'device_id' => 'device-E',
         ])->assertStatus(200);
 
@@ -940,7 +925,6 @@ class DailyAttendanceTest extends TestCase
 
         $this->postJson('/api/absen/publik-smp/check-in', [
             'nis' => '20034',
-            'qr_code' => app(RotatingQrService::class)->code(RotatingQrService::dailyScope($masuk->ulid)),
             'lat' => -6.2000100, 'lng' => 106.8000100, 'device_id' => 'device-F',
         ])->assertStatus(200)->assertJsonPath('is_late', false);
 
@@ -1067,5 +1051,137 @@ class DailyAttendanceTest extends TestCase
             ->postJson('/api/admin/holidays', ['date' => '2026-09-21', 'label' => 'Hari Besar'])
             ->assertCreated()
             ->assertJsonPath('holiday.weekday', 'Senin');
+    }
+
+    // --- Absen gerbang dengan wajah (docs/09) ----------------------------------
+
+    /** A face-api-shaped descriptor: 128 floats, shifted by $offset on every axis. */
+    private function face(float $base, float $offset = 0.0): array
+    {
+        return array_map(fn (int $i) => round(sin($i * $base) * 0.1 + $offset, 6), range(0, 127));
+    }
+
+    /** The smallest valid JPEG header the matcher accepts as a snapshot. */
+    private function photo(): string
+    {
+        return 'data:image/jpeg;base64,'.base64_encode("\xFF\xD8\xFF\xE0".str_repeat('x', 64));
+    }
+
+    private function faceCheckIn(string $nis, array $descriptor, string $device = 'class-ipad'): \Illuminate\Testing\TestResponse
+    {
+        return $this->postJson('/api/absen/publik-smp/check-in', [
+            'nis' => $nis,
+            'lat' => -6.2000100, 'lng' => 106.8000100,
+            'device_id' => $device,
+            'descriptor' => $descriptor,
+            'photo' => $this->photo(),
+        ]);
+    }
+
+    public function test_the_first_face_check_in_registers_the_face_and_later_ones_must_match(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('local');
+        $this->gateSetting(['face_required' => true, 'pulang_enabled' => true, 'pulang_opens_at' => '14:30', 'pulang_closes_at' => '17:00']);
+        $classroom = $this->classroomIn($this->smp);
+        $alvin = $this->studentIn($classroom, '30001');
+        $this->masukSessionFor($this->smp);
+
+        $this->postJson('/api/absen/publik-smp/lookup', ['nis' => '30001'])
+            ->assertOk()->assertJsonPath('face_enrolled', false);
+
+        // No face data at all is refused before anything is written.
+        $this->postJson('/api/absen/publik-smp/check-in', [
+            'nis' => '30001', 'lat' => -6.2000100, 'lng' => 106.8000100,
+        ])->assertStatus(422);
+
+        $this->faceCheckIn('30001', $this->face(0.3))
+            ->assertOk()
+            ->assertJsonPath('face_enrolled_now', true);
+
+        $this->assertDatabaseHas('student_faces', ['student_id' => $alvin->id]);
+        $record = DailyRecord::where('student_id', $alvin->id)->firstOrFail();
+        $this->assertNotNull($record->photo_path);
+        $this->assertNull($record->device_hash, 'Face check-ins do not bind the device.');
+        \Illuminate\Support\Facades\Storage::disk('local')->assertExists($record->photo_path);
+
+        // The descriptor is encrypted at rest - never the raw floats.
+        $this->assertStringNotContainsString('0.0', (string) \Illuminate\Support\Facades\DB::table('student_faces')->value('descriptor'));
+
+        // At pulang a friend's face under Alvin's NIS is refused...
+        Carbon::setTestNow($this->monday->copy()->setTime(15, 0)->utc());
+        $this->faceCheckIn('30001', $this->face(0.9))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Wajah tidak cocok dengan NIS ini. Coba lagi dengan cahaya cukup, atau minta wali kelas mencatat absenmu.');
+
+        // ...while Alvin's own face, slightly different today, passes.
+        $this->faceCheckIn('30001', $this->face(0.3, 0.01))
+            ->assertOk()
+            ->assertJsonPath('face_enrolled_now', false);
+
+        $this->assertSame(2, DailyRecord::where('student_id', $alvin->id)->count());
+        $this->assertSame(1, \App\Models\StudentFace::count());
+    }
+
+    public function test_one_class_ipad_checks_in_many_students_when_faces_are_on(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('local');
+        $this->gateSetting(['face_required' => true]);
+        $classroom = $this->classroomIn($this->smp);
+        $this->studentIn($classroom, '30002');
+        $this->studentIn($classroom, '30003');
+        $session = $this->masukSessionFor($this->smp);
+
+        // Same device, two students, two faces: both pass - the old
+        // one-device-one-NIS rule would have refused the second.
+        $this->faceCheckIn('30002', $this->face(0.2))->assertOk();
+        $this->faceCheckIn('30003', $this->face(0.7))->assertOk();
+
+        $this->assertSame(2, DailyRecord::where('daily_session_id', $session->id)->count());
+    }
+
+    public function test_a_refused_face_leaves_no_snapshot_behind(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('local');
+        $this->gateSetting(['face_required' => true]);
+        $classroom = $this->classroomIn($this->smp);
+        $this->studentIn($classroom, '30004');
+        $this->masukSessionFor($this->smp);
+
+        $this->faceCheckIn('30004', $this->face(0.4))->assertOk();
+        // Same NIS again: "already checked in" - the new snapshot is removed.
+        $this->faceCheckIn('30004', $this->face(0.4))->assertStatus(409);
+
+        $this->assertCount(2, \Illuminate\Support\Facades\Storage::disk('local')->allFiles(), 'Only the evidence photo and the reference copy remain.');
+    }
+
+    public function test_staff_share_the_link_and_a_wali_kelas_resets_only_their_own_students_face(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('local');
+        $this->gateSetting(['face_required' => true]);
+        $wali = $this->staff('guru', $this->smp);
+        $otherGuru = $this->staff('guru', $this->smp);
+        $classroom = $this->classroomIn($this->smp, $wali);
+        $student = $this->studentIn($classroom, '30005');
+        $this->masukSessionFor($this->smp);
+        $this->faceCheckIn('30005', $this->face(0.5))->assertOk();
+
+        foreach ([$wali, $this->staff('waka_kesiswaan', $this->smp)] as $user) {
+            $prefix = $user->role === 'guru' ? 'guru' : 'admin';
+            $this->actingAs($user)->getJson("/api/{$prefix}/daily-attendance/public-link")
+                ->assertOk()->assertJsonPath('public_path', '/absen/publik-smp');
+        }
+
+        $this->actingAs($wali)->get("/api/files/student-faces/{$student->ulid}")->assertOk();
+
+        // Not their homeroom: not found, and the face stays.
+        $this->actingAs($otherGuru)->deleteJson("/api/guru/students/{$student->ulid}/face")->assertStatus(404);
+        $this->assertDatabaseHas('student_faces', ['student_id' => $student->id]);
+
+        $this->actingAs($wali)->deleteJson("/api/guru/students/{$student->ulid}/face")->assertOk();
+        $this->assertDatabaseMissing('student_faces', ['student_id' => $student->id]);
+
+        // Another unit's waka never sees it.
+        $this->actingAs($this->staff('waka_kesiswaan', $this->sd))
+            ->get("/api/files/student-faces/{$student->ulid}")->assertStatus(404);
     }
 }

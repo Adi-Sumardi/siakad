@@ -14,8 +14,9 @@ import type { NextRequest } from "next/server";
 // /presensi and /absen are the student self-check-in pages - reached by
 // scanning a QR or tapping a link in a WA group description, with zero
 // cookies of any kind (students have no account in this app at all), so
-// they must never be gated behind "has a session".
-const PUBLIC_PATHS = ["/login", "/aktivasi", "/presensi", "/absen"];
+// they must never be gated behind "has a session". /models holds the face
+// model weights the /absen page loads, so it is public for the same reason.
+const PUBLIC_PATHS = ["/login", "/aktivasi", "/presensi", "/absen", "/models"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

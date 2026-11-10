@@ -57,7 +57,7 @@ class DailyGateController extends Controller
                 'gate_lng' => (float) $setting->gate_lng,
                 'radius_m' => (int) $setting->geo_radius_m,
             ],
-            'qr_required' => $setting->qr_required,
+            'face_required' => (bool) $setting->face_required,
         ]);
     }
 
@@ -84,6 +84,9 @@ class DailyGateController extends Controller
         return response()->json([
             'student' => ['nama_panggilan' => $student->nama_panggilan],
             'already_checked_in' => $already,
+            // No face yet: the page tells the student this check-in will
+            // register their face. Never the face itself.
+            'face_enrolled' => $student->face()->exists(),
         ]);
     }
 
@@ -102,6 +105,8 @@ class DailyGateController extends Controller
             return response()->json(['message' => 'NIS tidak ditemukan di unit ini.'], 404);
         }
 
+        $wasEnrolled = $student->face()->exists();
+
         try {
             $record = $this->service->selfCheckIn($session, $student, [
                 'device_id' => $request->validated('device_id'),
@@ -109,7 +114,8 @@ class DailyGateController extends Controller
                 'lat' => $request->validated('lat') !== null ? (float) $request->validated('lat') : null,
                 'lng' => $request->validated('lng') !== null ? (float) $request->validated('lng') : null,
                 'accuracy' => $request->validated('accuracy') !== null ? (float) $request->validated('accuracy') : null,
-                'qr_code' => $request->validated('qr_code'),
+                'descriptor' => $request->validated('descriptor'),
+                'photo' => $request->validated('photo'),
             ]);
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], $this->statusFor($e->getMessage()));
@@ -120,6 +126,7 @@ class DailyGateController extends Controller
             'student' => ['nama_panggilan' => $student->nama_panggilan],
             'is_late' => $record->is_late,
             'checked_in_at' => $record->checked_in_at?->format('H:i'),
+            'face_enrolled_now' => $setting->face_required && ! $wasEnrolled,
         ]);
     }
 
@@ -203,7 +210,7 @@ class DailyGateController extends Controller
         return match (true) {
             str_contains($message, 'semester aktif') => 503,
             str_contains($message, 'Sudah tercatat') || str_contains($message, 'Perangkat ini') => 409,
-            str_contains($message, 'QR') || str_contains($message, 'lokasi') || str_contains($message, 'area sekolah') || str_contains($message, 'akurat') => 422,
+            str_contains($message, 'ajah') ||str_contains($message, 'lokasi') || str_contains($message, 'area sekolah') || str_contains($message, 'akurat') => 422,
             default => 400,
         };
     }
