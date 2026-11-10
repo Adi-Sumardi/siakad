@@ -181,3 +181,19 @@ body {
     print-color-adjust: exact;
   }
 }
+
+/* A hint that appears only if a page is still on its loading state after a
+   while - pure CSS, so it still shows on a browser where the JavaScript
+   never ran (old iPad Safari, blocked script). Used by the public /absen page. */
+@keyframes reveal-late {
+  to {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+.reveal-late {
+  opacity: 0;
+  visibility: hidden;
+  animation: reveal-late 0.3s ease-out 10s forwards;
+}

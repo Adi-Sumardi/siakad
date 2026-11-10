@@ -11,7 +11,10 @@ const nextConfig: NextConfig = {
   // wildcards cover ngrok's random free-tunnel hostnames in both flavours
   // (.dev / .app), so a fresh tunnel needs no config edit. Production is not
   // affected: this option only applies to `next dev`.
-  allowedDevOrigins: ["localhost:3000", "*.ngrok-free.dev", "*.ngrok-free.app"],
+  // trycloudflare.com: Cloudflare quick tunnels, preferred for phone tests -
+  // ngrok's free warning page is drawn by a script from cdn.ngrok.com, and
+  // on networks that block that CDN a phone sees only a blank white page.
+  allowedDevOrigins: ["localhost:3000", "*.ngrok-free.dev", "*.ngrok-free.app", "*.trycloudflare.com"],
 
   // The production shape, reproduced locally: nginx serves /api and /sanctum
   // on the SAME origin as this app, which is what Sanctum SPA cookie auth and

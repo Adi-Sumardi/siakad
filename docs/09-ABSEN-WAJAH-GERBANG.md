@@ -54,16 +54,23 @@ Keputusan yang sudah diambil sekolah:
 
 | Bagian | Lokasi |
 |---|---|
-| Model wajah + deteksi kedip (browser) | `frontend/src/lib/face-check.ts` memakai `@vladmandic/face-api`. Model ada di `frontend/public/models/face/` (±7 MB, diunduh sekali per perangkat lalu di-cache). |
+| Pelacak wajah & kedip (browser) | `frontend/src/lib/face-check.ts` + `blink-detector.ts`, memakai **MediaPipe Face Landmarker** (`@mediapipe/tasks-vision` 1.1.1). Model `public/mediapipe/face_landmarker.task` (±3,6 MB, di-commit); WASM disalin dari `node_modules` ke `public/mediapipe/wasm/` oleh `scripts/copy-mediapipe-wasm.mjs` saat `predev`/`prebuild` (tidak di-commit). |
+| Ciri wajah untuk pencocokan (browser) | `@vladmandic/face-api`, model di `frontend/public/models/face/` (±7 MB). Dihitung di latar ±1x per detik selama siswa menghadap kamera. |
 | Halaman absen | `frontend/src/app/absen/[slug]/page.tsx` |
 | Validasi & pencocokan (server) | `app/Services/Attendance/FaceMatcher.php`, dipanggil dari `DailyAttendanceService::selfCheckIn` |
 | Ambang & masa simpan foto | `config/services.php` → `face.max_distance` (`FACE_MAX_DISTANCE`, default 0,5) dan `face.photo_retention_days` (`FACE_PHOTO_RETENTION_DAYS`, default 30) |
 | Link, foto, hapus wajah (staf) | `app/Http/Controllers/Api/StudentFaceController.php` |
 | Hapus foto bukti lama | `php artisan attendance:prune-face-photos`, terjadwal tiap hari 03:45 |
 
-**Deteksi kedip:** rasio buka-tutup mata (*eye aspect ratio*) dihitung dari 68 titik wajah.
-Kedip = rasio turun di bawah 70% dari kondisi mata terbuka, lalu naik lagi. Yang dikirim adalah
-frame setelah mata terbuka kembali.
+**Deteksi kedip:** MediaPipe melacak wajah di setiap frame kamera (GPU, ±20–30 fps di HP) dan
+memberi skor kedip per mata (`eyeBlinkLeft`/`eyeBlinkRight`, 0 = terbuka, 1 = tertutup). Kedip =
+skor naik 0,25 di atas kondisi terbuka orang itu (minimal 0,35), lalu turun lagi. Patokan "terbuka"
+adalah median 15 frame terakhir, sehingga mata sipit atau berkacamata tetap terbaca.
+
+**Kenapa langsung:** ciri wajah (descriptor) sudah dihitung di latar sebelum kedip. Begitu kedip
+selesai, descriptor terbaru (maksimal 2,5 detik) dan foto frame setelah kedip langsung dikirim,
+lalu layar menampilkan hasil absen. Kedua mesin diunduh dan dipanaskan sejak halaman absen dibuka,
+karena frame pertama di GPU butuh ±5 detik untuk menyiapkan shader.
 
 ## 4. Data
 
@@ -113,7 +120,24 @@ Setiap penghapusan tercatat di Log Aktivitas.
 - **Masker dibuka** saat absen. Cahaya dari belakang (membelakangi jendela) membuat wajah gelap dan sering gagal.
 - Presensi **per mapel** tidak berubah: tetap memakai QR dari guru dan aturan perangkat sendiri.
 
-## 8. Uji coba yang disarankan
+## 8. Menguji dari HP sebelum di-deploy
+
+Kamera di browser wajib HTTPS, jadi HP butuh tunnel. **Jangan pakai ngrok gratis**: ngrok
+menampilkan halaman peringatan yang isinya diambil dari `cdn.ngrok.com`, dan di jaringan yang
+memblokir CDN itu HP hanya melihat layar putih kosong (bukan error aplikasi). Pakai Cloudflare
+quick tunnel (gratis, tanpa akun, tanpa halaman peringatan):
+
+```
+winget install --id Cloudflare.cloudflared
+cloudflared tunnel --url http://localhost:3000
+```
+
+Buka alamat `https://….trycloudflare.com/absen/{slug}` yang dicetak. Domain ini sudah diizinkan
+di `allowedDevOrigins` (`frontend/next.config.ts`). Di server produksi tidak ada halaman perantara,
+jadi link bisa dibuka di Chrome/Safari mana pun. Browser di dalam aplikasi lain (Instagram,
+Facebook, LINE) sering memblokir kamera; halaman absen menampilkan petunjuk "Buka di Chrome/Safari".
+
+## 9. Uji coba yang disarankan
 
 1. Satu kelas SMP dengan iPad kelas dan satu kelas SMA dengan HP, selama 1–2 minggu.
 2. Catat: berapa siswa lolos di percobaan pertama, rata-rata waktu per siswa, dan berapa yang ditolak padahal jujur.

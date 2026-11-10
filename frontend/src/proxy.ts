@@ -15,8 +15,9 @@ import type { NextRequest } from "next/server";
 // scanning a QR or tapping a link in a WA group description, with zero
 // cookies of any kind (students have no account in this app at all), so
 // they must never be gated behind "has a session". /models holds the face
-// model weights the /absen page loads, so it is public for the same reason.
-const PUBLIC_PATHS = ["/login", "/aktivasi", "/presensi", "/absen", "/models"];
+// model weights the /absen page loads, and /mediapipe its blink tracker
+// (WASM + model), so both are public for the same reason.
+const PUBLIC_PATHS = ["/login", "/aktivasi", "/presensi", "/absen", "/models", "/mediapipe"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

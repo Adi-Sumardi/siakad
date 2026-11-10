@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock, Eye, MapPin, School, ScanFace, UserCheck } from "lucide-react";
 import { deviceId, getPosition } from "@/lib/absen-qr";
-import { useBlinkCapture, type BlinkStatus, type FaceCapture } from "@/lib/face-check";
+import { useBlinkCapture, warmUpFaceApi, type BlinkStatus, type FaceCapture } from "@/lib/face-check";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -50,7 +50,8 @@ const FACE_HINT: Record<BlinkStatus, string> = {
   "many-faces": "Terlihat lebih dari satu wajah — pastikan hanya kamu di depan kamera.",
   "too-far": "Dekatkan wajah ke kamera.",
   ready: "Sekarang berkedip sekali.",
-  captured: "Memeriksa wajah…",
+  "eyes-closed": "Kedipan terlihat — buka mata lagi.",
+  captured: "Kedipan terdeteksi, memeriksa wajah…",
   "camera-error": "Kamera tidak bisa dibuka. Izinkan akses kamera untuk browser ini, lalu coba lagi.",
   "model-error": "Gagal memuat pengenal wajah. Periksa koneksi internet, lalu coba lagi.",
 };
@@ -92,6 +93,10 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
           setScreen({ step: "unavailable", reason });
         } else {
           setScreen({ step: "intro" });
+          // Download and warm up the face models while the student reads
+          // the intro and types their NIS, so the camera step starts
+          // tracking at once instead of compiling shaders mid-blink.
+          if (d.face_required) warmUpFaceApi();
         }
       })
       .catch(() => setScreen({ step: "unavailable", reason: "Link absen tidak dikenali atau sudah tidak berlaku." }));
@@ -231,7 +236,19 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
           <span className="text-xs font-medium">{info?.unit_label ?? "Absen Siswa"}</span>
         </div>
 
-        {screen.step === "loading" && <Skeleton className="h-32 w-full" />}
+        {screen.step === "loading" && (
+          <div className="flex flex-col gap-3">
+            <Skeleton className="h-24 w-full" />
+            <p className="text-sm text-muted-foreground">Memuat halaman absen…</p>
+            {/* Server-rendered and shown by CSS alone after 10 s: if the
+                browser never runs this page's JavaScript, the student still
+                learns why instead of staring at an empty card. */}
+            <p className="reveal-late rounded-lg bg-warn/10 px-3 py-2 text-left text-xs text-warn">
+              Halaman belum termuat. Periksa koneksi internet, lalu muat ulang. Jika tetap begini, perbarui browser
+              (Safari/iPadOS atau Chrome versi terbaru) atau buka link ini di Chrome.
+            </p>
+          </div>
+        )}
 
         {screen.step === "unavailable" && (
           <div className="flex flex-col items-center gap-3 py-6">
@@ -332,14 +349,14 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
               <video ref={videoRef} playsInline muted className="size-full -scale-x-100 object-cover" />
               <div
                 className={`pointer-events-none absolute inset-x-8 inset-y-10 rounded-[50%] border-4 ${
-                  status === "ready" ? "border-good" : "border-white/60"
+                  status === "ready" || status === "eyes-closed" || status === "captured" ? "border-good" : "border-white/60"
                 }`}
               />
             </div>
 
             {!error && (
               <p className="flex items-center justify-center gap-1.5 text-sm font-medium" aria-live="polite">
-                {status === "ready" && <Eye className="size-4 text-good" />}
+                {(status === "ready" || status === "eyes-closed") && <Eye className="size-4 text-good" />}
                 {FACE_HINT[status]}
               </p>
             )}
@@ -360,6 +377,13 @@ export default function GateCheckInPage({ params }: { params: Promise<{ slug: st
 
             {(status === "camera-error" || status === "model-error") && !error && (
               <Button onClick={retry}>Coba Lagi</Button>
+            )}
+
+            {status === "camera-error" && (
+              <p className="rounded-lg bg-warn/10 px-3 py-2 text-left text-xs text-warn">
+                Kalau link ini dibuka dari dalam aplikasi lain (Instagram, Facebook, LINE, TikTok), kamera sering
+                diblokir. Ketuk menu ⋮ lalu pilih <strong>Buka di Chrome</strong> / <strong>Buka di Safari</strong>.
+              </p>
             )}
 
             {faceGaveUp && (

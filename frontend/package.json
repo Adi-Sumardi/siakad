@@ -3,12 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-mediapipe-wasm.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-mediapipe-wasm.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "1.1.1",
     "@vladmandic/face-api": "1.7.15",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
