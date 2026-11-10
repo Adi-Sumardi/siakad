@@ -57,7 +57,10 @@ class UserController extends Controller
                 });
             })
             ->when($request->string('role')->value(), fn ($q, $role) => $q->where('role', $role))
-            ->when(! $caller->isUnitScoped() && $request->string('unit')->value(), fn ($q, $unitCode) => $q->whereHas('schoolUnit', fn ($uq) => $uq->where('code', $unitCode)))
+            // The unit code is read on its own: when() hands its callback the
+            // condition's VALUE, and "A && code" evaluates to plain `true`,
+            // which used to filter on code = 1 and empty the list.
+            ->when(! $caller->isUnitScoped() ? $request->string('unit')->value() : null, fn ($q, $unitCode) => $q->whereHas('schoolUnit', fn ($uq) => $uq->where('code', $unitCode)))
             ->when($request->has('is_active') && $request->input('is_active') !== '', fn ($q) => $q->where('is_active', $request->boolean('is_active')))
             ->orderBy('role')
             ->orderBy('name')

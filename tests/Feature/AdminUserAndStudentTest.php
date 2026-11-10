@@ -65,6 +65,21 @@ class AdminUserAndStudentTest extends TestCase
             ]);
     }
 
+    public function test_central_admin_filters_users_by_unit(): void
+    {
+        $smp = SchoolUnit::create(['code' => 'SMP-12', 'label' => 'SMPI Al Azhar 12', 'jenjang_group' => 'smp']);
+        User::create(['name' => 'Mega Anwar', 'email' => 'mega@yapinet.id', 'phone' => '081200000001', 'role' => 'guru', 'school_unit_id' => $smp->id, 'is_active' => true]);
+        User::create(['name' => 'Mega Lain', 'email' => 'mega2@yapinet.id', 'phone' => '081200000002', 'role' => 'guru', 'school_unit_id' => $this->unit->id, 'is_active' => true]);
+
+        // Regression: the unit filter used to compare against `true`
+        // (when() passes its condition's value) and always came back empty.
+        $this->actingAs($this->admin)
+            ->getJson('/api/admin/users?role=guru&unit=SMP-12&is_active=1&search=mega')
+            ->assertOk()
+            ->assertJsonCount(1, 'users.data')
+            ->assertJsonPath('users.data.0.name', 'Mega Anwar');
+    }
+
     public function test_can_create_and_update_user(): void
     {
         $createRes = $this->actingAs($this->admin)->postJson('/api/admin/users', [

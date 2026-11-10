@@ -125,7 +125,9 @@ class FeeSettingController extends Controller
             // ?unit= asked for - the same "forced, not trusted" rule
             // BillingRunController applies to which unit a run actually bills.
             ->when($request->user()->isUnitScoped(), fn ($q) => $q->where('school_unit_id', $request->user()->school_unit_id))
-            ->when(! $request->user()->isUnitScoped() && $request->string('unit')->value(), fn ($q, $code) => $q->whereHas('schoolUnit', fn ($u) => $u->where('code', $code)))
+            // The code itself, not "A && code" (which is just `true`) - when()
+            // passes its condition's value into the callback.
+            ->when(! $request->user()->isUnitScoped() ? $request->string('unit')->value() : null, fn ($q, $code) => $q->whereHas('schoolUnit', fn ($u) => $u->where('code', $code)))
             ->when($request->string('type')->value(), fn ($q, $code) => $q->whereHas('feeType', fn ($t) => $t->where('code', $code)))
             ->when($request->string('year')->value(), fn ($q, $year) => $q->whereHas('academicYear', fn ($y) => $y->where('year', $year)))
             ->get();
