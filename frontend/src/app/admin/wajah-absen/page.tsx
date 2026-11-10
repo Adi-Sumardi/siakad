@@ -127,6 +127,7 @@ export default function StudentFacesPage() {
         <AbsenLinkCard
           key={unitQuery}
           endpoint={`/api/admin/daily-attendance/public-link${unitQuery ? `?${unitQuery}` : ""}`}
+          printHref={`/cetak/qr-absen${unitQuery ? `?${unitQuery}` : ""}`}
         />
       )}
 

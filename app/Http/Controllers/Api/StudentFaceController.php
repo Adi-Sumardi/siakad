@@ -44,6 +44,7 @@ class StudentFaceController extends Controller
             'enabled' => (bool) $setting?->enabled,
             'face_required' => (bool) $setting?->face_required,
             'public_path' => $slug ? '/absen/'.$slug : null,
+            'public_url' => $slug ? DailyAttendanceSetting::publicUrlFor($slug) : null,
         ]);
     }
 

@@ -1168,7 +1168,10 @@ class DailyAttendanceTest extends TestCase
         foreach ([$wali, $this->staff('waka_kesiswaan', $this->smp)] as $user) {
             $prefix = $user->role === 'guru' ? 'guru' : 'admin';
             $this->actingAs($user)->getJson("/api/{$prefix}/daily-attendance/public-link")
-                ->assertOk()->assertJsonPath('public_path', '/absen/publik-smp');
+                ->assertOk()->assertJsonPath('public_path', '/absen/publik-smp')
+                // The printed QR carries the official domain, not the
+                // address staff happened to open the app from.
+                ->assertJsonPath('public_url', rtrim((string) config('app.frontend_url'), '/').'/absen/publik-smp');
         }
 
         $this->actingAs($wali)->get("/api/files/student-faces/{$student->ulid}")->assertOk();

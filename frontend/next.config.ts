@@ -27,6 +27,19 @@ const nextConfig: NextConfig = {
   // In the Docker image nginx still owns /api before a request ever reaches
   // Next, and NEXT_PUBLIC_API_URL is empty there too - identical behaviour,
   // so these rewrites are dev/tunnel-only in practice.
+  // The face models (/models/face) and the MediaPipe blink tracker
+  // (/mediapipe) are ~20 MB a device downloads once. Without a cache window
+  // every class iPad re-validates all of it each morning on the school's
+  // one uplink at 07:00. A week is long enough for that and short enough
+  // that a model update still reaches everyone.
+  async headers() {
+    const week = "public, max-age=604800, stale-while-revalidate=86400";
+    return [
+      { source: "/models/:path*", headers: [{ key: "Cache-Control", value: week }] },
+      { source: "/mediapipe/:path*", headers: [{ key: "Cache-Control", value: week }] },
+    ];
+  },
+
   async rewrites() {
     const api = process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8000";
 

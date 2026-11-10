@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateDailyAttendanceSettingRequest;
+use App\Models\DailyAttendanceSetting;
 use App\Models\SchoolUnit;
 use App\Services\Attendance\DailyAttendanceService;
 use Illuminate\Http\JsonResponse;
@@ -129,6 +130,10 @@ class DailyAttendanceSettingController extends Controller
             // copy/QR buttons for a slug that exists.
             'public_slug' => $setting->public_slug,
             'public_path' => $setting->public_slug ? '/absen/'.$setting->public_slug : null,
+            // The full link on the official domain (FRONTEND_URL) - what a
+            // printed QR poster must carry, whatever address the admin
+            // happened to open this page from.
+            'public_url' => $setting->public_slug ? DailyAttendanceSetting::publicUrlFor($setting->public_slug) : null,
         ];
     }
 }

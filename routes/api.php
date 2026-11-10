@@ -126,10 +126,11 @@ Route::prefix('presensi')->middleware('throttle:300,1')->group(function () {
 // The daily gate check-in (T14 mode gerbang, DESAIN-PRESENSI-HARIAN.md §5D).
 // Same unauthenticated shape as /presensi above: the unit's public_slug is
 // the only credential, and the whole morning can scan in over one school
-// WiFi egress IP - hence the shared 300/min bucket, not the usual 60.
+// WiFi egress IP - hence the shared 600/min bucket, not the usual 60 (with
+// faces, every class iPad of a campus shares that one IP at 07:00).
 // GET only reads today's window; it never lazily creates one - sessions are
 // written by the scheduler and the staff boards, never by anonymous traffic.
-Route::prefix('absen')->middleware('throttle:300,1')->group(function () {
+Route::prefix('absen')->middleware('throttle:600,1')->group(function () {
     Route::get('/{slug}', [DailyGateController::class, 'show']);
     Route::post('/{slug}/lookup', [DailyGateController::class, 'lookup']);
     Route::post('/{slug}/check-in', [DailyGateController::class, 'checkIn']);

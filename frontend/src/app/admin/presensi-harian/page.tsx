@@ -1,18 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
-import { Calendar, CalendarCheck2, Copy, Download, Link2, RefreshCw, ShieldAlert, Split, Users } from "lucide-react";
+import { Calendar, CalendarCheck2, Copy, Download, Link2, Printer, RefreshCw, ShieldAlert, Split, Users } from "lucide-react";
 import { toast } from "sonner";
 import { CorrectionCell } from "@/components/attendance-correction";
 import { FacePhotoButton } from "@/components/face-photo";
 import { LeaveReviewPanel } from "@/components/leave-review-panel";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { absenLinkUrl } from "@/lib/absen-link";
 import { api, ApiError } from "@/lib/api";
 import { downloadApiFile } from "@/lib/download";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -30,6 +32,7 @@ type Settings = {
   notifications: { masuk: boolean; pulang: boolean; absent: boolean };
   public_slug: string | null;
   public_path: string | null;
+  public_url: string | null;
 };
 
 type RosterRow = {
@@ -443,7 +446,7 @@ export default function AdminDailyAttendancePage() {
           </Card>
 
           {settings.intake_mode === "gerbang" && settings.enabled && (
-            <PublicLinkCard slug={settings.public_slug} query={query} onChanged={load} />
+            <PublicLinkCard publicUrl={settings.public_url} publicPath={settings.public_path} query={query} onChanged={load} />
           )}
 
           <LeaveReviewPanel endpoint="/api/admin/leave-requests" onChanged={() => loadBoard()} />
@@ -1036,14 +1039,32 @@ function HolidayCalendarCard() {
  * description. Issue once; the reset button kills a leaked link on the spot.
  * One link per unit - students are separated by NIS, never by URL.
  */
-function PublicLinkCard({ slug, query, onChanged }: { slug: string | null; query: string; onChanged: () => void }) {
+function PublicLinkCard({
+  publicUrl,
+  publicPath,
+  query,
+  onChanged,
+}: {
+  publicUrl: string | null;
+  publicPath: string | null;
+  query: string;
+  onChanged: () => void;
+}) {
   const [busy, setBusy] = useState(false);
 
-  // This card only renders once the client fetch has populated settings, so
-  // window is always there by now - no state, no effect, no hydration dance.
-  const url = slug && typeof window !== "undefined" ? `${window.location.origin}/absen/${slug}` : null;
+  // The official domain when the server has one (what a printed QR must
+  // carry); this card only renders after the client fetch, so window exists.
+  const url = absenLinkUrl(publicUrl, publicPath);
 
   async function issue(reset: boolean) {
+    if (
+      reset &&
+      !window.confirm(
+        "Reset link absen? Link dan QR lama (termasuk yang sudah dicetak dan ditempel di kelas) langsung tidak berlaku. QR harus dicetak ulang.",
+      )
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await api.post(`/api/admin/daily-attendance/public-link${reset ? "/reset" : ""}${query}`);
@@ -1096,8 +1117,16 @@ function PublicLinkCard({ slug, query, onChanged }: { slug: string | null; query
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              QR di samping hanya berisi link ini — scan dengan kamera iPad/HP untuk membukanya tanpa mengetik. Bukan QR absen.
+              QR di samping tetap (tidak berganti) dan hanya berisi link ini — cetak lalu tempel di tiap kelas. QR
+              baru perlu dicetak ulang hanya kalau link di-reset.
             </p>
+            <Link
+              href={`/cetak/qr-absen${query}`}
+              target="_blank"
+              className={buttonVariants({ variant: "default", size: "sm" }) + " w-fit"}
+            >
+              <Printer className="size-3.5" /> Cetak QR untuk Kelas
+            </Link>
             <Button
               variant="outline"
               size="sm"

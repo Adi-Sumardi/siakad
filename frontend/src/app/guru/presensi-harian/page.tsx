@@ -153,7 +153,7 @@ export default function GuruDailyAttendancePage() {
     <div className="flex flex-col gap-5">
       <Header />
 
-      {today?.intake_mode === "gerbang" && <AbsenLinkCard endpoint="/api/guru/daily-attendance/public-link" />}
+      {today?.intake_mode === "gerbang" && <AbsenLinkCard endpoint="/api/guru/daily-attendance/public-link" printHref="/cetak/qr-absen" />}
 
       <LeaveReviewPanel endpoint="/api/guru/leave-requests" onChanged={load} />
 

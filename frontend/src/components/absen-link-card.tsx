@@ -1,30 +1,35 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, Link2 } from "lucide-react";
+import Link from "next/link";
+import { Copy, Link2, Printer } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
+import { absenLinkUrl } from "@/lib/absen-link";
 
 /**
  * The unit's public absen link to share with the class (WA group, class
- * iPad). Read-only here - issuing and resetting stay with the admin unit.
+ * iPad, printed QR poster). Read-only here - issuing and resetting stay
+ * with the admin unit.
  */
-export function AbsenLinkCard({ endpoint }: { endpoint: string }) {
-  const [path, setPath] = useState<string | null | undefined>(undefined);
+export function AbsenLinkCard({ endpoint, printHref }: { endpoint: string; printHref: string }) {
+  const [link, setLink] = useState<{ public_path: string | null; public_url?: string | null } | null | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
     api
-      .get<{ public_path: string | null }>(endpoint)
-      .then((d) => setPath(d.public_path))
-      .catch(() => setPath(null));
+      .get<{ public_path: string | null; public_url?: string | null }>(endpoint)
+      .then(setLink)
+      .catch(() => setLink(null));
   }, [endpoint]);
 
-  if (path === undefined) return null;
+  if (link === undefined) return null;
 
-  const url = path && typeof window !== "undefined" ? `${window.location.origin}${path}` : null;
+  const url = absenLinkUrl(link?.public_url, link?.public_path);
 
   async function copy() {
     if (!url) return;
@@ -44,15 +49,18 @@ export function AbsenLinkCard({ endpoint }: { endpoint: string }) {
       </div>
       {url ? (
         <>
-          <div className="mt-2 flex gap-2">
-            <Input readOnly value={url} className="h-9 text-xs" />
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Input readOnly value={url} className="h-9 min-w-0 flex-1 text-xs" />
             <Button variant="outline" size="sm" onClick={copy}>
               <Copy className="size-3.5" /> Salin
             </Button>
+            <Link href={printHref} target="_blank" className={buttonVariants({ variant: "outline", size: "sm" })}>
+              <Printer className="size-3.5" /> Cetak QR
+            </Link>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            Siswa membuka link ini, mengetik NIS, lalu berkedip di depan kamera. Boleh dibuka di iPad kelas atau HP
-            teman — yang dicocokkan wajahnya.
+            Siswa membuka link ini (atau scan QR yang ditempel di kelas), mengetik NIS, lalu berkedip di depan kamera.
+            Boleh dibuka di iPad kelas atau HP teman — yang dicocokkan wajahnya.
           </p>
         </>
       ) : (
@@ -63,4 +71,3 @@ export function AbsenLinkCard({ endpoint }: { endpoint: string }) {
     </Card>
   );
 }
-

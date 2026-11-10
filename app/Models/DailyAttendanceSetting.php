@@ -48,6 +48,16 @@ class DailyAttendanceSetting extends Model
         'notify_absent' => 'boolean',
     ];
 
+    /**
+     * The unit's public absen link on the official domain (FRONTEND_URL).
+     * It only changes when an admin resets the slug, so a QR printed from
+     * it can stay taped to a classroom wall for the whole year.
+     */
+    public static function publicUrlFor(string $slug): string
+    {
+        return rtrim((string) config('app.frontend_url'), '/').'/absen/'.$slug;
+    }
+
     public function schoolUnit(): BelongsTo
     {
         return $this->belongsTo(SchoolUnit::class);
