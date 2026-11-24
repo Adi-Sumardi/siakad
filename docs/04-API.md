@@ -61,8 +61,8 @@ membuat "bayar SPP 3 bulan untuk 2 anak dalam satu transaksi" mungkin (D3).
 Kepemilikan tiap tagihan diperiksa ulang di server (`CheckoutService::collectPayable`),
 bukan dipercaya dari daftar yang dikirim browser.
 
-Tidak ada endpoint unggah bukti transfer — pembayaran online lewat Xendit,
-tunai dicatat langsung oleh admin; tidak ada yang pernah menghasilkan slip
+Tidak ada endpoint unggah bukti transfer — semua pembayaran lewat VA,
+tidak ada jalur tunai; tidak ada yang pernah menghasilkan slip
 untuk difoto.
 
 ## Guru (`role: guru`)

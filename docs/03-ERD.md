@@ -341,15 +341,15 @@ SPP sudah terpecah alami per bulan.
 | gateway_response, metadata | jsonb nullable | |
 | expires_at, paid_at, failed_at | timestamp | |
 | verified_by FK, verified_at, verification_notes, rejection_reason | | tetap ada di skema, tetapi alur verifikasi manual tidak pernah dibangun (lihat 06 Fase 2) |
-| recorded_by FK | | admin yang mencatat pembayaran tunai |
+| recorded_by FK | | sisa skema lama; tidak dipakai (pembayaran hanya lewat VA) |
 | timestamps | | |
 
 Unique pada `external_transaction_id` sejak migration pertama — ini bug yang baru
 ketahuan belakangan di PMB, tidak perlu diulang.
 
 Kolom `receipt_file_*` pernah disketsa di sini lalu di-dropped (migration
-`2026_08_17_000025`): pembayaran online settle lewat callback gateway, tunai
-dicatat langsung oleh admin — tidak ada slip transfer yang pernah ada untuk difoto.
+`2026_08_17_000025`): pembayaran online settle lewat callback VA (tidak ada
+jalur tunai) — tidak ada slip transfer yang pernah ada untuk difoto.
 
 ### `payment_allocations`
 `id, payment_id FK cascade, bill_id FK cascade, amount decimal(12,2), timestamps`.

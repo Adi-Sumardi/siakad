@@ -26,9 +26,8 @@ menerima email, bisa aktivasi, dan bisa login.
 - Generator tagihan (`BillGenerator`) + `billing_runs` + preview dry-run
 - Portal tagihan wali: daftar lintas anak, detail, keranjang, checkout multi-tagihan
 - Integrasi Xendit + webhook + `payment_allocations` + `PaymentAllocator`
-- Pembayaran tunai dicatat admin (`CheckoutService::recordManual`) — **bukan**
-  unggah bukti transfer: semua pembayaran online lewat Xendit, jadi tidak ada
-  slip untuk difoto. Endpoint verifikasi manual tidak dibangun karena tidak ada
+- Semua pembayaran hanya lewat Virtual Account (VA) — tidak ada tunai dan
+  tidak ada unggah bukti transfer, jadi tidak ada slip untuk difoto. Endpoint verifikasi manual tidak dibangun karena tidak ada
   yang pernah menulis ke sana.
 - Invoice/kuitansi PDF (`BillPdfService`, satu template untuk keduanya)
 - Scheduler: `bills:generate`, `bills:mark-overdue`, `bills:send-reminders` (H-7/H-1/H+3)

@@ -46,8 +46,8 @@ di-dispatch **setelah** transaksi pembayaran commit (`dispatch()->afterCommit()`
 mengikuti pola yang sudah dipakai `SelectionAnnouncementService`: tidak ada apa pun
 yang dikirim untuk perubahan yang masih bisa di-rollback.
 
-Untuk siswa yang membayar uang pangkal secara tunai di sekolah, jalurnya tetap sama —
-admin memverifikasi pembayaran manual, `updatePaymentStatus()` jalan, handoff terkirim.
+Uang pangkal hanya bisa dibayar lewat Virtual Account (VA) — tidak ada jalur
+tunai. Begitu callback VA masuk, `updatePaymentStatus()` jalan, handoff terkirim.
 
 ## Kontrak handoff
 

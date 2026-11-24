@@ -289,7 +289,7 @@ class CheckoutService
             $name = $primary->feeType?->name ?? $feeTypeCode;
 
             throw new RuntimeException(
-                "Jenis biaya '{$name}' belum punya nomor Virtual Account di bank. Silakan bayar tunai di Tata Usaha sementara."
+                "Jenis biaya '{$name}' belum punya nomor Virtual Account di bank. Hubungi Tata Usaha agar nomor VA-nya didaftarkan dulu."
             );
         }
     }

@@ -109,7 +109,7 @@ class DiagnoseVaCollisions extends Command
         $unmapped = $types->filter(fn (FeeType $t) => BillingApiClient::resolvePrefix($t->code) === null);
 
         if ($unmapped->isNotEmpty()) {
-            $this->warn('Fee types WITHOUT a VA prefix (checkout by VA refuses them; pay cash until e-SPP confirms a prefix):');
+            $this->warn('Fee types WITHOUT a VA prefix (checkout by VA refuses them until e-SPP registers a prefix):');
 
             foreach ($unmapped as $t) {
                 $this->line("  - {$t->code} ({$t->name})".($t->is_active ? '' : ' [nonaktif]'));
